@@ -1,0 +1,24 @@
+{
+  "id": "2e24dbf2-e21c-80b7-83f6-ef99c1dd9425",
+  "name": "所有公告",
+  "name_en": "All Announcements",
+  "purpose": "儲存公告模板與歡迎訊息的 Child Blocks",
+  "last_updated": "2026-01-18T14:54:26.024Z",
+  "properties": {
+    "季度": {
+      "type": "relation",
+      "config": {
+        "database_id": "7deede34-579d-4c77-b79b-20b9f4f000e7",
+        "type": "dual_property"
+      }
+    },
+    "Date": {
+      "type": "date",
+      "config": null
+    },
+    "Name": {
+      "type": "title",
+      "config": null
+    }
+  }
+}

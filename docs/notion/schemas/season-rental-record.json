@@ -1,0 +1,94 @@
+{
+  "id": "7deede34-579d-4c77-b79b-20b9f4f000e7",
+  "name": "季租承租紀錄",
+  "name_en": "Season Rental Record",
+  "purpose": "記錄每季的場地承租資訊、報名人數、費用計算",
+  "last_updated": "2026-01-18T14:54:25.072Z",
+  "properties": {
+    "備註": {
+      "type": "rich_text",
+      "config": null
+    },
+    "報名人": {
+      "type": "relation",
+      "config": {
+        "database_id": "252f388d-4ac7-49a4-82ae-a7f18044f701",
+        "type": "dual_property"
+      }
+    },
+    "公告": {
+      "type": "relation",
+      "config": {
+        "database_id": "2e24dbf2-e21c-80b7-83f6-ef99c1dd9425",
+        "type": "dual_property"
+      }
+    },
+    "地點": {
+      "type": "rich_text",
+      "config": null
+    },
+    "場地數": {
+      "type": "number",
+      "config": {
+        "format": "number"
+      }
+    },
+    "每人平均場租（特殊狀況）": {
+      "type": "number",
+      "config": {
+        "format": "number"
+      }
+    },
+    "場租總金額": {
+      "type": "formula",
+      "config": {
+        "expression": "{{notion:block_property:T%3BPJ:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}}*{{notion:block_property:%7CMRs:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}}*{{notion:block_property:~%3B%60G:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}}*2"
+      }
+    },
+    "打球日": {
+      "type": "relation",
+      "config": {
+        "database_id": "0fd76b77-9f07-4aa3-a3c9-12ba18dbe32e",
+        "type": "dual_property"
+      }
+    },
+    "報名人數": {
+      "type": "formula",
+      "config": {
+        "expression": "{{notion:block_property:G%40xy:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}}.length()"
+      }
+    },
+    "合約": {
+      "type": "files",
+      "config": null
+    },
+    "每人平均場租": {
+      "type": "formula",
+      "config": {
+        "expression": "{{notion:block_property:UI~W:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}}.empty().if({{notion:block_property:%5By%60%3B:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}}/{{notion:block_property:ndOW:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}},{{notion:block_property:UI~W:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}})"
+      }
+    },
+    "零打費用": {
+      "type": "number",
+      "config": {
+        "format": "number"
+      }
+    },
+    "租借次數 (2hrs)": {
+      "type": "number",
+      "config": {
+        "format": "number"
+      }
+    },
+    "每場/小時 定價": {
+      "type": "number",
+      "config": {
+        "format": "number_with_commas"
+      }
+    },
+    "季租時段": {
+      "type": "title",
+      "config": null
+    }
+  }
+}

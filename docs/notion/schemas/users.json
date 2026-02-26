@@ -1,0 +1,57 @@
+{
+  "id": "2e44dbf2-e21c-80d1-af81-c3b61579b3bb",
+  "name": "USERS",
+  "name_en": "USERS",
+  "purpose": "使用者追蹤",
+  "last_updated": "2026-01-18T14:54:26.663Z",
+  "properties": {
+    "is_admin": {
+      "type": "checkbox",
+      "config": null
+    },
+    "groups": {
+      "type": "multi_select",
+      "config": {
+        "options": [
+          {
+            "name": "Ca18e766e2730654fc1ca2573a14e01e2",
+            "color": "default"
+          },
+          {
+            "name": "C9fb61df21d9118e77d6e3065716fc08a",
+            "color": "yellow"
+          },
+          {
+            "name": "Cf231a0c7452e80d80335bf981a77fcf8",
+            "color": "brown"
+          }
+        ]
+      }
+    },
+    "Registered name": {
+      "type": "relation",
+      "config": {
+        "database_id": "252f388d-4ac7-49a4-82ae-a7f18044f701",
+        "type": "dual_property"
+      }
+    },
+    "message_counts": {
+      "type": "number",
+      "config": {
+        "format": "number"
+      }
+    },
+    "Custom Name": {
+      "type": "rich_text",
+      "config": null
+    },
+    "multi-chat": {
+      "type": "multi_select",
+      "config": null
+    },
+    "user_id": {
+      "type": "title",
+      "config": null
+    }
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "id": "0fd76b77-9f07-4aa3-a3c9-12ba18dbe32e",
+  "name": "行事曆",
+  "name_en": "Calendar",
+  "purpose": "記錄每次打球的日期、請假人、場地數量",
+  "last_updated": "2026-01-18T14:54:25.745Z",
+  "properties": {
+    "請假人": {
+      "type": "relation",
+      "config": {
+        "database_id": "252f388d-4ac7-49a4-82ae-a7f18044f701",
+        "type": "single_property"
+      }
+    },
+    "季度": {
+      "type": "relation",
+      "config": {
+        "database_id": "7deede34-579d-4c77-b79b-20b9f4f000e7",
+        "type": "dual_property"
+      }
+    },
+    "詳細內容": {
+      "type": "rich_text",
+      "config": null
+    },
+    "場地數": {
+      "type": "number",
+      "config": {
+        "format": "number"
+      }
+    },
+    "類型": {
+      "type": "select",
+      "config": {
+        "options": [
+          {
+            "name": "繳費",
+            "color": "orange"
+          },
+          {
+            "name": "報名",
+            "color": "yellow"
+          },
+          {
+            "name": "打球",
+            "color": "blue"
+          },
+          {
+            "name": "打球暫停",
+            "color": "red"
+          }
+        ]
+      }
+    },
+    "時間": {
+      "type": "date",
+      "config": null
+    },
+    "零打": {
+      "type": "multi_select",
+      "config": null
+    },
+    "名稱": {
+      "type": "title",
+      "config": null
+    }
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "id": "252f388d-4ac7-49a4-82ae-a7f18044f701",
+  "name": "人員清單",
+  "name_en": "People List",
+  "purpose": "管理羽球社團成員名單，追蹤繳費狀態",
+  "last_updated": "2026-01-18T14:54:24.757Z",
+  "properties": {
+    "報名季度": {
+      "type": "relation",
+      "config": {
+        "database_id": "7deede34-579d-4c77-b79b-20b9f4f000e7",
+        "type": "dual_property"
+      }
+    },
+    "未繳季租": {
+      "type": "formula",
+      "config": {
+        "expression": "filter(map({{notion:block_property:BJ%3Fu:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}}, if (includes({{notion:block_property:%5CkQb:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}}, current), \"\", current)), current)"
+      }
+    },
+    "已繳季租": {
+      "type": "rollup",
+      "config": {
+        "relation_property_name": "付款",
+        "rollup_property_name": "子項｜季租繳費",
+        "function": "show_original"
+      }
+    },
+    "USER": {
+      "type": "relation",
+      "config": {
+        "database_id": "2e44dbf2-e21c-80d1-af81-c3b61579b3bb",
+        "type": "dual_property"
+      }
+    },
+    "結清": {
+      "type": "formula",
+      "config": {
+        "expression": "if (length( {{notion:block_property:EYBc:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}} ) == 0, true, false)"
+      }
+    },
+    "付款": {
+      "type": "relation",
+      "config": {
+        "database_id": "4573dc24-ef10-4241-971f-af4ed8a986d1",
+        "type": "dual_property"
+      }
+    },
+    "Name": {
+      "type": "title",
+      "config": null
+    }
+  }
+}
