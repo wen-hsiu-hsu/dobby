@@ -3,7 +3,7 @@ import { getReqId } from './request-context.js';
 
 const isDev = process.env['NODE_ENV'] !== 'production';
 
-const base = pino({
+let base: pino.Logger = pino({
   level: isDev ? 'debug' : 'info',
   ...(isDev && {
     transport: {
@@ -17,14 +17,34 @@ const base = pino({
   }),
 });
 
-export const logger = new Proxy(base, {
-  get(target, prop) {
-    const method = target[prop as keyof typeof target];
+export async function initLogger(): Promise<void> {
+  if (isDev) return;
+
+  const build = await import('pino-roll');
+  const fileStream = await build.default({
+    file: 'logs/app',
+    frequency: 'daily',
+    dateFormat: 'yyyy-MM-dd',
+    mkdir: true,
+  });
+
+  base = pino(
+    { level: 'debug' },
+    pino.multistream([
+      { stream: process.stdout, level: 'debug' },
+      { stream: fileStream, level: 'debug' },
+    ])
+  );
+}
+
+export const logger = new Proxy({} as pino.Logger, {
+  get(_target, prop) {
+    const method = base[prop as keyof typeof base];
     if (prop === 'child' || typeof method !== 'function') return method;
     return (obj: object, msg?: string) => {
       const reqId = getReqId();
       const merged = reqId ? { reqId, ...obj } : obj;
-      return (method as Function).call(target, merged, msg);
+      return (method as Function).call(base, merged, msg);
     };
   },
 });

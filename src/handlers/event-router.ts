@@ -8,7 +8,7 @@ import { runWithContext } from '../utils/request-context.js';
 export async function processEvents(events: WebhookEvent[], botId: string): Promise<void> {
   for (const event of events) {
     await runWithContext(async () => {
-    logger.debug({ type: event.type, source: event.source }, 'Processing event');
+    logger.debug({ type: event.type, source: event.source, message: 'message' in event ? event.message : undefined }, 'Processing event');
     try {
       switch (event.type) {
         case 'message':

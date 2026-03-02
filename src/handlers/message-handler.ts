@@ -30,17 +30,23 @@ export async function handleMessage(event: MessageEvent, botId: string): Promise
 
   if (isCommand(text)) {
     const command = parseCommand(text);
-    if (!command) return;
-
+    if (!command) {
+      logger.debug({ text }, 'Message looks like command but failed to parse');
+      return;
+    }
+    logger.debug({ command, isAdmin }, 'Routing command');
     await routeCommand(command, event as any, botId, isAdmin);
     return;
   }
 
   // Auto-reply (skip for admin)
-  if (isAdmin) return;
+  if (isAdmin) {
+    logger.debug({ userId, text }, 'Skipping auto-reply for admin');
+    return;
+  }
 
   const reply = findReply(text);
-  logger.debug({ text, reply }, 'auto-reply lookup');
+  logger.debug({ text, matched: reply !== null, reply }, 'Auto-reply lookup');
   if (reply) {
     await replyMessage(event.replyToken, [{ type: 'text', text: reply }], botId);
   }

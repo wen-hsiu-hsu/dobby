@@ -7,4 +7,9 @@ services:
     env_file:
       - .env
     environment:
-      - NODE_ENV=development
+      - NODE_ENV=production
+    volumes:
+      - logs:/app/logs
+
+volumes:
+  logs:

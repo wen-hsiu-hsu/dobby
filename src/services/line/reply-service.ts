@@ -10,10 +10,13 @@ export async function replyMessage(
   botId: string
 ): Promise<void> {
   const client = getClient(botId);
-  logger.info({ botId, replyToken: replyToken.slice(0, 8) + '…', messageCount: messages.length }, 'LINE reply');
+  const messageContents = messages.map((m) =>
+    m.type === 'text' ? (m as { type: string; text: string }).text : `[${m.type}]`
+  );
+  logger.info({ botId, replyToken: replyToken.slice(0, 8) + '…', messageCount: messages.length, messages: messageContents }, 'LINE reply');
   try {
     await client.replyMessage({ replyToken, messages });
-    logger.debug({ botId }, 'LINE reply sent');
+    logger.debug({ botId, messages: messageContents }, 'LINE reply sent');
   } catch (err) {
     logger.warn({ err, botId }, 'Reply failed, no fallback available (no groupId for push)');
   }

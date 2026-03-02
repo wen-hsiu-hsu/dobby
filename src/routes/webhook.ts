@@ -10,7 +10,7 @@ webhookRouter.post('/:botId', lineSignatureMiddleware, (req, res) => {
   res.status(200).json({ status: 'ok' });
   const botId = (req.params['botId'] as string | undefined) ?? 'dobby';
   const events = req.body.events as WebhookEvent[];
-  logger.info({ botId, eventCount: events.length }, 'Webhook received');
+  logger.info({ botId, eventCount: events.length, events }, 'Webhook received');
   processEvents(events, botId).catch((err) =>
     logger.error({ err }, 'Error processing events')
   );

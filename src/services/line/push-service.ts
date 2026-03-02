@@ -10,12 +10,15 @@ export async function pushMessage(
   botId: string
 ): Promise<void> {
   const client = getClient(botId);
-  logger.info({ botId, to, messageCount: messages.length }, 'LINE push');
+  const messageContents = messages.map((m) =>
+    m.type === 'text' ? (m as { type: string; text: string }).text : `[${m.type}]`
+  );
+  logger.info({ botId, to, messageCount: messages.length, messages: messageContents }, 'LINE push');
   try {
     await client.pushMessage({ to, messages });
-    logger.debug({ botId, to }, 'LINE push sent');
+    logger.debug({ botId, to, messages: messageContents }, 'LINE push sent');
   } catch (err) {
-    logger.error({ err, to, botId }, 'Push message failed');
+    logger.error({ err, to, botId, messages: messageContents }, 'Push message failed');
     throw err;
   }
 }
