@@ -19,10 +19,8 @@ export interface CalendarEvent {
 
 export interface SeasonRecord {
   pageId: string;
-  name: string;
+  name: string; // format: YYYY-QN (e.g. "2025-Q1")
   members: string[]; // relation pageIds of People
-  startDate: string | null;
-  endDate: string | null;
 }
 
 export interface PersonRecord {

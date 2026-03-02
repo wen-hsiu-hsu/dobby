@@ -18,6 +18,23 @@ export function getQuarter(date: Date = new Date()): number {
 }
 
 /**
+ * Returns the current season name in "YYYY-QN" format using Asia/Taipei timezone.
+ * e.g. "2026-Q1"
+ */
+export function getCurrentSeasonName(): string {
+  const now = new Date();
+  const taipei = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Taipei',
+    year: 'numeric',
+    month: 'numeric',
+  }).formatToParts(now);
+  const year = Number(taipei.find((p) => p.type === 'year')!.value);
+  const month = Number(taipei.find((p) => p.type === 'month')!.value);
+  const quarter = Math.floor((month - 1) / 3) + 1;
+  return `${year}-Q${quarter}`;
+}
+
+/**
  * Formats a date as YYYY-MM-DD.
  */
 export function formatDate(date: Date): string {
