@@ -1,20 +1,46 @@
+const TAIPEI_TZ = 'Asia/Taipei';
+
 /**
- * Returns the next Saturday from today (or today if today is Saturday).
+ * Returns date parts (year, month 1-based, day, weekday 0=Sun) in Asia/Taipei timezone.
  */
-export function getNextSaturday(from: Date = new Date()): Date {
-  const date = new Date(from);
-  const day = date.getDay(); // 0=Sun, 6=Sat
-  const daysUntilSaturday = day === 6 ? 0 : (6 - day);
-  date.setDate(date.getDate() + daysUntilSaturday);
-  date.setHours(0, 0, 0, 0);
-  return date;
+function getTaipeiParts(date: Date): { year: number; month: number; day: number; weekday: number } {
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: TAIPEI_TZ,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    weekday: 'short',
+  });
+  const parts = fmt.formatToParts(date);
+  const get = (type: string) => parts.find((p) => p.type === type)!.value;
+  const weekdayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return {
+    year: Number(get('year')),
+    month: Number(get('month')),
+    day: Number(get('day')),
+    weekday: weekdayMap[get('weekday')],
+  };
 }
 
 /**
- * Returns fiscal quarter number (1-4) for a given date.
+ * Returns the next Saturday from today (or today if today is Saturday),
+ * using Asia/Taipei timezone to determine the current day.
+ */
+export function getNextSaturday(from: Date = new Date()): Date {
+  const { weekday, year, month, day } = getTaipeiParts(from);
+  const daysUntilSaturday = weekday === 6 ? 0 : (6 - weekday);
+  // Return as a UTC midnight date offset by the days needed
+  const base = new Date(Date.UTC(year, month - 1, day));
+  base.setUTCDate(base.getUTCDate() + daysUntilSaturday);
+  return base;
+}
+
+/**
+ * Returns fiscal quarter number (1-4) for a given date, using Asia/Taipei timezone.
  */
 export function getQuarter(date: Date = new Date()): number {
-  return Math.floor(date.getMonth() / 3) + 1;
+  const { month } = getTaipeiParts(date);
+  return Math.floor((month - 1) / 3) + 1;
 }
 
 /**
@@ -22,25 +48,18 @@ export function getQuarter(date: Date = new Date()): number {
  * e.g. "2026-Q1"
  */
 export function getCurrentSeasonName(): string {
-  const now = new Date();
-  const taipei = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Asia/Taipei',
-    year: 'numeric',
-    month: 'numeric',
-  }).formatToParts(now);
-  const year = Number(taipei.find((p) => p.type === 'year')!.value);
-  const month = Number(taipei.find((p) => p.type === 'month')!.value);
+  const { year, month } = getTaipeiParts(new Date());
   const quarter = Math.floor((month - 1) / 3) + 1;
   return `${year}-Q${quarter}`;
 }
 
 /**
- * Formats a date as YYYY-MM-DD.
+ * Formats a Date (treated as UTC) as YYYY-MM-DD.
  */
 export function formatDate(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(date.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
 }
 
@@ -49,8 +68,8 @@ export function formatDate(date: Date): string {
  */
 export function getNextSaturdayDateText(from: Date = new Date()): string {
   const sat = getNextSaturday(from);
-  const y = sat.getFullYear();
-  const m = String(sat.getMonth() + 1).padStart(2, '0');
-  const d = String(sat.getDate()).padStart(2, '0');
+  const y = sat.getUTCFullYear();
+  const m = String(sat.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(sat.getUTCDate()).padStart(2, '0');
   return `${y}/${m}/${d}（六）`;
 }

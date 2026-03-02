@@ -98,7 +98,7 @@ explore 時未取得 `command` handler 的詳細內容，需確認：
 
 ---
 
-## Issue 5: date-utils 時區未明確設定為 Asia/Taipei
+## Issue 5: date-utils 時區未明確設定為 Asia/Taipei ✅ 已修復
 
 **嚴重度：🟡 中**
 
