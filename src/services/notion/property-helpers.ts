@@ -42,6 +42,13 @@ export function getCheckbox(properties: Properties, key: string): boolean {
   return prop.checkbox;
 }
 
+export function getFormulaBoolean(properties: Properties, key: string): boolean {
+  const prop = properties[key];
+  if (!prop || prop.type !== 'formula') return false;
+  if (prop.formula.type !== 'boolean') return false;
+  return prop.formula.boolean ?? false;
+}
+
 export function getDate(properties: Properties, key: string): string | null {
   const prop = properties[key];
   if (!prop || prop.type !== 'date') return null;

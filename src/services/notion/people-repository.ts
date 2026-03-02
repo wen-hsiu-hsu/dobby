@@ -1,6 +1,6 @@
 import { env } from '../../config/env.js';
 import { notionGet, notionPost } from './notion-fetch.js';
-import { getTitle, getRichText, getCheckbox } from './property-helpers.js';
+import { getTitle, getRichText, getFormulaBoolean } from './property-helpers.js';
 import type { PersonRecord } from '../../types/notion-models.js';
 import type { PageObjectResponse } from '@notionhq/client/build/src/api-endpoints.js';
 
@@ -9,7 +9,7 @@ function pageToRecord(page: PageObjectResponse): PersonRecord {
   return {
     pageId: page.id,
     name: getTitle(p, 'Name'),
-    hasPaid: getCheckbox(p, 'Has Paid'),
+    hasPaid: getFormulaBoolean(p, '結清'),
     lineUserId: getRichText(p, 'Line User ID'),
   };
 }
@@ -31,7 +31,7 @@ export async function findByName(name: string): Promise<PersonRecord | null> {
 
 export async function findAllUnpaid(): Promise<PersonRecord[]> {
   const response = await notionPost(`/databases/${env.NOTION_DB_PEOPLE}/query`, {
-    filter: { property: 'Has Paid', checkbox: { equals: false } },
+    filter: { property: '結清', formula: { checkbox: { equals: false } } },
   }) as any;
   return response.results.map((r: unknown) => pageToRecord(r as PageObjectResponse));
 }
