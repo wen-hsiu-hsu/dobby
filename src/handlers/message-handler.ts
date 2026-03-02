@@ -26,6 +26,7 @@ export async function handleMessage(event: MessageEvent, botId: string): Promise
   // Lazy-load admin status from USERS DB
   const notionUser = await findByUserId(userId);
   const isAdmin = notionUser?.isAdmin ?? false;
+  logger.debug({ userId, text, isAdmin, sourceType: event.source.type }, 'handleMessage');
 
   if (isCommand(text)) {
     const command = parseCommand(text);
@@ -39,6 +40,7 @@ export async function handleMessage(event: MessageEvent, botId: string): Promise
   if (isAdmin) return;
 
   const reply = findReply(text);
+  logger.debug({ text, reply }, 'auto-reply lookup');
   if (reply) {
     await replyMessage(event.replyToken, [{ type: 'text', text: reply }], botId);
   }

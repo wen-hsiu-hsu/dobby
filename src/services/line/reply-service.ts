@@ -10,8 +10,10 @@ export async function replyMessage(
   botId: string
 ): Promise<void> {
   const client = getClient(botId);
+  logger.info({ botId, replyToken: replyToken.slice(0, 8) + '…', messageCount: messages.length }, 'LINE reply');
   try {
     await client.replyMessage({ replyToken, messages });
+    logger.debug({ botId }, 'LINE reply sent');
   } catch (err) {
     logger.warn({ err, botId }, 'Reply failed, no fallback available (no groupId for push)');
   }

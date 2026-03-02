@@ -10,8 +10,10 @@ export async function pushMessage(
   botId: string
 ): Promise<void> {
   const client = getClient(botId);
+  logger.info({ botId, to, messageCount: messages.length }, 'LINE push');
   try {
     await client.pushMessage({ to, messages });
+    logger.debug({ botId, to }, 'LINE push sent');
   } catch (err) {
     logger.error({ err, to, botId }, 'Push message failed');
     throw err;
