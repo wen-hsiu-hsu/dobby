@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 
 beforeAll(() => {
   process.env['NODE_ENV'] = 'test';
@@ -14,47 +14,49 @@ beforeAll(() => {
   process.env['NOTION_DB_ANNOUNCEMENT'] = 'test-db-announcement';
 });
 
-vi.mock('../services/notion/notion-client.js', () => ({
-  notion: {
-    dataSources: { query: vi.fn() },
-    pages: { create: vi.fn(), update: vi.fn().mockResolvedValue({}), retrieve: vi.fn() },
-    blocks: { children: { list: vi.fn() } },
-  },
-}));
-
 vi.mock('../config/line.js', () => ({
   dobbyClient: { replyMessage: vi.fn().mockResolvedValue({}) },
   battingClient: { replyMessage: vi.fn().mockResolvedValue({}) },
   getClient: vi.fn().mockReturnValue({ replyMessage: vi.fn().mockResolvedValue({}) }),
 }));
 
-describe('Registration flow', () => {
-  it('handleRegistration replies with success message', async () => {
-    const { notion } = await import('../services/notion/notion-client.js');
-    const { getClient } = await import('../config/line.js');
+function mockFetchResponse(data: unknown) {
+  return Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve(data),
+  } as Response);
+}
 
+describe('Registration flow', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('handleRegistration replies with success message', async () => {
+    const { getClient } = await import('../config/line.js');
     const mockReply = vi.fn().mockResolvedValue({});
     (getClient as any).mockReturnValue({ replyMessage: mockReply });
 
-    // Mock: findByUserId → user with customName
-    (notion.dataSources.query as any).mockImplementation(({ filter }: any) => {
-      // users query
-      return Promise.resolve({
-        results: [{
-          id: 'user-page-1',
-          properties: {
-            'User ID': { type: 'title', title: [{ plain_text: 'user1' }] },
-            'Display Name': { type: 'rich_text', rich_text: [{ plain_text: 'Alice' }] },
-            'Custom Name': { type: 'rich_text', rich_text: [{ plain_text: 'Alice' }] },
-            'Message Count': { type: 'number', number: 0 },
-            'Groups': { type: 'multi_select', multi_select: [] },
-            'Multi Chats': { type: 'multi_select', multi_select: [] },
-          },
-        }],
-      });
-    });
+    const userPage = {
+      id: 'user-page-1',
+      properties: {
+        user_id: { type: 'title', title: [{ plain_text: 'user1' }] },
+        'Custom Name': { type: 'rich_text', rich_text: [{ plain_text: 'Alice' }] },
+        is_admin: { type: 'checkbox', checkbox: false },
+        message_counts: { type: 'number', number: 0 },
+        groups: { type: 'multi_select', multi_select: [] },
+        'multi-chat': { type: 'multi_select', multi_select: [] },
+      },
+    };
+    fetchMock.mockImplementation(() => mockFetchResponse({ results: [userPage] }));
 
-    // For simplicity, test the capacity calculator directly for the e2e flow
     const { calculateAddCapacity } = await import('../commands/registration/capacity-calculator.js');
     const event = {
       pageId: 'evt1', date: '2024-01-06',
@@ -69,44 +71,56 @@ describe('Registration flow', () => {
 
   it('handleLeave rejects non-season member', async () => {
     const { handleLeave } = await import('../commands/registration/leave-handler.js');
-    const { notion } = await import('../services/notion/notion-client.js');
     const { getClient } = await import('../config/line.js');
 
     const mockReply = vi.fn().mockResolvedValue({});
     (getClient as any).mockReturnValue({ replyMessage: mockReply });
 
-    // Users query returns user
-    // Season findAll returns season where target is NOT a member
-    (notion.dataSources.query as any).mockImplementation(() => Promise.resolve({
-      results: [{
-        id: 'user-page-1',
-        properties: {
-          'User ID': { type: 'title', title: [{ plain_text: 'user1' }] },
-          'Display Name': { type: 'rich_text', rich_text: [{ plain_text: 'Bob' }] },
-          'Custom Name': { type: 'rich_text', rich_text: [{ plain_text: 'Bob' }] },
-          'Message Count': { type: 'number', number: 0 },
-          'Groups': { type: 'multi_select', multi_select: [] },
-          'Multi Chats': { type: 'multi_select', multi_select: [] },
-          // Season: Name field for season
-          'Name': { type: 'title', title: [{ plain_text: 'Q1 2024' }] },
-          'Members': { type: 'relation', relation: [], has_more: false },
-          'Start Date': { type: 'date', date: null },
-          'End Date': { type: 'date', date: null },
-          // People
-          'Has Paid': { type: 'checkbox', checkbox: false },
-          'Line User ID': { type: 'rich_text', rich_text: [] },
-        },
-      }],
-    }));
+    const userPage = {
+      id: 'user-page-1',
+      properties: {
+        user_id: { type: 'title', title: [{ plain_text: 'user1' }] },
+        'Custom Name': { type: 'rich_text', rich_text: [{ plain_text: 'Bob' }] },
+        is_admin: { type: 'checkbox', checkbox: false },
+        message_counts: { type: 'number', number: 0 },
+        groups: { type: 'multi_select', multi_select: [] },
+        'multi-chat': { type: 'multi_select', multi_select: [] },
+      },
+    };
 
-    // Mock pages.retrieve for people
-    (notion.pages.retrieve as any).mockResolvedValue({
+    const seasonPage = {
+      id: 'season-page-1',
+      properties: {
+        Name: { type: 'title', title: [{ plain_text: 'Q1 2024' }] },
+        Members: { type: 'relation', relation: [], has_more: false },
+        'Start Date': { type: 'date', date: null },
+        'End Date': { type: 'date', date: null },
+      },
+    };
+
+    const personPage = {
       id: 'person1',
       properties: {
-        'Name': { type: 'title', title: [{ plain_text: 'Bob' }] },
+        Name: { type: 'title', title: [{ plain_text: 'Bob' }] },
         'Has Paid': { type: 'checkbox', checkbox: false },
         'Line User ID': { type: 'rich_text', rich_text: [] },
       },
+    };
+
+    fetchMock.mockImplementation((url: string) => {
+      if (url.includes('/databases/test-db-users/query')) {
+        return mockFetchResponse({ results: [userPage] });
+      }
+      if (url.includes('/databases/test-db-people/query')) {
+        return mockFetchResponse({ results: [personPage] });
+      }
+      if (url.includes('/databases/test-db-season/query')) {
+        return mockFetchResponse({ results: [seasonPage] });
+      }
+      if (url.includes('/pages/')) {
+        return mockFetchResponse(personPage);
+      }
+      return mockFetchResponse({ results: [] });
     });
 
     const event = {
@@ -117,7 +131,6 @@ describe('Registration flow', () => {
 
     await handleLeave(event as any, false, 'dobby');
 
-    // Should reply with season-member-only message
     expect(mockReply).toHaveBeenCalledWith(
       expect.objectContaining({
         messages: expect.arrayContaining([

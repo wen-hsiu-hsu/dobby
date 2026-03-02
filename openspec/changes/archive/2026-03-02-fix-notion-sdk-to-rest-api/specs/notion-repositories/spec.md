@@ -1,35 +1,5 @@
 ## ADDED Requirements
 
-### Requirement: Repository pattern for all Notion DBs
-The system SHALL access Notion via typed Repository classes, never calling the Notion client directly from handlers.
-
-#### Scenario: Repository abstraction
-- **WHEN** a handler needs Notion data
-- **THEN** it calls a Repository method (e.g., `calendarRepository.findByDate(date)`)
-- **AND** the Repository handles all Notion API formatting and error handling
-
-### Requirement: Property helper centralization
-All Notion property read/write format conversions SHALL be centralized in `property-helpers.ts`.
-
-#### Scenario: Property reading
-- **WHEN** reading a rich_text property
-- **THEN** `getRichText(page, 'Custom Name')` returns the plain text string or null
-
-### Requirement: USERS repository
-The USERS repository SHALL support: findByUserId, findByCustomName, create, update, incrementMessageCount. All operations SHALL use the standard Notion REST API (`/databases/{id}/query`) via native `fetch`, not the SDK's internal `dataSources` API.
-
-#### Scenario: Find by userId
-- **WHEN** `usersRepository.findByUserId(userId)` is called
-- **THEN** a NotionUser object or null is returned
-
-#### Scenario: Correct property name mapping
-- **WHEN** reading or writing USERS database records
-- **THEN** the repository SHALL use property names matching the actual Notion schema: `user_id` (title), `Custom Name` (rich_text), `is_admin` (checkbox), `message_counts` (number), `groups` (multi_select), `multi-chat` (multi_select)
-
-#### Scenario: API error propagation
-- **WHEN** the Notion REST API returns a non-2xx response
-- **THEN** the repository SHALL throw an error with the Notion error body included in the message
-
 ### Requirement: Shared Notion fetch helpers
 The system SHALL centralise all Notion REST API HTTP calls in `src/services/notion/notion-fetch.ts`, exporting `notionGet`, `notionPost`, and `notionPatch`. No repository SHALL import from `notion-client.ts` for data operations.
 
@@ -40,6 +10,8 @@ The system SHALL centralise all Notion REST API HTTP calls in `src/services/noti
 #### Scenario: Non-2xx response throws error
 - **WHEN** the Notion REST API returns a non-2xx status
 - **THEN** the helper SHALL throw an `Error` with the Notion error body in the message
+
+## MODIFIED Requirements
 
 ### Requirement: Calendar repository
 The calendar repository SHALL support: findByDate (next Saturday), updateAbsentees (add/remove), updateGuests (zero-play multi_select). All operations SHALL use the standard Notion REST API via `notion-fetch.ts`, not the SDK.

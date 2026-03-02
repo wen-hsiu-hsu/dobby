@@ -1,22 +1,19 @@
 import cron from 'node-cron';
 import * as usersRepo from '../services/notion/users-repository.js';
+import { notionPost } from '../services/notion/notion-fetch.js';
 import { getProfile } from '../services/line/profile-service.js';
 import { logger } from '../utils/logger.js';
+import { env } from '../config/env.js';
 
 async function updateDisplayNames(): Promise<void> {
   logger.info('Starting display name batch update');
   try {
-    // Get all users - we need to fetch all pages
-    // For now, query all users (no filter)
-    const { notion } = await import('../services/notion/notion-client.js');
-    const { env } = await import('../config/env.js');
-
-    const response = await notion.dataSources.query({ data_source_id: env.NOTION_DB_USERS });
+    const response = await notionPost(`/databases/${env.NOTION_DB_USERS}/query`, {}) as any;
     const pages = response.results as any[];
 
     let updated = 0;
     for (const page of pages) {
-      const userId = page.properties?.['User ID']?.title?.[0]?.plain_text;
+      const userId = page.properties?.['user_id']?.title?.[0]?.plain_text;
       if (!userId) continue;
 
       const profile = await getProfile(userId);

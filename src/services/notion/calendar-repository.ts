@@ -1,5 +1,5 @@
-import { notion } from './notion-client.js';
 import { env } from '../../config/env.js';
+import { notionPost, notionPatch } from './notion-fetch.js';
 import {
   getDate,
   getRelation,
@@ -25,24 +25,21 @@ function pageToEvent(page: PageObjectResponse): CalendarEvent {
 }
 
 export async function findByDate(date: string): Promise<CalendarEvent | null> {
-  const response = await notion.dataSources.query({
-    data_source_id: env.NOTION_DB_CALENDAR,
+  const response = await notionPost(`/databases/${env.NOTION_DB_CALENDAR}/query`, {
     filter: { property: 'Date', date: { equals: date } },
-  });
+  }) as any;
   if (response.results.length === 0) return null;
   return pageToEvent(response.results[0] as PageObjectResponse);
 }
 
 export async function updateAbsentees(pageId: string, absenteePageIds: string[]): Promise<void> {
-  await notion.pages.update({
-    page_id: pageId,
-    properties: { Absentees: setRelation(absenteePageIds) } as any,
+  await notionPatch(`/pages/${pageId}`, {
+    properties: { Absentees: setRelation(absenteePageIds) },
   });
 }
 
 export async function updateGuests(pageId: string, guests: string[]): Promise<void> {
-  await notion.pages.update({
-    page_id: pageId,
-    properties: { Guests: setMultiSelect(guests) } as any,
+  await notionPatch(`/pages/${pageId}`, {
+    properties: { Guests: setMultiSelect(guests) },
   });
 }

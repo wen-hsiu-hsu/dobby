@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 
 beforeAll(() => {
   process.env['NODE_ENV'] = 'test';
@@ -14,15 +14,6 @@ beforeAll(() => {
   process.env['NOTION_DB_ANNOUNCEMENT'] = 'test-db-announcement';
   process.env['PORT'] = '3000';
 });
-
-// Mock Notion client
-vi.mock('../services/notion/notion-client.js', () => ({
-  notion: {
-    dataSources: { query: vi.fn() },
-    pages: { create: vi.fn(), update: vi.fn(), retrieve: vi.fn() },
-    blocks: { children: { list: vi.fn() } },
-  },
-}));
 
 // Mock LINE clients
 vi.mock('../config/line.js', () => ({
@@ -43,7 +34,25 @@ vi.mock('../config/line.js', () => ({
   }),
 }));
 
+function mockFetchResponse(data: unknown) {
+  return Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve(data),
+  } as Response);
+}
+
 describe('Command routing integration', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn().mockImplementation(() => mockFetchResponse({ results: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('routes @Dobby command to command-list handler', async () => {
     const { routeCommand } = await import('../commands/command-router.js');
     const { parseCommand } = await import('../commands/command-parser.js');
@@ -72,15 +81,20 @@ describe('Command routing integration', () => {
   });
 
   it('routes @Dobby (alone) to introduce handler', async () => {
-    const { notion } = await import('../services/notion/notion-client.js');
     const { getClient } = await import('../config/line.js');
 
-    // Mock announcement lookup
-    (notion.dataSources.query as any).mockResolvedValue({
-      results: [{ id: 'page1', properties: { Name: { type: 'title', title: [{ plain_text: 'INTRODUCE' }] } } }],
-    });
-    (notion.blocks.children.list as any).mockResolvedValue({
-      results: [{ type: 'paragraph', paragraph: { rich_text: [{ plain_text: 'Hello!' }] } }],
+    fetchMock.mockImplementation((url: string) => {
+      if (url.includes('/databases/test-db-announcement/query')) {
+        return mockFetchResponse({
+          results: [{ id: 'page1', properties: { Name: { type: 'title', title: [{ plain_text: 'INTRODUCE' }] } } }],
+        });
+      }
+      if (url.includes('/blocks/page1/children')) {
+        return mockFetchResponse({
+          results: [{ type: 'paragraph', paragraph: { rich_text: [{ plain_text: 'Hello!' }] } }],
+        });
+      }
+      return mockFetchResponse({ results: [] });
     });
 
     const mockClient = { replyMessage: vi.fn().mockResolvedValue({}) };
