@@ -2,51 +2,39 @@
   "id": "7deede34-579d-4c77-b79b-20b9f4f000e7",
   "name": "季租承租紀錄",
   "name_en": "Season Rental Record",
-  "purpose": "記錄每季的場地承租資訊、報名人數、費用計算",
+  "purpose": "每季的場地承租合約資料，定義季租成員名單與費用",
   "last_updated": "2026-01-18T14:54:25.072Z",
   "properties": {
-    "備註": {
-      "type": "rich_text",
+    "季租時段": {
+      "type": "title",
+      "description": "季度識別名稱，如 '2025-Q1'。participants 指令可依此查詢",
       "config": null
+    },
+    "場地數": {
+      "type": "number",
+      "description": "本季預設場地數，用於容量計算（可用名額 = 場地數 × 7 - 季租成員數...）",
+      "config": {
+        "format": "number"
+      }
     },
     "報名人": {
       "type": "relation",
+      "description": "本季的季租成員清單，關聯至「人員清單」。成員數量直接影響每週可用零打名額",
       "config": {
         "database_id": "252f388d-4ac7-49a4-82ae-a7f18044f701",
         "type": "dual_property"
       }
     },
-    "公告": {
-      "type": "relation",
-      "config": {
-        "database_id": "2e24dbf2-e21c-80b7-83f6-ef99c1dd9425",
-        "type": "dual_property"
-      }
-    },
-    "地點": {
-      "type": "rich_text",
-      "config": null
-    },
-    "場地數": {
+    "零打費用": {
       "type": "number",
+      "description": "本季零打每人費用（元）",
       "config": {
         "format": "number"
-      }
-    },
-    "每人平均場租（特殊狀況）": {
-      "type": "number",
-      "config": {
-        "format": "number"
-      }
-    },
-    "場租總金額": {
-      "type": "formula",
-      "config": {
-        "expression": "{{notion:block_property:T%3BPJ:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}}*{{notion:block_property:%7CMRs:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}}*{{notion:block_property:~%3B%60G:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}}*2"
       }
     },
     "打球日": {
       "type": "relation",
+      "description": "本季對應的行事曆頁面，關聯至「行事曆」",
       "config": {
         "database_id": "0fd76b77-9f07-4aa3-a3c9-12ba18dbe32e",
         "type": "dual_property"
@@ -54,40 +42,67 @@
     },
     "報名人數": {
       "type": "formula",
+      "description": "季租成員人數（formula 計算 報名人 relation 數量）",
       "config": {
         "expression": "{{notion:block_property:G%40xy:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}}.length()"
       }
     },
-    "合約": {
-      "type": "files",
-      "config": null
+    "場租總金額": {
+      "type": "formula",
+      "description": "本季總場租費用（formula 計算）",
+      "config": {
+        "expression": "{{notion:block_property:T%3BPJ:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}}*{{notion:block_property:%7CMRs:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}}*{{notion:block_property:~%3B%60G:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}}*2"
+      }
     },
     "每人平均場租": {
       "type": "formula",
+      "description": "每位季租成員應繳的場租（formula 計算，若有特殊狀況則使用手動覆寫欄位）",
       "config": {
         "expression": "{{notion:block_property:UI~W:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}}.empty().if({{notion:block_property:%5By%60%3B:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}}/{{notion:block_property:ndOW:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}},{{notion:block_property:UI~W:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}})"
       }
     },
-    "零打費用": {
+    "每人平均場租（特殊狀況）": {
       "type": "number",
+      "description": "手動覆寫的每人場租金額，設定後會取代 formula 計算值",
       "config": {
         "format": "number"
       }
     },
     "租借次數 (2hrs)": {
       "type": "number",
+      "description": "本季總租借次數（每次 2 小時）",
       "config": {
         "format": "number"
       }
     },
     "每場/小時 定價": {
       "type": "number",
+      "description": "場地每小時定價",
       "config": {
         "format": "number_with_commas"
       }
     },
-    "季租時段": {
-      "type": "title",
+    "地點": {
+      "type": "rich_text",
+      "description": "打球場地地址",
+      "config": null
+    },
+    "備註": {
+      "type": "rich_text",
+      "description": "備註",
+      "config": null
+    },
+    "公告": {
+      "type": "relation",
+      "description": "關聯至「所有公告」",
+      "config": {
+        "database_id": "2e24dbf2-e21c-80b7-83f6-ef99c1dd9425",
+        "type": "dual_property"
+      }
+    },
+    "合約": {
+      "type": "files",
+      "description": "承租合約文件",
       "config": null
     }
   }

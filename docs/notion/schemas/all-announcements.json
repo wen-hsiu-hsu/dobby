@@ -2,23 +2,32 @@
   "id": "2e24dbf2-e21c-80b7-83f6-ef99c1dd9425",
   "name": "所有公告",
   "name_en": "All Announcements",
-  "purpose": "儲存公告模板與歡迎訊息的 Child Blocks",
+  "purpose": "儲存各種公告模板與訊息模板，bot 指令讀取此資料庫的 page content 回覆",
   "last_updated": "2026-01-18T14:54:26.024Z",
+  "known_pages": {
+    "NEWS_TEMPLATE": "@Dobby news 指令顯示的公告內容",
+    "PAYMENT": "@Dobby payment 指令顯示的付款說明（支援 bulleted list）",
+    "WELCOME_MESSAGE": "機器人加入群組時發送的歡迎訊息，支援 {NEW_FRIEND}、{MANAGER} placeholder",
+    "INTRODUCE": "@Dobby 自我介紹內容，支援 {USER}、{MANAGER} placeholder"
+  },
   "properties": {
+    "Name": {
+      "type": "title",
+      "description": "公告/模板名稱，如 NEWS_TEMPLATE、PAYMENT、WELCOME_MESSAGE、INTRODUCE",
+      "config": null
+    },
+    "Date": {
+      "type": "date",
+      "description": "公告日期",
+      "config": null
+    },
     "季度": {
       "type": "relation",
+      "description": "關聯至「季租承租紀錄」",
       "config": {
         "database_id": "7deede34-579d-4c77-b79b-20b9f4f000e7",
         "type": "dual_property"
       }
-    },
-    "Date": {
-      "type": "date",
-      "config": null
-    },
-    "Name": {
-      "type": "title",
-      "config": null
     }
   }
 }

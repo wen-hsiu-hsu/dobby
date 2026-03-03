@@ -1,11 +1,31 @@
 {
   "last_updated": "2026-01-18T14:54:26.664Z",
+  "docs_reference": "docs/notion/databases.md",
   "databases": {
+    "USERS": {
+      "id": "2e44dbf2-e21c-80d1-af81-c3b61579b3bb",
+      "name": "USERS",
+      "name_en": "USERS",
+      "purpose": "追蹤所有曾與 bot 互動的 LINE 使用者，管理權限與群組資訊",
+      "env_var": "NOTION_DB_USERS",
+      "filename": "users.json",
+      "path": "docs/notion/schemas/users.json"
+    },
+    "Calendar": {
+      "id": "0fd76b77-9f07-4aa3-a3c9-12ba18dbe32e",
+      "name": "行事曆",
+      "name_en": "Calendar",
+      "purpose": "每週打球活動的紀錄，是報名系統的核心資料來源",
+      "env_var": "NOTION_DB_CALENDAR",
+      "filename": "calendar.json",
+      "path": "docs/notion/schemas/calendar.json"
+    },
     "People List": {
       "id": "252f388d-4ac7-49a4-82ae-a7f18044f701",
       "name": "人員清單",
       "name_en": "People List",
-      "purpose": "管理羽球社團成員名單，追蹤繳費狀態",
+      "purpose": "所有球員的名冊，是整個系統的人員資料中心",
+      "env_var": "NOTION_DB_PEOPLE",
       "filename": "people-list.json",
       "path": "docs/notion/schemas/people-list.json"
     },
@@ -13,23 +33,17 @@
       "id": "7deede34-579d-4c77-b79b-20b9f4f000e7",
       "name": "季租承租紀錄",
       "name_en": "Season Rental Record",
-      "purpose": "記錄每季的場地承租資訊、報名人數、費用計算",
+      "purpose": "每季的場地承租合約資料，定義季租成員名單與費用",
+      "env_var": "NOTION_DB_SEASON",
       "filename": "season-rental-record.json",
       "path": "docs/notion/schemas/season-rental-record.json"
-    },
-    "Calendar": {
-      "id": "0fd76b77-9f07-4aa3-a3c9-12ba18dbe32e",
-      "name": "行事曆",
-      "name_en": "Calendar",
-      "purpose": "記錄每次打球的日期、請假人、場地數量",
-      "filename": "calendar.json",
-      "path": "docs/notion/schemas/calendar.json"
     },
     "All Announcements": {
       "id": "2e24dbf2-e21c-80b7-83f6-ef99c1dd9425",
       "name": "所有公告",
       "name_en": "All Announcements",
-      "purpose": "儲存公告模板與歡迎訊息的 Child Blocks",
+      "purpose": "儲存各種公告模板與訊息模板",
+      "env_var": "NOTION_DB_ANNOUNCEMENT",
       "filename": "all-announcements.json",
       "path": "docs/notion/schemas/all-announcements.json"
     },
@@ -38,16 +52,9 @@
       "name": "TEXT_REPLY",
       "name_en": "TEXT_REPLY",
       "purpose": "自動回覆規則",
+      "env_var": null,
       "filename": "text-reply.json",
       "path": "docs/notion/schemas/text-reply.json"
-    },
-    "USERS": {
-      "id": "2e44dbf2-e21c-80d1-af81-c3b61579b3bb",
-      "name": "USERS",
-      "name_en": "USERS",
-      "purpose": "使用者追蹤",
-      "filename": "users.json",
-      "path": "docs/notion/schemas/users.json"
     }
   }
 }

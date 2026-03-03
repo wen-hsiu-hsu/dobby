@@ -2,15 +2,27 @@
   "id": "2e44dbf2-e21c-80d1-af81-c3b61579b3bb",
   "name": "USERS",
   "name_en": "USERS",
-  "purpose": "使用者追蹤",
+  "purpose": "追蹤所有曾與 bot 互動的 LINE 使用者，管理權限與群組資訊",
   "last_updated": "2026-01-18T14:54:26.663Z",
   "properties": {
+    "user_id": {
+      "type": "title",
+      "description": "LINE userId，主鍵",
+      "config": null
+    },
+    "Custom Name": {
+      "type": "rich_text",
+      "description": "從 LINE API 同步的 displayName，由排程每週一更新",
+      "config": null
+    },
     "is_admin": {
       "type": "checkbox",
+      "description": "管理員權限。true 可執行管理員指令、代他人操作、不觸發自動回覆",
       "config": null
     },
     "groups": {
       "type": "multi_select",
+      "description": "使用者所在的 LINE 群組 ID 清單，每次互動時自動更新",
       "config": {
         "options": [
           {
@@ -28,8 +40,14 @@
         ]
       }
     },
+    "multi-chat": {
+      "type": "multi_select",
+      "description": "使用者所在的 LINE 聊天室 ID 清單（非群組）",
+      "config": null
+    },
     "Registered name": {
       "type": "relation",
+      "description": "關聯至「人員清單」，建立 LINE 帳號與球員名冊的對應。有值表示此使用者是正式季租球員",
       "config": {
         "database_id": "252f388d-4ac7-49a4-82ae-a7f18044f701",
         "type": "dual_property"
@@ -37,21 +55,10 @@
     },
     "message_counts": {
       "type": "number",
+      "description": "累積訊息數量，每次發訊息時 +1",
       "config": {
         "format": "number"
       }
-    },
-    "Custom Name": {
-      "type": "rich_text",
-      "config": null
-    },
-    "multi-chat": {
-      "type": "multi_select",
-      "config": null
-    },
-    "user_id": {
-      "type": "title",
-      "config": null
     }
   }
 }

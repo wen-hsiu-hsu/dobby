@@ -2,18 +2,54 @@
   "id": "0fd76b77-9f07-4aa3-a3c9-12ba18dbe32e",
   "name": "行事曆",
   "name_en": "Calendar",
-  "purpose": "記錄每次打球的日期、請假人、場地數量",
+  "purpose": "每週打球活動的紀錄，是報名系統的核心資料來源",
   "last_updated": "2026-01-18T14:54:25.745Z",
   "properties": {
+    "名稱": {
+      "type": "title",
+      "description": "活動名稱，通常為日期字串",
+      "config": null
+    },
+    "時間": {
+      "type": "date",
+      "description": "活動日期，通常是週六。報名系統以此欄位查詢當週活動",
+      "config": null
+    },
+    "類型": {
+      "type": "select",
+      "description": "活動類型。'打球暫停' 時報名會被拒絕，推播顯示暫停",
+      "config": {
+        "options": [
+          { "name": "繳費", "color": "orange" },
+          { "name": "報名", "color": "yellow" },
+          { "name": "打球", "color": "blue" },
+          { "name": "打球暫停", "color": "red" }
+        ]
+      }
+    },
+    "場地數": {
+      "type": "number",
+      "description": "本週場地數，優先使用此值，若為空則使用當季預設場地數",
+      "config": {
+        "format": "number"
+      }
+    },
     "請假人": {
       "type": "relation",
+      "description": "本週請假的季租球員，Relation 至「人員清單」。請假人數影響容量計算",
       "config": {
         "database_id": "252f388d-4ac7-49a4-82ae-a7f18044f701",
         "type": "single_property"
       }
     },
+    "零打": {
+      "type": "multi_select",
+      "description": "本週補位名單。命名規則：季租成員的朋友為 '{姓名}的朋友'，一般人為 '{姓名}'",
+      "config": null
+    },
     "季度": {
       "type": "relation",
+      "description": "關聯至「季租承租紀錄」，用於取得當季場地數和成員清單",
       "config": {
         "database_id": "7deede34-579d-4c77-b79b-20b9f4f000e7",
         "type": "dual_property"
@@ -21,47 +57,7 @@
     },
     "詳細內容": {
       "type": "rich_text",
-      "config": null
-    },
-    "場地數": {
-      "type": "number",
-      "config": {
-        "format": "number"
-      }
-    },
-    "類型": {
-      "type": "select",
-      "config": {
-        "options": [
-          {
-            "name": "繳費",
-            "color": "orange"
-          },
-          {
-            "name": "報名",
-            "color": "yellow"
-          },
-          {
-            "name": "打球",
-            "color": "blue"
-          },
-          {
-            "name": "打球暫停",
-            "color": "red"
-          }
-        ]
-      }
-    },
-    "時間": {
-      "type": "date",
-      "config": null
-    },
-    "零打": {
-      "type": "multi_select",
-      "config": null
-    },
-    "名稱": {
-      "type": "title",
+      "description": "備註欄位",
       "config": null
     }
   }
