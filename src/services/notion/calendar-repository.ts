@@ -4,8 +4,7 @@ import {
   getDate,
   getRelation,
   getMultiSelect,
-  getNumber,
-  getCheckbox,
+  getSelect,
   setRelation,
   setMultiSelect,
 } from './property-helpers.js';
@@ -16,17 +15,16 @@ function pageToEvent(page: PageObjectResponse): CalendarEvent {
   const p = page.properties;
   return {
     pageId: page.id,
-    date: getDate(p, 'Date') ?? '',
-    absentees: getRelation(p, 'Absentees'),
-    guests: getMultiSelect(p, 'Guests'),
-    capacity: getNumber(p, 'Capacity'),
-    isPaused: getCheckbox(p, 'Is Paused'),
+    date: getDate(p, '時間') ?? '',
+    absentees: getRelation(p, '請假人'),
+    guests: getMultiSelect(p, '零打'),
+    isPaused: getSelect(p, '類型') === '打球暫停',
   };
 }
 
 export async function findByDate(date: string): Promise<CalendarEvent | null> {
   const response = await notionPost(`/databases/${env.NOTION_DB_CALENDAR}/query`, {
-    filter: { property: 'Date', date: { equals: date } },
+    filter: { property: '時間', date: { equals: date } },
   }) as any;
   if (response.results.length === 0) return null;
   return pageToEvent(response.results[0] as PageObjectResponse);
@@ -34,12 +32,12 @@ export async function findByDate(date: string): Promise<CalendarEvent | null> {
 
 export async function updateAbsentees(pageId: string, absenteePageIds: string[]): Promise<void> {
   await notionPatch(`/pages/${pageId}`, {
-    properties: { Absentees: setRelation(absenteePageIds) },
+    properties: { 請假人: setRelation(absenteePageIds) },
   });
 }
 
 export async function updateGuests(pageId: string, guests: string[]): Promise<void> {
   await notionPatch(`/pages/${pageId}`, {
-    properties: { Guests: setMultiSelect(guests) },
+    properties: { 零打: setMultiSelect(guests) },
   });
 }

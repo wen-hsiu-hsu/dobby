@@ -9,6 +9,7 @@ function pageToUser(page: any): NotionUser {
     pageId: page.id,
     userId: p['user_id']?.title?.[0]?.plain_text ?? '',
     customName: p['Custom Name']?.rich_text?.[0]?.plain_text ?? '',
+    registeredPersonPageId: p['Registered name']?.relation?.[0]?.id ?? '',
     isAdmin: p['is_admin']?.checkbox ?? false,
     messageCount: p['message_counts']?.number ?? 0,
     groups: p['groups']?.multi_select?.map((s: any) => s.name) ?? [],

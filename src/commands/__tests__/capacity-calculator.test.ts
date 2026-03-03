@@ -7,12 +7,13 @@ const baseEvent: CalendarEventData = {
   date: '2024-01-06',
   absentees: [],
   guests: [],
-  capacity: 14,
   isPaused: false,
 };
 
+// courts=2, members=3 → total capacity = 2×7 = 14, available = 14 - 3 + 0 - guests
 const season: SeasonData = {
   members: ['p1', 'p2', 'p3'],
+  courts: 2,
 };
 
 describe('calculateAddCapacity', () => {

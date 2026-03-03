@@ -12,23 +12,24 @@ export async function resolveTarget(
   actorUserId: string
 ): Promise<ResolvedTarget | null> {
   if (target.isSelf) {
-    // Look up actor's registered person
+    // Must be a known bot user; People DB membership is optional (non-season members can still register as guests)
     const user = await usersRepo.findByUserId(actorUserId);
     if (!user) return null;
-    // user has a registeredName relation - but we store it differently
-    // For now return the user's custom name / display name
-    const person = await peopleRepo.findByName(user.customName);
-    if (!person) return null;
-    return { personPageId: person.pageId, displayName: person.name };
+    const person = user.registeredPersonPageId
+      ? (await peopleRepo.findByPageIds([user.registeredPersonPageId]))[0] ?? null
+      : null;
+    return { personPageId: person?.pageId ?? '', displayName: person?.name ?? user.customName };
   }
 
   if (target.targetUserId) {
     const user = await usersRepo.findByUserId(target.targetUserId);
     if (user) {
-      const person = await peopleRepo.findByName(user.customName);
-      if (person) return { personPageId: person.pageId, displayName: person.name };
+      const person = user.registeredPersonPageId
+        ? (await peopleRepo.findByPageIds([user.registeredPersonPageId]))[0] ?? null
+        : null;
+      return { personPageId: person?.pageId ?? '', displayName: person?.name ?? user.customName };
     }
-    // Try by name if userId lookup failed
+    // Fall through to name lookup if user not in Users DB
   }
 
   if (target.targetName) {

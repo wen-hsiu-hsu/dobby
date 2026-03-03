@@ -1,6 +1,6 @@
 import { env } from '../../config/env.js';
 import { notionPost } from './notion-fetch.js';
-import { getTitle, getRelation } from './property-helpers.js';
+import { getTitle, getRelation, getNumber } from './property-helpers.js';
 import type { SeasonRecord } from '../../types/notion-models.js';
 import type { PageObjectResponse } from '@notionhq/client/build/src/api-endpoints.js';
 
@@ -10,6 +10,8 @@ function pageToRecord(page: PageObjectResponse): SeasonRecord {
     pageId: page.id,
     name: getTitle(p, '季租時段'),
     members: getRelation(p, '報名人'),
+    courts: getNumber(p, '場地數') ?? 2,
+    guestFee: getNumber(p, '零打費用') ?? 170,
   };
 }
 

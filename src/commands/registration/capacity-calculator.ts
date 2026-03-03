@@ -1,14 +1,14 @@
 export interface CalendarEventData {
   pageId: string;
   date: string;
-  absentees: string[];   // relation pageIds of People
-  guests: string[];      // multi_select names (zero-da / 零打)
-  capacity: number | null;
-  isPaused: boolean;
+  absentees: string[];   // relation pageIds of People (請假人)
+  guests: string[];      // multi_select names (零打)
+  isPaused: boolean;     // 類型 === '打球暫停'
 }
 
 export interface SeasonData {
-  members: string[];     // relation pageIds of People
+  members: string[];     // relation pageIds of People (報名人)
+  courts: number;        // 場地數
 }
 
 export interface CapacityResult {
@@ -23,22 +23,23 @@ export function calculateAddCapacity(
   seasonData: SeasonData,
   targetName: string,
   delta: number,
-  isSelfSeasonMember: boolean
+  isSelfSeasonMember: boolean,
+  isAdmin = false
 ): CapacityResult {
   if (event.isPaused) {
     return { canAdd: false, error: '本次活動已暫停，無法報名' };
   }
 
+  // 可報名數 = 場地數 × 7 - 季打人數 + 請假人數 - 已報名零打數量
   const COURTS_DENSITY = 7;
-  const totalCapacity =
-    event.capacity !== null
-      ? event.capacity
-      : (seasonData.members.length - event.absentees.length) + COURTS_DENSITY * 2; // rough estimate
-
   const currentGuests = event.guests.length;
-  const availableSlots = totalCapacity - (seasonData.members.length - event.absentees.length) - currentGuests;
+  const availableSlots =
+    seasonData.courts * COURTS_DENSITY -
+    seasonData.members.length +
+    event.absentees.length -
+    currentGuests;
 
-  if (delta > availableSlots) {
+  if (!isAdmin && delta > availableSlots) {
     return {
       canAdd: false,
       error: `名額不足，目前剩餘 ${availableSlots} 個名額`,

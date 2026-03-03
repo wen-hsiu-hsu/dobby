@@ -46,7 +46,7 @@ export async function routeCommand(
       break;
     case CommandType.REGISTRATION: {
       const delta = parseInt(command.delta ?? '+1', 10);
-      await handleRegistration(event as any, delta, botId);
+      await handleRegistration(event as any, delta, botId, isAdmin);
       break;
     }
     case CommandType.LEAVE:

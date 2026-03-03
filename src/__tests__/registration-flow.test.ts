@@ -60,9 +60,9 @@ describe('Registration flow', () => {
     const { calculateAddCapacity } = await import('../commands/registration/capacity-calculator.js');
     const event = {
       pageId: 'evt1', date: '2024-01-06',
-      absentees: [], guests: [], capacity: 14, isPaused: false,
+      absentees: [], guests: [], isPaused: false,
     };
-    const season = { members: ['p1', 'p2', 'p3'] };
+    const season = { members: ['p1', 'p2', 'p3'], courts: 2 };
 
     const result = calculateAddCapacity(event, season, 'Alice', 1, false);
     expect(result.canAdd).toBe(true);
