@@ -1,0 +1,14 @@
+{
+  "results": [
+    {
+      "type": "paragraph",
+      "paragraph": {
+        "rich_text": [
+          { "plain_text": "歡迎加入！{USER} 有任何問題請聯絡 {MANAGER}。", "type": "text" }
+        ]
+      }
+    }
+  ],
+  "has_more": false,
+  "next_cursor": null
+}

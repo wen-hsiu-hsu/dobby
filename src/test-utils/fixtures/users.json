@@ -1,0 +1,41 @@
+{
+  "results": [
+    {
+      "id": "user-page-1",
+      "object": "page",
+      "properties": {
+        "user_id": {
+          "type": "title",
+          "title": [{ "plain_text": "user-alice", "type": "text" }]
+        },
+        "Custom Name": {
+          "type": "rich_text",
+          "rich_text": []
+        },
+        "Registered name": {
+          "type": "relation",
+          "relation": [{ "id": "person-1" }],
+          "has_more": false
+        },
+        "is_admin": {
+          "type": "checkbox",
+          "checkbox": false
+        },
+        "message_counts": {
+          "type": "number",
+          "number": 0
+        },
+        "groups": {
+          "type": "multi_select",
+          "multi_select": []
+        },
+        "multi-chat": {
+          "type": "multi_select",
+          "multi_select": []
+        }
+      }
+    }
+  ],
+  "has_more": false,
+  "next_cursor": null
+}

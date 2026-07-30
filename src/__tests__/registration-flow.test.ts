@@ -1,142 +1,108 @@
-import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { createTestBot } from '../test-utils/index.js';
 
-beforeAll(() => {
-  process.env['NODE_ENV'] = 'test';
-  process.env['LINE_CHANNEL_SECRET_DOBBY'] = 'test-secret-dobby';
-  process.env['LINE_CHANNEL_ACCESS_TOKEN_DOBBY'] = 'test-token-dobby';
-  process.env['LINE_CHANNEL_SECRET_BATTING'] = 'test-secret-batting';
-  process.env['LINE_CHANNEL_ACCESS_TOKEN_BATTING'] = 'test-token-batting';
-  process.env['NOTION_API_KEY'] = 'test-notion-key';
-  process.env['NOTION_DB_USERS'] = 'test-db-users';
-  process.env['NOTION_DB_CALENDAR'] = 'test-db-calendar';
-  process.env['NOTION_DB_PEOPLE'] = 'test-db-people';
-  process.env['NOTION_DB_SEASON'] = 'test-db-season';
-  process.env['NOTION_DB_ANNOUNCEMENT'] = 'test-db-announcement';
-});
-
-vi.mock('../config/line.js', () => ({
-  dobbyClient: { replyMessage: vi.fn().mockResolvedValue({}) },
-  battingClient: { replyMessage: vi.fn().mockResolvedValue({}) },
-  getClient: vi.fn().mockReturnValue({ replyMessage: vi.fn().mockResolvedValue({}) }),
-}));
-
-function mockFetchResponse(data: unknown) {
-  return Promise.resolve({
-    ok: true,
-    json: () => Promise.resolve(data),
-  } as Response);
-}
+vi.mock('../services/notion/notion-fetch.js');
+vi.mock('../config/line.js');
+vi.mock('../services/mutex.js');
 
 describe('Registration flow', () => {
-  let fetchMock: ReturnType<typeof vi.fn>;
-
-  beforeEach(() => {
-    fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-  });
-
   afterEach(() => {
-    vi.unstubAllGlobals();
+    vi.resetAllMocks();
   });
 
-  it('handleRegistration replies with success message', async () => {
-    const { getClient } = await import('../config/line.js');
-    const mockReply = vi.fn().mockResolvedValue({});
-    (getClient as any).mockReturnValue({ replyMessage: mockReply });
+  it('@Dobby +1 → 報名成功（season member）', async () => {
+    // Default fixture: Alice (person-1) is a season member, calendar has 0 guests
+    const bot = createTestBot();
+    const messages = await bot.run('@Dobby +1', { userId: 'user-alice' });
 
-    const userPage = {
-      id: 'user-page-1',
-      properties: {
-        user_id: { type: 'title', title: [{ plain_text: 'user1' }] },
-        'Custom Name': { type: 'rich_text', rich_text: [{ plain_text: 'Alice' }] },
-        is_admin: { type: 'checkbox', checkbox: false },
-        message_counts: { type: 'number', number: 0 },
-        groups: { type: 'multi_select', multi_select: [] },
-        'multi-chat': { type: 'multi_select', multi_select: [] },
+    expect(messages.length).toBeGreaterThan(0);
+    const msg = messages[0] as any;
+    expect(msg.text).toContain('報名成功');
+    // Notion PATCH should have been called once to update guests
+    expect(bot.notionPatchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('@Dobby +1 → 找不到活動（calendar empty）', async () => {
+    const bot = createTestBot({ calendar: { results: [] } });
+    const messages = await bot.run('@Dobby +1', { userId: 'user-alice' });
+
+    const msg = messages[0] as any;
+    expect(msg.text).toContain('找不到');
+    expect(bot.notionPatchSpy).not.toHaveBeenCalled();
+  });
+
+  it('@Dobby +1 → 找不到季租資料（season empty）', async () => {
+    const bot = createTestBot({ season: { results: [] } });
+    const messages = await bot.run('@Dobby +1', { userId: 'user-alice' });
+
+    const msg = messages[0] as any;
+    expect(msg.text).toContain('季租');
+    expect(bot.notionPatchSpy).not.toHaveBeenCalled();
+  });
+
+  it('@Dobby +1 → 找不到帳號（user not registered）', async () => {
+    const bot = createTestBot({ users: { results: [] } });
+    const messages = await bot.run('@Dobby +1', { userId: 'unknown-user' });
+
+    const msg = messages[0] as any;
+    expect(msg.text).toContain('找不到');
+    expect(bot.notionPatchSpy).not.toHaveBeenCalled();
+  });
+
+  it('@Dobby 假 → 請假成功（season member）', async () => {
+    // Alice (person-1) is in season members, not currently absent
+    const bot = createTestBot();
+    const messages = await bot.run('@Dobby 假', { userId: 'user-alice' });
+
+    const msg = messages[0] as any;
+    expect(msg.text).toContain('請假成功');
+    // updateAbsentees should have been called
+    expect(bot.notionPatchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('@Dobby 假 → 拒絕非 season member', async () => {
+    // Bob (person-2) is in season members in default fixture too —
+    // use a user NOT mapped to any season person
+    const bot = createTestBot({
+      users: {
+        results: [
+          {
+            id: 'user-page-guest',
+            object: 'page',
+            properties: {
+              user_id: { type: 'title', title: [{ plain_text: 'user-guest' }] },
+              'Custom Name': { type: 'rich_text', rich_text: [{ plain_text: 'Guest' }] },
+              'Registered name': { type: 'relation', relation: [], has_more: false },
+              is_admin: { type: 'checkbox', checkbox: false },
+              message_counts: { type: 'number', number: 0 },
+              groups: { type: 'multi_select', multi_select: [] },
+              'multi-chat': { type: 'multi_select', multi_select: [] },
+            },
+          },
+        ],
       },
-    };
-    fetchMock.mockImplementation(() => mockFetchResponse({ results: [userPage] }));
+    });
 
-    const { calculateAddCapacity } = await import('../commands/registration/capacity-calculator.js');
-    const event = {
-      pageId: 'evt1', date: '2024-01-06',
-      absentees: [], guests: [], isPaused: false,
-    };
-    const season = { members: ['p1', 'p2', 'p3'], courts: 2 };
+    const messages = await bot.run('@Dobby 假', { userId: 'user-guest' });
+
+    const msg = messages[0] as any;
+    expect(msg.text).toContain('季租');
+    expect(bot.notionPatchSpy).not.toHaveBeenCalled();
+  });
+});
+
+// ── capacity-calculator unit tests (no bot needed) ──────────────────────────
+
+describe('calculateAddCapacity', () => {
+  it('adds guest when capacity available', async () => {
+    const { calculateAddCapacity } = await import(
+      '../commands/registration/capacity-calculator.js'
+    );
+    const event = { pageId: 'evt1', date: '2026-05-09', absentees: [], guests: [], isPaused: false };
+    const season = { members: ['p1', 'p2', 'p3'], courts: 2, pageId: 's1', name: '2026-Q2', guestFee: 200 };
 
     const result = calculateAddCapacity(event, season, 'Alice', 1, false);
     expect(result.canAdd).toBe(true);
     expect(result.newGuests).toContain('Alice');
-  });
-
-  it('handleLeave rejects non-season member', async () => {
-    const { handleLeave } = await import('../commands/registration/leave-handler.js');
-    const { getClient } = await import('../config/line.js');
-
-    const mockReply = vi.fn().mockResolvedValue({});
-    (getClient as any).mockReturnValue({ replyMessage: mockReply });
-
-    const userPage = {
-      id: 'user-page-1',
-      properties: {
-        user_id: { type: 'title', title: [{ plain_text: 'user1' }] },
-        'Custom Name': { type: 'rich_text', rich_text: [{ plain_text: 'Bob' }] },
-        is_admin: { type: 'checkbox', checkbox: false },
-        message_counts: { type: 'number', number: 0 },
-        groups: { type: 'multi_select', multi_select: [] },
-        'multi-chat': { type: 'multi_select', multi_select: [] },
-      },
-    };
-
-    const seasonPage = {
-      id: 'season-page-1',
-      properties: {
-        Name: { type: 'title', title: [{ plain_text: 'Q1 2024' }] },
-        Members: { type: 'relation', relation: [], has_more: false },
-        'Start Date': { type: 'date', date: null },
-        'End Date': { type: 'date', date: null },
-      },
-    };
-
-    const personPage = {
-      id: 'person1',
-      properties: {
-        Name: { type: 'title', title: [{ plain_text: 'Bob' }] },
-        'Has Paid': { type: 'checkbox', checkbox: false },
-        'Line User ID': { type: 'rich_text', rich_text: [] },
-      },
-    };
-
-    fetchMock.mockImplementation((url: string) => {
-      if (url.includes('/databases/test-db-users/query')) {
-        return mockFetchResponse({ results: [userPage] });
-      }
-      if (url.includes('/databases/test-db-people/query')) {
-        return mockFetchResponse({ results: [personPage] });
-      }
-      if (url.includes('/databases/test-db-season/query')) {
-        return mockFetchResponse({ results: [seasonPage] });
-      }
-      if (url.includes('/pages/')) {
-        return mockFetchResponse(personPage);
-      }
-      return mockFetchResponse({ results: [] });
-    });
-
-    const event = {
-      replyToken: 'token-leave',
-      message: { text: '@Dobby 假' },
-      source: { userId: 'user1' },
-    };
-
-    await handleLeave(event as any, false, 'dobby');
-
-    expect(mockReply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        messages: expect.arrayContaining([
-          expect.objectContaining({ text: expect.stringContaining('季租') }),
-        ]),
-      })
-    );
   });
 });

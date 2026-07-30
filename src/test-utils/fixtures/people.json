@@ -1,0 +1,42 @@
+{
+  "results": [
+    {
+      "id": "person-1",
+      "object": "page",
+      "properties": {
+        "Name": {
+          "type": "title",
+          "title": [{ "plain_text": "Alice", "type": "text" }]
+        },
+        "結清": {
+          "type": "formula",
+          "formula": { "type": "boolean", "boolean": true }
+        },
+        "Line User ID": {
+          "type": "rich_text",
+          "rich_text": [{ "plain_text": "user-alice", "type": "text" }]
+        }
+      }
+    },
+    {
+      "id": "person-2",
+      "object": "page",
+      "properties": {
+        "Name": {
+          "type": "title",
+          "title": [{ "plain_text": "Bob", "type": "text" }]
+        },
+        "結清": {
+          "type": "formula",
+          "formula": { "type": "boolean", "boolean": false }
+        },
+        "Line User ID": {
+          "type": "rich_text",
+          "rich_text": [{ "plain_text": "user-bob", "type": "text" }]
+        }
+      }
+    }
+  ],
+  "has_more": false,
+  "next_cursor": null
+}

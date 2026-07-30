@@ -1,0 +1,29 @@
+{
+  "results": [
+    {
+      "id": "season-page-1",
+      "object": "page",
+      "properties": {
+        "季租時段": {
+          "type": "title",
+          "title": [{ "plain_text": "2026-Q2", "type": "text" }]
+        },
+        "報名人": {
+          "type": "relation",
+          "relation": [{ "id": "person-1" }, { "id": "person-2" }],
+          "has_more": false
+        },
+        "場地數": {
+          "type": "number",
+          "number": 3
+        },
+        "零打費用": {
+          "type": "number",
+          "number": 200
+        }
+      }
+    }
+  ],
+  "has_more": false,
+  "next_cursor": null
+}

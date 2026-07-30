@@ -8,7 +8,8 @@
     "start": "node dist/index.cjs",
     "dev": "tsx watch src/index.ts",
     "test": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "record-fixtures": "tsx scripts/record-fixtures.ts"
   },
   "keywords": [],
   "author": "",

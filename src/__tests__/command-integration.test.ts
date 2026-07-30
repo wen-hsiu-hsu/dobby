@@ -1,117 +1,81 @@
-import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { createTestBot } from '../test-utils/index.js';
 
-beforeAll(() => {
-  process.env['NODE_ENV'] = 'test';
-  process.env['LINE_CHANNEL_SECRET_DOBBY'] = 'test-secret-dobby';
-  process.env['LINE_CHANNEL_ACCESS_TOKEN_DOBBY'] = 'test-token-dobby';
-  process.env['LINE_CHANNEL_SECRET_BATTING'] = 'test-secret-batting';
-  process.env['LINE_CHANNEL_ACCESS_TOKEN_BATTING'] = 'test-token-batting';
-  process.env['NOTION_API_KEY'] = 'test-notion-key';
-  process.env['NOTION_DB_USERS'] = 'test-db-users';
-  process.env['NOTION_DB_CALENDAR'] = 'test-db-calendar';
-  process.env['NOTION_DB_PEOPLE'] = 'test-db-people';
-  process.env['NOTION_DB_SEASON'] = 'test-db-season';
-  process.env['NOTION_DB_ANNOUNCEMENT'] = 'test-db-announcement';
-  process.env['PORT'] = '3000';
-});
-
-// Mock LINE clients
-vi.mock('../config/line.js', () => ({
-  dobbyClient: {
-    replyMessage: vi.fn().mockResolvedValue({}),
-    pushMessage: vi.fn().mockResolvedValue({}),
-    getGroupMemberProfile: vi.fn(),
-    getProfile: vi.fn(),
-  },
-  battingClient: {
-    replyMessage: vi.fn().mockResolvedValue({}),
-    pushMessage: vi.fn().mockResolvedValue({}),
-    getProfile: vi.fn(),
-  },
-  getClient: vi.fn().mockReturnValue({
-    replyMessage: vi.fn().mockResolvedValue({}),
-    pushMessage: vi.fn().mockResolvedValue({}),
-  }),
-}));
-
-function mockFetchResponse(data: unknown) {
-  return Promise.resolve({
-    ok: true,
-    json: () => Promise.resolve(data),
-  } as Response);
-}
+vi.mock('../services/notion/notion-fetch.js');
+vi.mock('../config/line.js');
+vi.mock('../services/mutex.js');
 
 describe('Command routing integration', () => {
-  let fetchMock: ReturnType<typeof vi.fn>;
-
-  beforeEach(() => {
-    fetchMock = vi.fn().mockImplementation(() => mockFetchResponse({ results: [] }));
-    vi.stubGlobal('fetch', fetchMock);
-  });
-
   afterEach(() => {
-    vi.unstubAllGlobals();
+    vi.resetAllMocks();
   });
 
-  it('routes @Dobby command to command-list handler', async () => {
-    const { routeCommand } = await import('../commands/command-router.js');
-    const { parseCommand } = await import('../commands/command-parser.js');
-    const { getClient } = await import('../config/line.js');
+  it('@Dobby command → replies with command list text', async () => {
+    const bot = createTestBot();
+    const messages = await bot.run('@Dobby command', { userId: 'user-alice' });
 
-    const mockClient = { replyMessage: vi.fn().mockResolvedValue({}) };
-    (getClient as any).mockReturnValue(mockClient);
-
-    const command = parseCommand('@Dobby command')!;
-    const event = {
-      replyToken: 'token123',
-      message: { text: '@Dobby command', type: 'text' },
-      source: { userId: 'user1', type: 'group', groupId: 'grp1' },
-    };
-
-    await routeCommand(command, event as any, 'dobby', false);
-
-    expect(mockClient.replyMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        replyToken: 'token123',
-        messages: expect.arrayContaining([
-          expect.objectContaining({ type: 'text' }),
-        ]),
-      })
-    );
+    expect(messages.length).toBeGreaterThan(0);
+    expect(messages[0]).toMatchObject({ type: 'text' });
   });
 
-  it('routes @Dobby (alone) to introduce handler', async () => {
-    const { getClient } = await import('../config/line.js');
+  it('@Dobby → replies with introduce text from announcement fixture', async () => {
+    const bot = createTestBot();
+    const messages = await bot.run('@Dobby', { userId: 'user-alice' });
 
-    fetchMock.mockImplementation((url: string) => {
-      if (url.includes('/databases/test-db-announcement/query')) {
-        return mockFetchResponse({
-          results: [{ id: 'page1', properties: { Name: { type: 'title', title: [{ plain_text: 'INTRODUCE' }] } } }],
-        });
-      }
-      if (url.includes('/blocks/page1/children')) {
-        return mockFetchResponse({
-          results: [{ type: 'paragraph', paragraph: { rich_text: [{ plain_text: 'Hello!' }] } }],
-        });
-      }
-      return mockFetchResponse({ results: [] });
+    expect(messages.length).toBeGreaterThan(0);
+    // The introduce handler uses textV2 with substitution
+    const msg = messages[0] as any;
+    expect(['text', 'textV2']).toContain(msg.type);
+  });
+
+  it('@Dobby → replies with error when no INTRODUCE announcement', async () => {
+    const bot = createTestBot({ announcement: { results: [] } });
+    const messages = await bot.run('@Dobby', { userId: 'user-alice' });
+
+    expect(messages.length).toBeGreaterThan(0);
+    const msg = messages[0] as any;
+    expect(msg.text).toContain('找不到');
+  });
+
+  it('non-command text → no reply (user not in auto-reply triggers)', async () => {
+    const bot = createTestBot();
+    const messages = await bot.run('隨便說說話xyz123', { userId: 'user-alice' });
+
+    expect(messages).toHaveLength(0);
+  });
+
+  it('auto-reply trigger → replies with matched response', async () => {
+    const bot = createTestBot();
+    // "請假" is a known auto-reply trigger in the JSON
+    const messages = await bot.run('我想請假', { userId: 'user-alice' });
+
+    expect(messages.length).toBeGreaterThan(0);
+    const msg = messages[0] as any;
+    expect(msg.text).toBe('喔不');
+  });
+
+  it('admin user → skips auto-reply', async () => {
+    const bot = createTestBot({
+      users: {
+        results: [
+          {
+            id: 'admin-page',
+            object: 'page',
+            properties: {
+              user_id: { type: 'title', title: [{ plain_text: 'admin-user' }] },
+              'Custom Name': { type: 'rich_text', rich_text: [] },
+              'Registered name': { type: 'relation', relation: [], has_more: false },
+              is_admin: { type: 'checkbox', checkbox: true },
+              message_counts: { type: 'number', number: 0 },
+              groups: { type: 'multi_select', multi_select: [] },
+              'multi-chat': { type: 'multi_select', multi_select: [] },
+            },
+          },
+        ],
+      },
     });
 
-    const mockClient = { replyMessage: vi.fn().mockResolvedValue({}) };
-    (getClient as any).mockReturnValue(mockClient);
-
-    const { routeCommand } = await import('../commands/command-router.js');
-    const { parseCommand } = await import('../commands/command-parser.js');
-
-    const command = parseCommand('@Dobby')!;
-    const event = {
-      replyToken: 'token456',
-      message: { text: '@Dobby', type: 'text' },
-      source: { userId: 'user1' },
-    };
-
-    await routeCommand(command, event as any, 'dobby', false);
-
-    expect(mockClient.replyMessage).toHaveBeenCalled();
+    const messages = await bot.run('我想請假', { userId: 'admin-user' });
+    expect(messages).toHaveLength(0);
   });
 });
