@@ -1,5 +1,13 @@
 /**
- * Record fixtures from real Notion API.
+ * Record a live snapshot of the real Notion API into a gitignored directory
+ * for manual comparison against the hand-curated test fixtures.
+ *
+ * This does NOT write into src/test-utils/fixtures — those fixtures use
+ * hand-edited synthetic IDs (person-1, user-alice, ...) that the whole test
+ * suite depends on, and overwriting them with raw API data breaks that
+ * mapping. Diff the snapshot against the tracked fixtures by hand and only
+ * port over structural/property changes, keeping the synthetic IDs intact.
+ *
  * Run: pnpm record-fixtures
  * Requires: local .env with real Notion credentials
  */
@@ -34,7 +42,7 @@ for (const [name, id] of Object.entries(DBS)) {
 }
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
-const FIXTURES_DIR = path.join(__dirname, '../src/test-utils/fixtures');
+const SNAPSHOT_DIR = path.join(__dirname, '../.notion-snapshot');
 
 function headers(): Record<string, string> {
   return {
@@ -70,7 +78,7 @@ async function notionGet(path: string): Promise<unknown> {
 }
 
 function writeFixture(relativePath: string, data: unknown): void {
-  const fullPath = path.join(FIXTURES_DIR, relativePath);
+  const fullPath = path.join(SNAPSHOT_DIR, relativePath);
   fs.mkdirSync(path.dirname(fullPath), { recursive: true });
   fs.writeFileSync(fullPath, JSON.stringify(data, null, 2) + '\n', 'utf-8');
   console.log(`  wrote ${relativePath}`);
@@ -99,14 +107,16 @@ async function main(): Promise<void> {
   // Record blocks for all announcement pages
   console.log('\nRecording announcement blocks...');
   const announcementData = JSON.parse(
-    fs.readFileSync(path.join(FIXTURES_DIR, 'announcement.json'), 'utf-8'),
+    fs.readFileSync(path.join(SNAPSHOT_DIR, 'announcement.json'), 'utf-8'),
   ) as { results: Array<{ id: string }> };
 
   for (const page of announcementData.results) {
     await recordBlocks(page.id);
   }
 
-  console.log('\nDone. Commit the updated fixtures if they changed.');
+  console.log(`\nDone. Snapshot written to ${SNAPSHOT_DIR}.`);
+  console.log('Diff it against src/test-utils/fixtures/ by hand — port over');
+  console.log('structural/property changes only, keep the synthetic IDs.');
 }
 
 main().catch((err) => {

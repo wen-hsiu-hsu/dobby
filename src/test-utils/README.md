@@ -77,14 +77,20 @@ await bot.run('@Dobby +1', {
 
 ### 更新 Fixture（對齊真實 API）
 
+`src/test-utils/fixtures/*.json` 是**手工維護**的合成資料，用了像 `person-1`、
+`user-alice` 這種可讀 ID，整個測試套件都依賴這些 ID 的對應關係。**不要**用真實
+API 資料整批覆蓋這些檔案。
+
 ```bash
 # 需要本地 .env 有真實 Notion 憑證
+# 寫到 gitignored 的 .notion-snapshot/，不會動到 fixtures/
 pnpm record-fixtures
 
-# 查看變更
-git diff src/test-utils/fixtures/
+# 手動比對 schema/欄位有沒有變化
+diff <(cat .notion-snapshot/people.json) <(cat src/test-utils/fixtures/people.json)
 
-# 確認測試仍通過
+# 只手動搬移「結構/欄位」的變動，保留 fixtures 裡的合成 ID
+# 改完後確認測試仍通過
 pnpm test
 ```
 
