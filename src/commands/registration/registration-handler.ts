@@ -1,10 +1,10 @@
-import { withMutex } from '../../services/mutex.js';
+import { withCalendarMutex } from './calendar-mutex.js';
 import { replyMessage } from '../../services/line/reply-service.js';
 import * as calendarRepo from '../../services/notion/calendar-repository.js';
 import * as seasonRepo from '../../services/notion/season-repository.js';
 import * as peopleRepo from '../../services/notion/people-repository.js';
 import { resolveTarget } from './target-resolver.js';
-import { calculateAddCapacity, calculateRemoveCapacity } from './capacity-calculator.js';
+import { calculateAddCapacity, calculateRemoveCapacity, calculateTotalSlots } from './capacity-calculator.js';
 import { parseRegistrationTarget } from './registration-parser.js';
 import { formatDate, getNextSaturday, getCurrentSeasonName } from '../../utils/date-utils.js';
 import { logger } from '../../utils/logger.js';
@@ -52,7 +52,7 @@ export async function handleRegistration(
   const isSelfSeasonMember = activeSeason.members.includes(resolved.personPageId);
 
   try {
-    await withMutex(calEvent.pageId, async () => {
+    await withCalendarMutex(calEvent.pageId, async () => {
       const freshEvent = await calendarRepo.findByDate(nextSaturday);
       if (!freshEvent) throw new Error('Event not found');
 
@@ -97,8 +97,7 @@ async function buildRegistrationReply(
   season: SeasonRecord,
   delta: number,
 ): Promise<string> {
-  const COURTS_DENSITY = 7;
-  const totalSlots = season.courts * COURTS_DENSITY - season.members.length + absenteePageIds.length;
+  const totalSlots = calculateTotalSlots({ absentees: absenteePageIds }, season);
   const remainingSlots = Math.max(0, totalSlots - guests.length);
 
   // Numbered guest list (show all slots including empty ones)

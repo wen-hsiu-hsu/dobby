@@ -18,6 +18,11 @@ export interface CapacityResult {
   removedGuests?: string[];
 }
 
+export function calculateTotalSlots(event: Pick<CalendarEventData, 'absentees'>, seasonData: SeasonData): number {
+  const COURTS_DENSITY = 7;
+  return seasonData.courts * COURTS_DENSITY - seasonData.members.length + event.absentees.length;
+}
+
 export function calculateAddCapacity(
   event: CalendarEventData,
   seasonData: SeasonData,
@@ -30,14 +35,8 @@ export function calculateAddCapacity(
     return { canAdd: false, error: '本次活動已暫停，無法報名' };
   }
 
-  // 可報名數 = 場地數 × 7 - 季打人數 + 請假人數 - 已報名零打數量
-  const COURTS_DENSITY = 7;
-  const currentGuests = event.guests.length;
-  const availableSlots =
-    seasonData.courts * COURTS_DENSITY -
-    seasonData.members.length +
-    event.absentees.length -
-    currentGuests;
+  // 可報名數 = 總名額 - 已報名零打數量
+  const availableSlots = calculateTotalSlots(event, seasonData) - event.guests.length;
 
   if (!isAdmin && delta > availableSlots) {
     return {

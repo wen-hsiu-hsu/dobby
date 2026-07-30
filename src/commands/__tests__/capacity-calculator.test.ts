@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { calculateAddCapacity, calculateRemoveCapacity } from '../registration/capacity-calculator.js';
+import { calculateAddCapacity, calculateRemoveCapacity, calculateTotalSlots } from '../registration/capacity-calculator.js';
 import type { CalendarEventData, SeasonData } from '../registration/capacity-calculator.js';
 
 const baseEvent: CalendarEventData = {
@@ -67,5 +67,13 @@ describe('calculateRemoveCapacity', () => {
     const result = calculateRemoveCapacity(baseEvent, 'Nobody', -1, false);
     expect(result.canAdd).toBe(false);
     expect(result.error).toMatch(/找不到/);
+  });
+});
+
+describe('calculateTotalSlots', () => {
+  it('computes courts × 7 − season members + absentees', () => {
+    // 2 courts × 7 = 14, minus 3 season members, plus 1 absentee = 12
+    const event: CalendarEventData = { ...baseEvent, absentees: ['p4'] };
+    expect(calculateTotalSlots(event, season)).toBe(12);
   });
 });

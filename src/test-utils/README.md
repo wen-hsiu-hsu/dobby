@@ -60,6 +60,13 @@ await bot.run('@Dobby +1', {
 });
 ```
 
+### 什麼時候不用 createTestBot
+
+`routePost`／`routeGet`（`create-test-bot.ts`）只依 DB ID 路由到對應 fixture，**不解析 Notion query 的 filter body**——所以像「`seasonRepo.findByName(name)` vs `seasonRepo.findAll()[0]`」這種差異，在 `createTestBot` 底下永遠回傳一樣的結果，測不出行為差異。
+
+遇到這種要斷言「呼叫了哪個 repository 函式／帶什麼參數」的情境，改用手動 `vi.mock()` 直接 mock 該 repository 模組，斷言呼叫參數即可（見
+`src/commands/registration/__tests__/leave-handler.test.ts`）。這不是隨意繞過慣例——只有在 `createTestBot` 的 fixture routing 結構性測不出來時才這樣做；其他情境仍優先用 `createTestBot`。
+
 ---
 
 ## Fixtures
