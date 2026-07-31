@@ -1,19 +1,27 @@
 import { env } from '../../config/env.js';
 import { notionPost, notionPatch } from './notion-fetch.js';
+import {
+  getTitle,
+  getRichText,
+  getRelation,
+  getCheckbox,
+  getNumber,
+  getMultiSelect,
+} from './property-helpers.js';
 import type { NotionUser } from '../../types/notion-models.js';
+import type { PageObjectResponse } from '@notionhq/client/build/src/api-endpoints.js';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function pageToUser(page: any): NotionUser {
+function pageToUser(page: PageObjectResponse): NotionUser {
   const p = page.properties;
   return {
     pageId: page.id,
-    userId: p['user_id']?.title?.[0]?.plain_text ?? '',
-    customName: p['Custom Name']?.rich_text?.[0]?.plain_text ?? '',
-    registeredPersonPageId: p['Registered name']?.relation?.[0]?.id ?? '',
-    isAdmin: p['is_admin']?.checkbox ?? false,
-    messageCount: p['message_counts']?.number ?? 0,
-    groups: p['groups']?.multi_select?.map((s: any) => s.name) ?? [],
-    multiChats: p['multi-chat']?.multi_select?.map((s: any) => s.name) ?? [],
+    userId: getTitle(p, 'user_id'),
+    customName: getRichText(p, 'Custom Name'),
+    registeredPersonPageId: getRelation(p, 'Registered name')[0] ?? '',
+    isAdmin: getCheckbox(p, 'is_admin'),
+    messageCount: getNumber(p, 'message_counts') ?? 0,
+    groups: getMultiSelect(p, 'groups'),
+    multiChats: getMultiSelect(p, 'multi-chat'),
   };
 }
 
@@ -22,7 +30,7 @@ export async function findByUserId(userId: string): Promise<NotionUser | null> {
     filter: { property: 'user_id', title: { equals: userId } },
   }) as any;
   if (response.results.length === 0) return null;
-  return pageToUser(response.results[0]);
+  return pageToUser(response.results[0] as PageObjectResponse);
 }
 
 export async function findAdmin(): Promise<NotionUser | null> {
@@ -30,7 +38,7 @@ export async function findAdmin(): Promise<NotionUser | null> {
     filter: { property: 'is_admin', checkbox: { equals: true } },
   }) as any;
   if (response.results.length === 0) return null;
-  return pageToUser(response.results[0]);
+  return pageToUser(response.results[0] as PageObjectResponse);
 }
 
 export async function findByCustomName(name: string): Promise<NotionUser | null> {
@@ -38,7 +46,7 @@ export async function findByCustomName(name: string): Promise<NotionUser | null>
     filter: { property: 'Custom Name', rich_text: { equals: name } },
   }) as any;
   if (response.results.length === 0) return null;
-  return pageToUser(response.results[0]);
+  return pageToUser(response.results[0] as PageObjectResponse);
 }
 
 export async function create(userId: string, customName: string): Promise<NotionUser> {
@@ -50,7 +58,7 @@ export async function create(userId: string, customName: string): Promise<Notion
       message_counts: { number: 0 },
     },
   });
-  return pageToUser(page);
+  return pageToUser(page as PageObjectResponse);
 }
 
 export async function update(

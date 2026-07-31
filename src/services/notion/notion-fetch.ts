@@ -35,40 +35,28 @@ async function assertOk(res: Response, method: string, path: string): Promise<vo
   }
 }
 
-export async function notionGet(path: string): Promise<unknown> {
-  logger.debug({ method: 'GET', path, db: getDbName(path) }, 'Notion API request');
+async function request(method: string, path: string, body?: unknown): Promise<unknown> {
+  const db = getDbName(path);
+  logger.debug({ method, path, db, ...(body !== undefined && { body }) }, 'Notion API request');
   const res = await fetch(`${BASE_URL}${path}`, {
-    method: 'GET',
+    method,
     headers: notionHeaders(),
+    ...(body !== undefined && { body: JSON.stringify(body) }),
   });
-  await assertOk(res, 'GET', path);
+  await assertOk(res, method, path);
   const data = await res.json();
-  logger.debug({ method: 'GET', path, db: getDbName(path), result: data }, 'Notion API response');
+  logger.debug({ method, path, db, result: data }, 'Notion API response');
   return data;
 }
 
-export async function notionPost(path: string, body: unknown): Promise<unknown> {
-  logger.debug({ method: 'POST', path, db: getDbName(path), body }, 'Notion API request');
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method: 'POST',
-    headers: notionHeaders(),
-    body: JSON.stringify(body),
-  });
-  await assertOk(res, 'POST', path);
-  const data = await res.json();
-  logger.debug({ method: 'POST', path, db: getDbName(path), result: data }, 'Notion API response');
-  return data;
+export function notionGet(path: string): Promise<unknown> {
+  return request('GET', path);
 }
 
-export async function notionPatch(path: string, body: unknown): Promise<unknown> {
-  logger.debug({ method: 'PATCH', path, db: getDbName(path), body }, 'Notion API request');
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method: 'PATCH',
-    headers: notionHeaders(),
-    body: JSON.stringify(body),
-  });
-  await assertOk(res, 'PATCH', path);
-  const data = await res.json();
-  logger.debug({ method: 'PATCH', path, db: getDbName(path), result: data }, 'Notion API response');
-  return data;
+export function notionPost(path: string, body: unknown): Promise<unknown> {
+  return request('POST', path, body);
+}
+
+export function notionPatch(path: string, body: unknown): Promise<unknown> {
+  return request('PATCH', path, body);
 }
