@@ -1,4 +1,4 @@
-import { withCalendarMutex } from './calendar-mutex.js';
+import { withMutex } from '../../services/mutex.js';
 import { replyMessage } from '../../services/line/reply-service.js';
 import * as calendarRepo from '../../services/notion/calendar-repository.js';
 import * as seasonRepo from '../../services/notion/season-repository.js';
@@ -53,7 +53,7 @@ export async function handleRegistration(
   const isSelfSeasonMember = activeSeason.members.includes(resolved.personPageId);
 
   try {
-    await withCalendarMutex(calEvent.pageId, async () => {
+    await withMutex(calEvent.pageId, async () => {
       const occupancy = await getEventOccupancy(nextSaturday);
       if (!occupancy) throw new Error('Event not found');
       const { event: freshEvent, season: freshSeason } = occupancy;

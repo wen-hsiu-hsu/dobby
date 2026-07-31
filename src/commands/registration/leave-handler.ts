@@ -4,7 +4,7 @@ import * as seasonRepo from '../../services/notion/season-repository.js';
 import { resolveTarget } from './target-resolver.js';
 import { parseRegistrationTarget } from './registration-parser.js';
 import { formatDate, getNextSaturday, getCurrentSeasonName } from '../../utils/date-utils.js';
-import { withCalendarMutex } from './calendar-mutex.js';
+import { withMutex } from '../../services/mutex.js';
 import { logger } from '../../utils/logger.js';
 
 interface MessageEvent {
@@ -40,7 +40,7 @@ export async function handleLeave(
   }
 
   try {
-    await withCalendarMutex(calEvent.pageId, async () => {
+    await withMutex(calEvent.pageId, async () => {
       const freshEvent = await calendarRepo.findByDate(nextSaturday);
       if (!freshEvent) throw new Error('Event not found');
 
