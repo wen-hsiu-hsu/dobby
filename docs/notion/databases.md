@@ -103,30 +103,14 @@ USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員�
 
 ---
 
-## TEXT_REPLY（自動回覆規則）
+## TEXT_REPLY（自動回覆規則）— Notion 中存在，但程式碼未使用
 
-**環境變數：** 無（透過 `NOTION_DB_ANNOUNCEMENT` 中的特定頁面） —— 實際上有獨立 DB
+Notion 有此資料庫（schema 見 `schemas/text-reply.json`），但**目前自動回覆不從 Notion 讀取**。實際來源是靜態 JSON 檔 `src/data/auto-reply.json`（由 `scripts/convert-auto-reply.mjs` 從 CSV 轉換）。若要改回 Notion 驅動，需新建 repository 並接上 `src/services/auto-reply.ts`。
 
-> **注意：** 若環境變數中有 `NOTION_DB_TEXT_REPLY`，則從獨立資料庫讀取。否則從公告資料庫讀取。請確認實際設定。
-
-**Repository：** `src/services/notion/text-reply-repository.ts`（含 5 分鐘 TTL cache）
-
-| 欄位 | 用途 |
-|------|------|
-| `message` | 觸發關鍵字 |
-| `reply` | 回覆內容 |
-
-**比對邏輯：** 字串 `includes()` 比對，**區分大小寫**。管理員的訊息不觸發自動回覆。
-
-修改規則後最多 5 分鐘生效（cache 過期）。
+**比對邏輯：** 字串 `includes()`，區分大小寫。管理員訊息不觸發。
 
 ---
 
 ## 更新 Schema
 
-若 Notion 資料庫欄位有變動，需要更新 `schemas/` 資料夾的 JSON 檔案：
-
-```bash
-# 需要設定 NOTION_TOKEN 環境變數
-node scripts/update-notion-schema.js
-```
+`schemas/` 下的 JSON 是 Notion 資料庫欄位的快照，供開發參考。repo 內**沒有**自動產生腳本（曾有 `update-notion-schema.js` 的說法但不存在）；欄位變動時需手動比對 Notion 頁面與 JSON 並更新。

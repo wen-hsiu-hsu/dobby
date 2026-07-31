@@ -124,4 +124,4 @@ Dobby 會介紹自己並 @mention 觸發者和管理員。
 
 管理員的訊息**不會**觸發自動回覆。
 
-自動回覆規則儲存在 Notion 的 `TEXT_REPLY` 資料庫，以關鍵字 `includes()` 比對（區分大小寫）。修改規則後 5 分鐘內生效（cache TTL）。
+自動回覆規則是靜態 JSON 檔（`src/data/auto-reply.json`，由 `scripts/convert-auto-reply.mjs` 從 CSV 轉換），非 Notion 資料庫。以關鍵字 `includes()` 比對（區分大小寫）。改規則需重新轉換 + 部署，非即時生效。

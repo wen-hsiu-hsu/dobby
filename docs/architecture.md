@@ -3,41 +3,14 @@
 ## 整體架構
 
 ```
-LINE Platform
-    │
-    ▼
-POST /webhook/:botId
-    │
-    ├── Signature Verification（middleware，per-bot channel secret）
-    │
-    ▼
-Event Router
-    │
-    ├── message ──────────────────────────────────────┐
-    │                                                  │
-    │   ┌──────────────────────────────────┐          │
-    │   │         Message Handler          │          │
-    │   │                                  │          │
-    │   │  Is @Dobby? ─── Yes ──▶ Command Parser      │
-    │   │      │                      │               │
-    │   │      No                     ▼               │
-    │   │      │              Command Router          │
-    │   │      │              │                       │
-    │   │      │      ┌───────┴────────┐              │
-    │   │      │      │  各 Command    │              │
-    │   │      │      │  Handler       │              │
-    │   │      │      └───────┬────────┘              │
-    │   │      │              │                       │
-    │   │      ▼              ▼                       │
-    │   │  Auto-Reply ────▶ LINE Reply API            │
-    │   └──────────────────────────────────┘          │
-    │                                                  │
-    ├── join ─────────────────────────────────────────┤
-    │   └── Welcome Message Handler                   │
-    │                                                  │
-    └── memberJoined ─────────────────────────────────┘
-        └── Member Joined Handler（@mention 替換）
+LINE → POST /webhook/:botId → Signature Verification（per-bot secret）→ Event Router
 ```
+
+Event Router 依事件類型分派：
+
+- **message** → Message Handler：是否以 `@Dobby` 開頭？是 → Command Parser → Command Router → 對應 Command Handler；否 → Auto-Reply 比對 → LINE Reply API
+- **join** → Welcome Message Handler
+- **memberJoined** → Member Joined Handler（@mention 替換為新成員）
 
 ## 指令系統
 
@@ -72,9 +45,14 @@ src/services/notion/
 ├── people-repository.ts    ← 人員清單
 ├── calendar-repository.ts  ← 行事曆
 ├── season-repository.ts    ← 季租承租紀錄
-├── announcement-repository.ts ← 所有公告
-└── text-reply-repository.ts   ← 自動回覆（含 5 分鐘 TTL cache）
+└── announcement-repository.ts ← 所有公告
 ```
+
+## 自動回覆
+
+`src/services/auto-reply.ts` 讀取**靜態 JSON 檔**（`src/data/auto-reply.json`），非 Notion 資料庫。規則以 `scripts/convert-auto-reply.mjs` 從 CSV 轉換產生。管理員訊息不觸發自動回覆。
+
+> Notion 中存在一個 `TEXT_REPLY` 資料庫（見 `docs/notion/schemas/text-reply.json`），但目前程式碼未使用它 — 可能是尚未完成的遷移。
 
 ## 關鍵設計決策
 
@@ -107,10 +85,6 @@ Webhook 收到 LINE 事件後，立即回傳 200，再非同步處理事件。
 ### 雙 Bot 支援
 
 路由基於 URL 的 `:botId`（`dobby` 或 `batting`），每個 bot 有自己的 channel secret 和 access token。Profile 查詢時先試 Dobby，失敗再試 batting。
-
-### Auto-Reply TTL Cache
-
-自動回覆規則從 Notion 讀取後 cache 5 分鐘，避免每次訊息都打 Notion API。
 
 ## 目錄結構
 

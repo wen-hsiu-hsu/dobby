@@ -1,0 +1,27 @@
+# Dobby
+
+羽球社 LINE bot（雙 bot：`dobby` / `batting`）。TypeScript + Express，Notion 為主要資料庫。詳細文件見 [`docs/README.md`](docs/README.md) — 不要在這裡重複那邊已有的內容。
+
+## 開發前必讀
+
+依任務內容找對應文件，不要全讀 → [`docs/README.md`](docs/README.md) 的目錄表有「什麼情境該讀」欄位。
+
+另外開工前先看 `TODO.md`（已知問題 / 待確認事項），避免重複踩雷。
+
+## 專案慣例
+
+- **新增指令**：`types/commands.ts` 加枚舉 → `command-parser.ts` 解析 → `commands/` 建 handler → `command-router.ts` 掛路由 → 更新 `docs/commands.md`（5 步驟，見 `docs/development.md`）。
+- **Notion 存取一律走 repository**（`src/services/notion/*-repository.ts`），不要在 handler 裡直接呼叫 Notion SDK。
+- **讀取 → 計算 → 寫回的操作用 `withMutex`**（`src/services/mutex.ts`），key 用 Notion 頁面 ID。報名、請假都遵循此模式。
+- **環境變數只能加在 `src/config/env.ts` 的 zod schema**，缺值要 fail-fast，不要用 `?? fallback` 掩蓋。
+- Notion API 有 rate limit（~3 req/s），批次操作間要加 delay（參考 `schedulers/display-name-update.ts` 的 400ms）。
+
+## 測試
+
+用 `createTestBot`（`src/test-utils/`）一行驅動 bot 並斷言 LINE 回覆內容 + Notion 呼叫。測試檔開頭需 mock `notion-fetch.js`、`config/line.js`、`services/mutex.js`（見 `src/test-utils/README.md`）。不要用 `npm run record-fixtures` 覆蓋 `src/test-utils/fixtures/` 下手寫的合成 fixture。
+
+## 已知的文件/程式碼落差（勿假設文件一定對）
+
+- 自動回覆是**靜態 JSON**（`src/data/auto-reply.json`），不是 Notion 驅動，即使 Notion 上仍有一個未使用的 `TEXT_REPLY` 資料庫。
+
+## 永遠用繁體中文回應
