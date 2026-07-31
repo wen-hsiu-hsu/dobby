@@ -113,6 +113,8 @@ Dobby 會介紹自己並 @mention 觸發者和管理員。
 ### 查看本週打球資訊
 ```
 @Dobby next
+@Dobby next?-=N     ← 查 N 天前的週六（除錯用）
+@Dobby next?c=N     ← what-if 預覽：若場地數為 N，剩餘名額多少（不寫回 Notion，不影響出席人數）
 ```
 管理員可查看下次打球的完整資訊（包含隱藏資訊）。
 

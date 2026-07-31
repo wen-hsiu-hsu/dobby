@@ -1,5 +1,5 @@
 import { CommandType } from '../types/commands.js';
-import type { ParsedCommand } from '../types/commands.js';
+import type { ParsedCommand, NextEventQueryParams } from '../types/commands.js';
 
 // Support full-width ＋／－
 function normalizeFullWidth(text: string): string {
@@ -62,7 +62,15 @@ export function parseCommand(text: string): ParsedCommand | null {
   // Next event (admin): "@Dobby next" with optional query "?-=N&c=N"
   if (body.startsWith('next')) {
     const queryMatch = body.match(/\?(.+)$/);
-    return { type: CommandType.NEXT_EVENT, rawText: text, queryParams: queryMatch?.[1] };
+    let queryParams: NextEventQueryParams | undefined;
+    if (queryMatch) {
+      queryParams = {};
+      const offsetMatch = queryMatch[1].match(/-=(\d+)/);
+      if (offsetMatch) queryParams.dayOffset = -parseInt(offsetMatch[1], 10);
+      const courtMatch = queryMatch[1].match(/c=(\d+)/);
+      if (courtMatch) queryParams.courtOverride = parseInt(courtMatch[1], 10);
+    }
+    return { type: CommandType.NEXT_EVENT, rawText: text, queryParams };
   }
 
   // News / announcement

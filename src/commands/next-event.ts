@@ -2,13 +2,15 @@ import * as calendarRepo from '../services/notion/calendar-repository.js';
 import * as seasonRepo from '../services/notion/season-repository.js';
 import { replyMessage } from '../services/line/reply-service.js';
 import { formatDate, getNextSaturday } from '../utils/date-utils.js';
+import { calculateTotalSlots } from './registration/capacity-calculator.js';
 import { logger } from '../utils/logger.js';
+import type { NextEventQueryParams } from '../types/commands.js';
 
 export async function handleNextEvent(
   replyToken: string,
   botId: string,
   isAdmin: boolean,
-  queryParams?: string
+  queryParams?: NextEventQueryParams
 ): Promise<void> {
   if (!isAdmin) {
     await replyMessage(replyToken, [{ type: 'text', text: '此指令僅限管理員使用' }], botId);
@@ -16,15 +18,8 @@ export async function handleNextEvent(
   }
 
   try {
-    // Parse query params: "-=N" (subtract N days) and "c=N" (court count override)
-    let dayOffset = 0;
-    let courtOverride: number | null = null;
-    if (queryParams) {
-      const offsetMatch = queryParams.match(/-=(\d+)/);
-      if (offsetMatch) dayOffset = -parseInt(offsetMatch[1], 10);
-      const courtMatch = queryParams.match(/c=(\d+)/);
-      if (courtMatch) courtOverride = parseInt(courtMatch[1], 10);
-    }
+    const dayOffset = queryParams?.dayOffset ?? 0;
+    const courtOverride = queryParams?.courtOverride ?? null;
 
     const baseDate = new Date();
     baseDate.setDate(baseDate.getDate() + dayOffset);
@@ -57,8 +52,10 @@ export async function handleNextEvent(
       lines.push(`\n零打名單：\n${calEvent.guests.map((g, i) => `${i + 1}. ${g}`).join('\n')}`);
     }
 
-    // courtOverride is parsed but not used in display currently
-    void courtOverride;
+    if (courtOverride !== null && activeSeason) {
+      const whatIfSlots = calculateTotalSlots(calEvent, { ...activeSeason, courts: courtOverride }) - guestCount;
+      lines.push(`（若 ${courtOverride} 場地：剩餘名額 ${whatIfSlots} 人）`);
+    }
 
     await replyMessage(replyToken, [{ type: 'text', text: lines.join('\n') }], botId);
   } catch (err) {
