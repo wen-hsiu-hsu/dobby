@@ -1,8 +1,6 @@
-import * as calendarRepo from '../services/notion/calendar-repository.js';
-import * as seasonRepo from '../services/notion/season-repository.js';
+import { getEventOccupancy } from '../services/notion/event-occupancy.js';
 import { replyMessage } from '../services/line/reply-service.js';
 import { formatDate, getNextSaturday } from '../utils/date-utils.js';
-import { calculateTotalSlots } from './registration/capacity-calculator.js';
 import { logger } from '../utils/logger.js';
 import type { NextEventQueryParams } from '../types/commands.js';
 
@@ -26,25 +24,21 @@ export async function handleNextEvent(
     const nextSat = getNextSaturday(baseDate);
     const dateStr = formatDate(nextSat);
 
-    const calEvent = await calendarRepo.findByDate(dateStr);
-    const seasons = await seasonRepo.findAll();
-    const activeSeason = seasons[0];
+    const occupancy = await getEventOccupancy(dateStr, courtOverride ?? undefined);
 
-    if (!calEvent) {
+    if (!occupancy) {
       await replyMessage(replyToken, [{ type: 'text', text: `找不到 ${dateStr} 的活動` }], botId);
       return;
     }
 
-    const seasonMemberCount = activeSeason?.members.length ?? 0;
-    const absentCount = calEvent.absentees.length;
+    const { event: calEvent, presentSeasonMembers, totalPeople, remainingSlots } = occupancy;
     const guestCount = calEvent.guests.length;
-    const present = seasonMemberCount - absentCount + guestCount;
 
     const lines = [
       `📅 ${dateStr}`,
-      `季租出席：${seasonMemberCount - absentCount} 人`,
+      `季租出席：${presentSeasonMembers} 人`,
       `零打報名：${guestCount} 人`,
-      `總計：${present} 人`,
+      `總計：${totalPeople} 人`,
       `狀態：${calEvent.isPaused ? '⛔ 暫停' : '✅ 正常'}`,
     ];
 
@@ -52,9 +46,8 @@ export async function handleNextEvent(
       lines.push(`\n零打名單：\n${calEvent.guests.map((g, i) => `${i + 1}. ${g}`).join('\n')}`);
     }
 
-    if (courtOverride !== null && activeSeason) {
-      const whatIfSlots = calculateTotalSlots(calEvent, { ...activeSeason, courts: courtOverride }) - guestCount;
-      lines.push(`（若 ${courtOverride} 場地：剩餘名額 ${whatIfSlots} 人）`);
+    if (courtOverride !== null) {
+      lines.push(`（若 ${courtOverride} 場地：剩餘名額 ${remainingSlots} 人）`);
     }
 
     await replyMessage(replyToken, [{ type: 'text', text: lines.join('\n') }], botId);

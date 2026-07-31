@@ -3,12 +3,13 @@ import { replyMessage } from '../../services/line/reply-service.js';
 import * as calendarRepo from '../../services/notion/calendar-repository.js';
 import * as seasonRepo from '../../services/notion/season-repository.js';
 import * as peopleRepo from '../../services/notion/people-repository.js';
+import { getEventOccupancy } from '../../services/notion/event-occupancy.js';
+import type { EventOccupancy } from '../../services/notion/event-occupancy.js';
 import { resolveTarget } from './target-resolver.js';
-import { calculateAddCapacity, calculateRemoveCapacity, calculateTotalSlots } from './capacity-calculator.js';
+import { calculateAddCapacity, calculateRemoveCapacity } from './capacity-calculator.js';
 import { parseRegistrationTarget } from './registration-parser.js';
 import { formatDate, getNextSaturday, getCurrentSeasonName } from '../../utils/date-utils.js';
 import { logger } from '../../utils/logger.js';
-import type { SeasonRecord } from '../../types/notion-models.js';
 
 interface MessageEvent {
   replyToken: string;
@@ -53,12 +54,13 @@ export async function handleRegistration(
 
   try {
     await withCalendarMutex(calEvent.pageId, async () => {
-      const freshEvent = await calendarRepo.findByDate(nextSaturday);
-      if (!freshEvent) throw new Error('Event not found');
+      const occupancy = await getEventOccupancy(nextSaturday);
+      if (!occupancy) throw new Error('Event not found');
+      const { event: freshEvent, season: freshSeason } = occupancy;
 
       let result;
       if (delta > 0) {
-        result = calculateAddCapacity(freshEvent, activeSeason, resolved.displayName, delta, isSelfSeasonMember, isAdmin);
+        result = calculateAddCapacity(freshEvent, freshSeason, resolved.displayName, delta, isSelfSeasonMember, isAdmin);
       } else {
         result = calculateRemoveCapacity(freshEvent, resolved.displayName, delta, isSelfSeasonMember);
       }
@@ -75,7 +77,7 @@ export async function handleRegistration(
         nextSaturday,
         updatedGuests,
         freshEvent.absentees,
-        activeSeason,
+        occupancy,
         delta,
       );
       await replyMessage(event.replyToken, [{ type: 'text', text: replyText }], botId);
@@ -94,10 +96,10 @@ async function buildRegistrationReply(
   date: string,
   guests: string[],
   absenteePageIds: string[],
-  season: SeasonRecord,
+  occupancy: EventOccupancy,
   delta: number,
 ): Promise<string> {
-  const totalSlots = calculateTotalSlots({ absentees: absenteePageIds }, season);
+  const { totalSlots, presentSeasonMembers, season } = occupancy;
   const remainingSlots = Math.max(0, totalSlots - guests.length);
 
   // Numbered guest list (show all slots including empty ones)
@@ -114,7 +116,7 @@ async function buildRegistrationReply(
   }
 
   const action = delta > 0 ? '報名成功 ✅' : '取消報名成功 ✅';
-  const totalPeople = season.members.length - absenteePageIds.length + guests.length;
+  const totalPeople = presentSeasonMembers + guests.length;
 
   return [
     `${action}`,
