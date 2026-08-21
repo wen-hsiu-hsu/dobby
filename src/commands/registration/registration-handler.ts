@@ -1,15 +1,14 @@
-import { withMutex } from '../../services/mutex.js';
 import { replyMessage } from '../../services/line/reply-service.js';
 import * as calendarRepo from '../../services/notion/calendar-repository.js';
 import * as seasonRepo from '../../services/notion/season-repository.js';
 import * as peopleRepo from '../../services/notion/people-repository.js';
 import { getEventOccupancy } from '../../services/notion/event-occupancy.js';
 import type { EventOccupancy } from '../../services/notion/event-occupancy.js';
+import { withFreshCalendarEvent } from './with-fresh-calendar-event.js';
 import { resolveTarget } from './target-resolver.js';
 import { calculateAddCapacity, calculateRemoveCapacity } from './capacity-calculator.js';
 import { parseRegistrationTarget } from './registration-parser.js';
 import { formatDate, getNextSaturday, getCurrentSeasonName } from '../../utils/date-utils.js';
-import { logger } from '../../utils/logger.js';
 
 interface MessageEvent {
   replyToken: string;
@@ -36,13 +35,6 @@ export async function handleRegistration(
     return;
   }
 
-  const nextSaturday = formatDate(getNextSaturday());
-  const calEvent = await calendarRepo.findByDate(nextSaturday);
-  if (!calEvent) {
-    await replyMessage(event.replyToken, [{ type: 'text', text: `找不到 ${nextSaturday} 的活動` }], botId);
-    return;
-  }
-
   // Get current season by name (e.g. "2026-Q1"), not by array index
   const activeSeason = await seasonRepo.findByName(getCurrentSeasonName());
   if (!activeSeason) {
@@ -51,11 +43,15 @@ export async function handleRegistration(
   }
 
   const isSelfSeasonMember = activeSeason.members.includes(resolved.personPageId);
+  const nextSaturday = formatDate(getNextSaturday());
 
-  try {
-    await withMutex(calEvent.pageId, async () => {
-      const occupancy = await getEventOccupancy(nextSaturday);
-      if (!occupancy) throw new Error('Event not found');
+  await withFreshCalendarEvent(
+    event.replyToken,
+    botId,
+    nextSaturday,
+    'Registration handler',
+    () => getEventOccupancy(nextSaturday),
+    async (occupancy) => {
       const { event: freshEvent, season: freshSeason } = occupancy;
 
       let result;
@@ -81,15 +77,8 @@ export async function handleRegistration(
         delta,
       );
       await replyMessage(event.replyToken, [{ type: 'text', text: replyText }], botId);
-    });
-  } catch (err: unknown) {
-    if (err instanceof Error && err.message?.includes('Mutex busy')) {
-      await replyMessage(event.replyToken, [{ type: 'text', text: '系統忙碌中，請稍後再試' }], botId);
-      return;
     }
-    logger.error({ err }, 'Registration handler error');
-    await replyMessage(event.replyToken, [{ type: 'text', text: '系統錯誤，請稍後再試' }], botId);
-  }
+  );
 }
 
 async function buildRegistrationReply(

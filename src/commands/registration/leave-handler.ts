@@ -4,8 +4,7 @@ import * as seasonRepo from '../../services/notion/season-repository.js';
 import { resolveTarget } from './target-resolver.js';
 import { parseRegistrationTarget } from './registration-parser.js';
 import { formatDate, getNextSaturday, getCurrentSeasonName } from '../../utils/date-utils.js';
-import { withMutex } from '../../services/mutex.js';
-import { logger } from '../../utils/logger.js';
+import { withFreshCalendarEvent } from './with-fresh-calendar-event.js';
 
 interface MessageEvent {
   replyToken: string;
@@ -33,17 +32,14 @@ export async function handleLeave(
   }
 
   const nextSaturday = formatDate(getNextSaturday());
-  const calEvent = await calendarRepo.findByDate(nextSaturday);
-  if (!calEvent) {
-    await replyMessage(event.replyToken, [{ type: 'text', text: `找不到 ${nextSaturday} 的活動` }], botId);
-    return;
-  }
 
-  try {
-    await withMutex(calEvent.pageId, async () => {
-      const freshEvent = await calendarRepo.findByDate(nextSaturday);
-      if (!freshEvent) throw new Error('Event not found');
-
+  await withFreshCalendarEvent(
+    event.replyToken,
+    botId,
+    nextSaturday,
+    'Leave handler',
+    () => calendarRepo.findByDate(nextSaturday),
+    async (freshEvent) => {
       const isCurrentlyAbsent = freshEvent.absentees.includes(resolved.personPageId);
 
       if (!isCancel && isCurrentlyAbsent) {
@@ -63,13 +59,6 @@ export async function handleLeave(
       await calendarRepo.updateAbsentees(freshEvent.pageId, newAbsentees);
       const action = isCancel ? '銷假成功' : '請假成功';
       await replyMessage(event.replyToken, [{ type: 'text', text: `${action}！${resolved.displayName}` }], botId);
-    });
-  } catch (err: unknown) {
-    if (err instanceof Error && err.message?.includes('Mutex busy')) {
-      await replyMessage(event.replyToken, [{ type: 'text', text: '系統忙碌中，請稍後再試' }], botId);
-      return;
     }
-    logger.error({ err }, 'Leave handler error');
-    await replyMessage(event.replyToken, [{ type: 'text', text: '系統錯誤，請稍後再試' }], botId);
-  }
+  );
 }
