@@ -1,21 +1,9 @@
 import type { messagingApi } from '@line/bot-sdk';
 import * as announcementRepo from '../services/notion/announcement-repository.js';
 import { findAdmin } from '../services/notion/users-repository.js';
+import { blocksToText } from '../services/notion/blocks-to-text.js';
 import { replyMessage } from '../services/line/reply-service.js';
 import { logger } from '../utils/logger.js';
-
-function blocksToText(blocks: any[]): string {
-  return blocks
-    .map((block) => {
-      const type = block.type as string;
-      const content = (block as any)[type];
-      if (!content) return '';
-      const richText: any[] = content.rich_text ?? [];
-      return richText.map((r: any) => r.plain_text ?? '').join('');
-    })
-    .filter(Boolean)
-    .join('\n');
-}
 
 export async function handleIntroduce(
   replyToken: string,

@@ -2,6 +2,7 @@ import * as announcementRepo from '../services/notion/announcement-repository.js
 import * as seasonRepo from '../services/notion/season-repository.js';
 import * as peopleRepo from '../services/notion/people-repository.js';
 import * as calendarRepo from '../services/notion/calendar-repository.js';
+import { blocksToText } from '../services/notion/blocks-to-text.js';
 import { replyMessage } from '../services/line/reply-service.js';
 import { getNextSaturdayDateText, getCurrentSeasonName, getSeasonMonthRange, groupDatesByMonth } from '../utils/date-utils.js';
 import type { SeasonRecord, PersonRecord, CalendarEvent } from '../types/notion-models.js';
@@ -51,21 +52,6 @@ function buildSeasonPlaceholders(
 
 function applySeasonPlaceholders(text: string, placeholders: Record<string, string>): string {
   return text.replace(/\{([A-Z_]+)\}/g, (match, key: string) => placeholders[key] ?? match);
-}
-
-function blocksToText(blocks: any[]): string {
-  return blocks
-    .map((block) => {
-      const type = block.type as string;
-      const content = (block as any)[type];
-      if (!content) return '';
-      const richText: any[] = content.rich_text ?? [];
-      const text = richText.map((r: any) => r.plain_text ?? '').join('');
-      if (!text) return '';
-      return type === 'bulleted_list_item' ? `• ${text}` : text;
-    })
-    .filter(Boolean)
-    .join('\n');
 }
 
 export async function handleNews(replyToken: string, botId: string): Promise<void> {
