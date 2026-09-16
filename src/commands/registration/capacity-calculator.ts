@@ -16,6 +16,8 @@ export interface CapacityResult {
   error?: string;
   newGuests?: string[];
   removedGuests?: string[];
+  /** Set when the requested delta was reduced to fit remaining capacity (non-admin only). */
+  cappedAt?: number;
 }
 
 export function calculateTotalSlots(event: Pick<CalendarEventData, 'absentees'>, seasonData: SeasonData): number {
@@ -38,23 +40,31 @@ export function calculateAddCapacity(
   // 可報名數 = 總名額 - 已報名零打數量
   const availableSlots = calculateTotalSlots(event, seasonData) - event.guests.length;
 
+  let actualDelta = delta;
+  let cappedAt: number | undefined;
+
   if (!isAdmin && delta > availableSlots) {
-    return {
-      canAdd: false,
-      error: `名額不足，目前剩餘 ${availableSlots} 個名額`,
-    };
+    if (availableSlots <= 0) {
+      return {
+        canAdd: false,
+        error: `名額不足，目前剩餘 ${availableSlots} 個名額`,
+      };
+    }
+    // Partially fulfill up to the remaining capacity instead of rejecting outright.
+    actualDelta = availableSlots;
+    cappedAt = availableSlots;
   }
 
   // Build new guest entries
   const newEntries: string[] = [];
   if (isSelfSeasonMember) {
     // Season member's friends: "{Name}的朋友" or "{Name}的朋友2", etc.
-    for (let i = 0; i < delta; i++) {
+    for (let i = 0; i < actualDelta; i++) {
       const suffix = i === 0 ? '' : String(i + 1);
       newEntries.push(`${targetName}的朋友${suffix}`);
     }
   } else {
-    for (let i = 0; i < delta; i++) {
+    for (let i = 0; i < actualDelta; i++) {
       const suffix = i === 0 ? '' : ` ${i + 1}`;
       newEntries.push(`${targetName}${suffix}`);
     }
@@ -63,6 +73,7 @@ export function calculateAddCapacity(
   return {
     canAdd: true,
     newGuests: [...event.guests, ...newEntries],
+    cappedAt,
   };
 }
 

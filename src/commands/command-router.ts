@@ -50,10 +50,10 @@ export async function routeCommand(
       break;
     }
     case CommandType.LEAVE:
-      await handleLeave(event as any, false, botId);
+      await handleLeave(event as any, false, botId, isAdmin);
       break;
     case CommandType.CANCEL_LEAVE:
-      await handleLeave(event as any, true, botId);
+      await handleLeave(event as any, true, botId, isAdmin);
       break;
     default:
       // Unknown command - ignore

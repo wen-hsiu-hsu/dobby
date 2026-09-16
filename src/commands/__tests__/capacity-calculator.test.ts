@@ -46,6 +46,35 @@ describe('calculateAddCapacity', () => {
     expect(result.canAdd).toBe(false);
     expect(result.error).toMatch(/名額不足/);
   });
+
+  it('partially fulfills up to remaining capacity instead of rejecting outright (non-admin)', () => {
+    // 11 slots total, 9 already taken → 2 remaining, but requesting 5
+    const nearFullEvent: CalendarEventData = {
+      ...baseEvent,
+      guests: Array.from({ length: 9 }, (_, i) => `Guest${i}`),
+    };
+    const result = calculateAddCapacity(nearFullEvent, season, 'Bob', 5, true, false);
+
+    expect(result.canAdd).toBe(true);
+    expect(result.cappedAt).toBe(2);
+    expect(result.newGuests).toHaveLength(11);
+    expect(result.newGuests).toContain('Bob的朋友');
+    expect(result.newGuests).toContain('Bob的朋友2');
+    expect(result.newGuests).not.toContain('Bob的朋友3');
+  });
+
+  it('admin is not capped even when the request exceeds remaining capacity', () => {
+    const nearFullEvent: CalendarEventData = {
+      ...baseEvent,
+      guests: Array.from({ length: 9 }, (_, i) => `Guest${i}`),
+    };
+    const result = calculateAddCapacity(nearFullEvent, season, 'New', 5, false, true);
+
+    expect(result.canAdd).toBe(true);
+    expect(result.cappedAt).toBeUndefined();
+    expect(result.newGuests).toHaveLength(14);
+    expect(result.newGuests).toContain('New 5');
+  });
 });
 
 describe('calculateRemoveCapacity', () => {

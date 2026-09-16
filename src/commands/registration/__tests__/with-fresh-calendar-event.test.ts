@@ -48,13 +48,13 @@ describe('withFreshCalendarEvent', () => {
     expect(mutation).toHaveBeenCalledWith(fresh);
   });
 
-  it('replies with a busy message when the lock is held, without logging an error', async () => {
-    vi.mocked(mutex.withMutex).mockRejectedValue(new Error('Mutex busy: evt-1'));
+  it('replies with a generic error when the queued mutex task times out', async () => {
+    vi.mocked(mutex.withMutex).mockRejectedValue(new Error('Mutex timeout: evt-1'));
 
     await withFreshCalendarEvent('token', 'dobby', '2026-05-09', 'ctx', () => Promise.resolve(calEvent), vi.fn());
 
-    expect(replyMessage).toHaveBeenCalledWith('token', [{ type: 'text', text: '系統忙碌中，請稍後再試' }], 'dobby');
-    expect(logger.error).not.toHaveBeenCalled();
+    expect(replyMessage).toHaveBeenCalledWith('token', [{ type: 'text', text: '系統錯誤，請稍後再試' }], 'dobby');
+    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ err: expect.any(Error) }), 'ctx error');
   });
 
   it('replies with a generic error and logs with the given context when refetch returns null', async () => {

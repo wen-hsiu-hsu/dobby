@@ -24,10 +24,6 @@ export async function withFreshCalendarEvent<T>(
       await mutation(fresh);
     });
   } catch (err: unknown) {
-    if (err instanceof Error && err.message?.includes('Mutex busy')) {
-      await replyMessage(replyToken, [{ type: 'text', text: '系統忙碌中，請稍後再試' }], botId);
-      return;
-    }
     logger.error({ err }, `${context} error`);
     await replyMessage(replyToken, [{ type: 'text', text: '系統錯誤，請稍後再試' }], botId);
   }

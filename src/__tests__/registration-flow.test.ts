@@ -60,6 +60,109 @@ describe('Registration flow', () => {
     expect(bot.notionPatchSpy).toHaveBeenCalledTimes(1);
   });
 
+  it('@Dobby +1 → 名額不足時仍回傳完整名額狀態，不是只有一句錯誤', async () => {
+    const bot = createTestBot({
+      season: {
+        results: [
+          {
+            id: 'season-page-1',
+            object: 'page',
+            properties: {
+              季租時段: { type: 'title', title: [{ plain_text: '2026-Q2' }] },
+              報名人: { type: 'relation', relation: [{ id: 'person-1' }, { id: 'person-2' }], has_more: false },
+              場地數: { type: 'number', number: 0 },
+              零打費用: { type: 'number', number: 200 },
+            },
+          },
+        ],
+      },
+    });
+
+    const messages = await bot.run('@Dobby +1', { userId: 'user-alice' });
+
+    const msg = messages[0] as any;
+    expect(msg.text).toContain('名額不足');
+    expect(msg.text).toContain('剩餘名額：');
+    expect(msg.text).toContain('總人數：共');
+    expect(bot.notionPatchSpy).not.toHaveBeenCalled();
+  });
+
+  it('@Dobby +7 → 名額不足時，非管理員仍能報到剩餘名額上限，並在回應說明已達上限', async () => {
+    const bot = createTestBot({
+      season: {
+        results: [
+          {
+            id: 'season-page-1',
+            object: 'page',
+            properties: {
+              季租時段: { type: 'title', title: [{ plain_text: '2026-Q2' }] },
+              報名人: { type: 'relation', relation: [{ id: 'person-1' }, { id: 'person-2' }], has_more: false },
+              場地數: { type: 'number', number: 1 }, // totalSlots = 1*7 - 2 + 0 = 5
+              零打費用: { type: 'number', number: 200 },
+            },
+          },
+        ],
+      },
+    });
+
+    const messages = await bot.run('@Dobby +7', { userId: 'user-alice' });
+
+    const msg = messages[0] as any;
+    expect(msg.text).toContain('報名成功');
+    expect(msg.text).toContain('名額已達上限，僅報名 5 位，您原本要求 7 位');
+    expect(msg.text).toContain('Alice的朋友5');
+    expect(msg.text).not.toContain('Alice的朋友6');
+    expect(msg.text).toContain('剩餘名額：0 人');
+    expect(bot.notionPatchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('@Dobby @Bob +1 → 非管理員代他人報名應被拒絕', async () => {
+    // user-alice is not admin in the default fixture
+    const bot = createTestBot();
+    const messages = await bot.run('@Dobby @Bob +1', { userId: 'user-alice' });
+
+    const msg = messages[0] as any;
+    expect(msg.text).toBe('你不是管理員');
+    expect(bot.notionPatchSpy).not.toHaveBeenCalled();
+  });
+
+  it('@Dobby @Bob 假 → 非管理員代他人請假應被拒絕', async () => {
+    const bot = createTestBot();
+    const messages = await bot.run('@Dobby @Bob 假', { userId: 'user-alice' });
+
+    const msg = messages[0] as any;
+    expect(msg.text).toBe('你不是管理員');
+    expect(bot.notionPatchSpy).not.toHaveBeenCalled();
+  });
+
+  it('@Dobby @Bob +1 → 管理員可代他人報名', async () => {
+    const bot = createTestBot({
+      users: {
+        results: [
+          {
+            id: 'user-page-admin',
+            object: 'page',
+            properties: {
+              user_id: { type: 'title', title: [{ plain_text: 'user-boss' }] },
+              'Custom Name': { type: 'rich_text', rich_text: [] },
+              'Registered name': { type: 'relation', relation: [], has_more: false },
+              is_admin: { type: 'checkbox', checkbox: true },
+              message_counts: { type: 'number', number: 0 },
+              groups: { type: 'multi_select', multi_select: [] },
+              'multi-chat': { type: 'multi_select', multi_select: [] },
+            },
+          },
+        ],
+      },
+    });
+
+    const messages = await bot.run('@Dobby @Bob +1', { userId: 'user-boss' });
+
+    const msg = messages[0] as any;
+    expect(msg.text).toContain('報名成功');
+    expect(bot.notionPatchSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('@Dobby 假 → 拒絕非 season member', async () => {
     // Bob (person-2) is in season members in default fixture too —
     // use a user NOT mapped to any season person

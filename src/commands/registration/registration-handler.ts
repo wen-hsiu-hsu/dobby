@@ -1,13 +1,12 @@
 import { replyMessage } from '../../services/line/reply-service.js';
 import * as calendarRepo from '../../services/notion/calendar-repository.js';
 import * as seasonRepo from '../../services/notion/season-repository.js';
-import * as peopleRepo from '../../services/notion/people-repository.js';
 import { getEventOccupancy } from '../../services/notion/event-occupancy.js';
-import type { EventOccupancy } from '../../services/notion/event-occupancy.js';
 import { withFreshCalendarEvent } from './with-fresh-calendar-event.js';
 import { resolveTarget } from './target-resolver.js';
 import { calculateAddCapacity, calculateRemoveCapacity } from './capacity-calculator.js';
 import { parseRegistrationTarget } from './registration-parser.js';
+import { buildEventStatusMessage } from './event-status-message.js';
 import { formatDate, getNextSaturday, getCurrentSeasonName } from '../../utils/date-utils.js';
 
 interface MessageEvent {
@@ -23,6 +22,11 @@ export async function handleRegistration(
   isAdmin = false
 ): Promise<void> {
   const target = parseRegistrationTarget(event as any);
+
+  if (!target.isSelf && !isAdmin) {
+    await replyMessage(event.replyToken, [{ type: 'text', text: '你不是管理員' }], botId);
+    return;
+  }
 
   if (target.parseError) {
     await replyMessage(event.replyToken, [{ type: 'text', text: target.parseError }], botId);
@@ -62,61 +66,41 @@ export async function handleRegistration(
       }
 
       if (!result.canAdd) {
-        await replyMessage(event.replyToken, [{ type: 'text', text: result.error ?? '操作失敗' }], botId);
+        const replyText = await buildEventStatusMessage({
+          date: nextSaturday,
+          headline: result.error ?? '操作失敗',
+          guests: freshEvent.guests,
+          totalSlots: occupancy.totalSlots,
+          presentSeasonMembers: occupancy.presentSeasonMembers,
+          guestFee: occupancy.season.guestFee,
+          absenteePageIds: freshEvent.absentees,
+        });
+        await replyMessage(event.replyToken, [{ type: 'text', text: replyText }], botId);
         return;
       }
 
       const updatedGuests = result.newGuests ?? [];
       await calendarRepo.updateGuests(freshEvent.pageId, updatedGuests);
 
-      const replyText = await buildRegistrationReply(
-        nextSaturday,
-        updatedGuests,
-        freshEvent.absentees,
-        occupancy,
-        delta,
-      );
+      let headline: string;
+      if (delta <= 0) {
+        headline = '取消報名成功 ✅';
+      } else if (result.cappedAt !== undefined) {
+        headline = `報名成功 ✅（名額已達上限，僅報名 ${result.cappedAt} 位，您原本要求 ${delta} 位）`;
+      } else {
+        headline = '報名成功 ✅';
+      }
+
+      const replyText = await buildEventStatusMessage({
+        date: nextSaturday,
+        headline,
+        guests: updatedGuests,
+        totalSlots: occupancy.totalSlots,
+        presentSeasonMembers: occupancy.presentSeasonMembers,
+        guestFee: occupancy.season.guestFee,
+        absenteePageIds: freshEvent.absentees,
+      });
       await replyMessage(event.replyToken, [{ type: 'text', text: replyText }], botId);
     }
   );
-}
-
-async function buildRegistrationReply(
-  date: string,
-  guests: string[],
-  absenteePageIds: string[],
-  occupancy: EventOccupancy,
-  delta: number,
-): Promise<string> {
-  const { totalSlots, presentSeasonMembers, season } = occupancy;
-  const remainingSlots = Math.max(0, totalSlots - guests.length);
-
-  // Numbered guest list (show all slots including empty ones)
-  const displaySlots = Math.max(totalSlots, guests.length);
-  const guestLines = Array.from({ length: displaySlots }, (_, i) =>
-    `${i + 1}. ${guests[i] ?? ''}`,
-  ).join('\n');
-
-  // Fetch absentee names
-  let absenteeText = '無';
-  if (absenteePageIds.length > 0) {
-    const absentees = await peopleRepo.findByPageIds(absenteePageIds);
-    absenteeText = absentees.map((p) => p.name).join('、');
-  }
-
-  const action = delta > 0 ? '報名成功 ✅' : '取消報名成功 ✅';
-  const totalPeople = presentSeasonMembers + guests.length;
-
-  return [
-    `${action}`,
-    '',
-    date,
-    `零打名額 ${totalSlots} 人 | $${season.guestFee}/人`,
-    guestLines,
-    `剩餘名額：${remainingSlots} 人`,
-    `請假：${absenteeText}`,
-    '',
-    `若要報名請輸入 @Dobby +1`,
-    `總人數：共 ${totalPeople} 人`,
-  ].join('\n');
 }
