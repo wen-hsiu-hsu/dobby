@@ -22,6 +22,6 @@
 
 ## 已知的文件/程式碼落差（勿假設文件一定對）
 
-- 自動回覆是**靜態 JSON**（`src/data/auto-reply.json`），不是 Notion 驅動，即使 Notion 上仍有一個未使用的 `TEXT_REPLY` 資料庫。
+- 自動回覆是**靜態 JSON**（`src/data/auto-reply.json`），不是 Notion 驅動。
 
 ## 永遠用繁體中文回應

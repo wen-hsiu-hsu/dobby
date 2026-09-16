@@ -1,6 +1,6 @@
 # Notion 資料庫說明
 
-Dobby 使用 6 個 Notion 資料庫。欄位的詳細型別定義請參考 `schemas/` 資料夾的 JSON 檔案。
+Dobby 使用 5 個 Notion 資料庫。欄位的詳細型別定義請參考 `schemas/` 資料夾的 JSON 檔案。
 
 ---
 
@@ -106,14 +106,6 @@ USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員�
 | `{NEW_FRIEND}` | 新加入群組的成員（memberJoined 事件） |
 | `{USER}` | 觸發指令的使用者 |
 | `{MANAGER}` | `is_admin = true` 的管理員 |
-
----
-
-## TEXT_REPLY（自動回覆規則）— Notion 中存在，但程式碼未使用
-
-Notion 有此資料庫（schema 見 `schemas/text-reply.json`），但**目前自動回覆不從 Notion 讀取**。實際來源是靜態 JSON 檔 `src/data/auto-reply.json`（由 `scripts/convert-auto-reply.mjs` 從 CSV 轉換）。若要改回 Notion 驅動，需新建 repository 並接上 `src/services/auto-reply.ts`。
-
-**比對邏輯：** 字串 `includes()`，區分大小寫。管理員訊息不觸發。
 
 ---
 

@@ -4,3 +4,4 @@ dist/
 *.log
 logs/
 .notion-snapshot/
+docs/_analysis-report.html

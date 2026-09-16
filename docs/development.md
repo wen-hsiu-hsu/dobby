@@ -112,5 +112,5 @@ docker run -p 3000:3000 --env-file .env dobby
 
 Notion API 限制約 3 req/s。設計 Notion 查詢時注意：
 - 避免不必要的查詢
-- 需要快速回應的路徑使用 cache（如 text-reply TTL cache）
+- 需要快速回應的路徑使用 cache
 - 排程任務（display-name-update）在 Notion 更新之間有 400ms delay

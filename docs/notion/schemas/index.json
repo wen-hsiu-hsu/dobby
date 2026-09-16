@@ -46,15 +46,6 @@
       "env_var": "NOTION_DB_ANNOUNCEMENT",
       "filename": "all-announcements.json",
       "path": "docs/notion/schemas/all-announcements.json"
-    },
-    "TEXT_REPLY": {
-      "id": "2e34dbf2-e21c-8047-8ac5-fccfc5c02729",
-      "name": "TEXT_REPLY",
-      "name_en": "TEXT_REPLY",
-      "purpose": "自動回覆規則",
-      "env_var": null,
-      "filename": "text-reply.json",
-      "path": "docs/notion/schemas/text-reply.json"
     }
   }
 }

@@ -23,4 +23,3 @@
 - `people-list.json` — 人員清單
 - `season-rental-record.json` — 季租承租紀錄
 - `all-announcements.json` — 所有公告
-- `text-reply.json` — 自動回覆規則

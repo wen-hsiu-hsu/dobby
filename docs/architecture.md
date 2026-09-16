@@ -52,8 +52,6 @@ src/services/notion/
 
 `src/services/auto-reply.ts` 讀取**靜態 JSON 檔**（`src/data/auto-reply.json`），非 Notion 資料庫。規則以 `scripts/convert-auto-reply.mjs` 從 CSV 轉換產生。管理員訊息不觸發自動回覆。
 
-> Notion 中存在一個 `TEXT_REPLY` 資料庫（見 `docs/notion/schemas/text-reply.json`），但目前程式碼未使用它 — 可能是尚未完成的遷移。
-
 ## 關鍵設計決策
 
 ### Fire-and-Forget Webhook 處理
