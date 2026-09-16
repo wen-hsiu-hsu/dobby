@@ -16,7 +16,7 @@ function normalizeFullWidth(text: string): string {
 
 export function parseRegistrationTarget(event: MentionEvent): RegistrationTarget {
   const msg = event.message;
-  const text = normalizeFullWidth(msg.text).replace(/@Dobby/i, '').trim();
+  const text = normalizeFullWidth(msg.text).replace(/@Dobby/i, '').trim().replace(/\s+/g, ' ');
 
   const commandRegex = /([+\-]\d+|假|銷假)/;
   const match = text.match(commandRegex);

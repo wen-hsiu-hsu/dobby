@@ -32,6 +32,16 @@ describe('parseCommand', () => {
     expect(cmd?.delta).toBe('-2');
   });
 
+  it('collapses repeated spaces after @Dobby, e.g. "@Dobby  +2" behaves like "@Dobby +2"', () => {
+    const cmd = parseCommand('@Dobby  +2');
+    expect(cmd?.type).toBe(CommandType.REGISTRATION);
+    expect(cmd?.delta).toBe('+2');
+  });
+
+  it('collapses repeated internal spaces, e.g. "@Dobby   指令" behaves like "@Dobby 指令"', () => {
+    expect(parseCommand('@Dobby   指令')?.type).toBe(CommandType.COMMAND_LIST);
+  });
+
   it('parses full-width ＋1 as REGISTRATION', () => {
     const cmd = parseCommand('@Dobby ＋1');
     expect(cmd?.type).toBe(CommandType.REGISTRATION);

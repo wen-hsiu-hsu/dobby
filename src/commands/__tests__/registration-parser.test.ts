@@ -47,4 +47,13 @@ describe('parseRegistrationTarget', () => {
     const result = parseRegistrationTarget(event as any);
     expect(result.isSelf).toBe(true);
   });
+
+  it('collapses repeated spaces between @mention and delta', () => {
+    const event = makeEvent('@Dobby   @Bob    +1', [
+      { type: 'user', index: 0, length: 6 }, // no userId (PC)
+    ]);
+    const result = parseRegistrationTarget(event as any);
+    expect(result.isSelf).toBe(false);
+    expect(result.targetName).toBe('Bob');
+  });
 });
