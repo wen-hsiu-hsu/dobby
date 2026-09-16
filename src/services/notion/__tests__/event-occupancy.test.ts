@@ -21,6 +21,12 @@ const season = {
   members: ['p1', 'p2', 'p3'],
   courts: 2,
   guestFee: 200,
+  location: '',
+  weekCounts: 0,
+  pricePerPersonForSeason: null,
+  pricePerPersonOverride: null,
+  totalPrice: null,
+  playDatePageIds: [],
 };
 
 beforeEach(() => {

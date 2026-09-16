@@ -49,6 +49,13 @@ export function getFormulaBoolean(properties: Properties, key: string): boolean 
   return prop.formula.boolean ?? false;
 }
 
+export function getFormulaNumber(properties: Properties, key: string): number | null {
+  const prop = properties[key];
+  if (!prop || prop.type !== 'formula') return null;
+  if (prop.formula.type !== 'number') return null;
+  return prop.formula.number;
+}
+
 export function getDate(properties: Properties, key: string): string | null {
   const prop = properties[key];
   if (!prop || prop.type !== 'date') return null;

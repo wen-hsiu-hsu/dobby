@@ -1,5 +1,5 @@
 import { env } from '../../config/env.js';
-import { notionPost, notionPatch } from './notion-fetch.js';
+import { notionPost, notionPatch, notionGet } from './notion-fetch.js';
 import {
   getDate,
   getRelation,
@@ -28,6 +28,13 @@ export async function findByDate(date: string): Promise<CalendarEvent | null> {
   }) as any;
   if (response.results.length === 0) return null;
   return pageToEvent(response.results[0] as PageObjectResponse);
+}
+
+export async function findByPageIds(pageIds: string[]): Promise<CalendarEvent[]> {
+  const results = await Promise.all(
+    pageIds.map((id) => notionGet(`/pages/${id}`)),
+  );
+  return results.map((r) => pageToEvent(r as PageObjectResponse));
 }
 
 export async function updateAbsentees(pageId: string, absenteePageIds: string[]): Promise<void> {

@@ -25,7 +25,23 @@ Dobby 會介紹自己並 @mention 觸發者和管理員。
 @Dobby news
 @Dobby 公告
 ```
-顯示最新公告（從 Notion「所有公告」資料庫讀取）。
+讀取 Notion「所有公告」資料庫中名為 `NEWS_TEMPLATE` 的頁面，套用當季季租資料後回傳。內容裡的 `{PLACEHOLDER}` 會被即時抓取的資料取代：
+
+| 變數 | 內容 |
+|------|------|
+| `{SEASON}` | 季度名稱，如 `2026-Q3` |
+| `{FROM_TO_MONTH}` | 季度月份範圍，如 `7~9月` |
+| `{TOTAL_PEOPLE}` | 當季報名人數 |
+| `{LIST_ALL_PEOPLE}` | 當季報名人名單，頓號分隔的單行（`許文修、陳玟育、...`） |
+| `{PRICE_PER_PERSON_FOR_SEASON}` | 每人平均場租，Notion formula 算出來的小數無條件進位到整數（僅供參考，非實際繳費金額） |
+| `{PRICE_PER_PERSON_FOR_ONCE}` | 零打（單次）費用 |
+| `{COURT_COUNT}` | 場地數 |
+| `{WEEK_COUNTS}` | 本季租借次數 |
+| `{TOTAL_PRICE}` | 場租總金額 |
+| `{LIST_ALL_DATES}` | 本季所有打球日期，依月份分行、同月用 `, ` 相隔，格式 `M/DD`（如 `7/04, 7/11`） |
+| `{LOCATION}` | 打球地點 |
+
+Notion 內容裡的 `bulleted_list_item`（項目符號清單）在輸出時會自動補上 `• ` 前綴。改公告文字內容（包含新增備註句子）要去 Notion 改 `NEWS_TEMPLATE` 頁面，不用改 code；但若要新增/修改變數本身或格式，需同步改 `src/commands/news.ts`。
 
 ---
 

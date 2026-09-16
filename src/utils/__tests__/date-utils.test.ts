@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getNextSaturday, getQuarter, formatDate, getNextSaturdayDateText } from '../date-utils.js';
+import { getNextSaturday, getQuarter, formatDate, getNextSaturdayDateText, getSeasonMonthRange, groupDatesByMonth } from '../date-utils.js';
 
 describe('getNextSaturday', () => {
   it('returns same day if today is Saturday', () => {
@@ -57,5 +57,48 @@ describe('getNextSaturdayDateText', () => {
   it('formats Saturday as YYYY/MM/DD（六）', () => {
     const fri = new Date('2024-01-05');
     expect(getNextSaturdayDateText(fri)).toBe('2024/01/06（六）');
+  });
+});
+
+describe('getSeasonMonthRange', () => {
+  it('returns 1~3月 for Q1', () => {
+    expect(getSeasonMonthRange('2026-Q1')).toBe('1~3月');
+  });
+
+  it('returns 7~9月 for Q3', () => {
+    expect(getSeasonMonthRange('2026-Q3')).toBe('7~9月');
+  });
+
+  it('returns 10~12月 for Q4', () => {
+    expect(getSeasonMonthRange('2026-Q4')).toBe('10~12月');
+  });
+
+  it('returns empty string for an unrecognized format', () => {
+    expect(getSeasonMonthRange('not-a-season')).toBe('');
+  });
+});
+
+describe('groupDatesByMonth', () => {
+  it('groups same-month dates on one line as "M/DD, M/DD", separating months with a newline', () => {
+    const dates = [
+      '2026-07-04', '2026-07-11', '2026-07-18', '2026-07-25',
+      '2026-08-01', '2026-08-08',
+      '2026-09-05',
+    ];
+    expect(groupDatesByMonth(dates)).toBe(
+      '7/04, 7/11, 7/18, 7/25\n8/01, 8/08\n9/05',
+    );
+  });
+
+  it('sorts unordered input before grouping', () => {
+    expect(groupDatesByMonth(['2026-08-01', '2026-07-04'])).toBe('7/04\n8/01');
+  });
+
+  it('accepts full ISO datetime strings, using only the date portion', () => {
+    expect(groupDatesByMonth(['2026-09-26T20:00:00.000+08:00'])).toBe('9/26');
+  });
+
+  it('returns empty string for no dates', () => {
+    expect(groupDatesByMonth([])).toBe('');
   });
 });

@@ -50,12 +50,18 @@ USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員�
 
 | 欄位 | 用途 |
 |------|------|
-| 季度名稱 | 如 `2025-Q1`（用於 participants 指令） |
+| `季租時段` | 季度名稱，如 `2025-Q1`（`findByName()` 用此欄位查詢當季） |
 | `報名人` | Relation，關聯至「人員清單」，定義該季的固定成員 |
-| `courts` | 場地數，用於容量計算 |
-| `零打定價` | 當季零打價格 |
+| `場地數` | 場地數，用於容量計算 |
+| `零打費用` | 當季零打（單次）價格 |
+| `地點` | 打球地點，`news` 指令 `{LOCATION}` |
+| `租借次數 (2hrs)` | 本季總租借次數，`news` 指令 `{WEEK_COUNTS}` |
+| `每人平均場租` | formula，本季每人應繳場租，`news` 指令 `{PRICE_PER_PERSON_FOR_SEASON}` |
+| `每人平均場租（特殊狀況）` | 手動覆寫值，設定後取代上面的 formula |
+| `場租總金額` | formula，本季場租總額，`news` 指令 `{TOTAL_PRICE}` |
+| `打球日` | Relation，關聯至「行事曆」，本季所有打球日，`news` 指令 `{LIST_ALL_DATES}` |
 
-`findAll()` 回傳的第一筆為當前有效季度。
+`findByName(getCurrentSeasonName())` 依季度名稱查詢當季資料，不是取 `findAll()` 的第一筆。
 
 ---
 

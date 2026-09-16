@@ -23,6 +23,12 @@ export interface SeasonRecord {
   members: string[]; // relation pageIds of People — 報名人
   courts: number; // 場地數
   guestFee: number; // 零打費用
+  location: string; // 地點
+  weekCounts: number; // 租借次數 (2hrs) — 本季總租借次數
+  pricePerPersonForSeason: number | null; // 每人平均場租（formula）
+  pricePerPersonOverride: number | null; // 每人平均場租（特殊狀況）— 設定時取代 formula 值
+  totalPrice: number | null; // 場租總金額（formula）
+  playDatePageIds: string[]; // 打球日（relation → Calendar），用於公告列出本季所有打球日期
 }
 
 export interface PersonRecord {

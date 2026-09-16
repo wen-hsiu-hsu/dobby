@@ -54,6 +54,35 @@ export function getCurrentSeasonName(): string {
 }
 
 /**
+ * Returns the month range text for a season name in "YYYY-QN" format, e.g. "2026-Q3" → "7~9月".
+ */
+export function getSeasonMonthRange(seasonName: string): string {
+  const match = seasonName.match(/Q([1-4])/);
+  if (!match) return '';
+  const quarter = Number(match[1]);
+  const startMonth = (quarter - 1) * 3 + 1;
+  return `${startMonth}~${startMonth + 2}月`;
+}
+
+/**
+ * Groups ISO dates (or "YYYY-MM-DD" prefixes) by month, formats each as "M/DD" (no leading
+ * zero on month), joins same-month dates with ", " and separates months with a newline.
+ * e.g. ["2026-07-04", "2026-07-11", "2026-08-01"] → "7/04, 7/11\n8/01"
+ */
+export function groupDatesByMonth(isoDates: string[]): string {
+  const sorted = [...isoDates].sort((a, b) => a.localeCompare(b));
+  const groups = new Map<string, string[]>();
+  for (const iso of sorted) {
+    const [, m, d] = iso.slice(0, 10).split('-');
+    const groupKey = iso.slice(0, 7); // "YYYY-MM"
+    const label = `${Number(m)}/${d}`;
+    if (!groups.has(groupKey)) groups.set(groupKey, []);
+    groups.get(groupKey)!.push(label);
+  }
+  return [...groups.values()].map((labels) => labels.join(', ')).join('\n');
+}
+
+/**
  * Formats a Date (treated as UTC) as YYYY-MM-DD.
  */
 export function formatDate(date: Date): string {

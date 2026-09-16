@@ -1,19 +1,56 @@
 import * as announcementRepo from '../services/notion/announcement-repository.js';
+import * as seasonRepo from '../services/notion/season-repository.js';
+import * as peopleRepo from '../services/notion/people-repository.js';
+import * as calendarRepo from '../services/notion/calendar-repository.js';
 import { replyMessage } from '../services/line/reply-service.js';
-import { getNextSaturdayDateText } from '../utils/date-utils.js';
+import { getNextSaturdayDateText, getCurrentSeasonName, getSeasonMonthRange, groupDatesByMonth } from '../utils/date-utils.js';
+import type { SeasonRecord, PersonRecord, CalendarEvent } from '../types/notion-models.js';
 import { logger } from '../utils/logger.js';
 
-const PLACEHOLDERS: Record<string, () => string> = {
+const STATIC_PLACEHOLDERS: Record<string, () => string> = {
   '{{NEXT_SATURDAY}}': () => getNextSaturdayDateText(),
   '{{DATE}}': () => getNextSaturdayDateText(),
 };
 
-function applyPlaceholders(text: string): string {
+function applyStaticPlaceholders(text: string): string {
   let result = text;
-  for (const [key, fn] of Object.entries(PLACEHOLDERS)) {
+  for (const [key, fn] of Object.entries(STATIC_PLACEHOLDERS)) {
     result = result.replaceAll(key, fn());
   }
   return result;
+}
+
+// Season summary variables, e.g. {SEASON}, {TOTAL_PEOPLE} — filled in from live Notion data.
+function buildSeasonPlaceholders(
+  season: SeasonRecord,
+  people: PersonRecord[],
+  playDates: CalendarEvent[],
+): Record<string, string> {
+  const listAllPeople = people.map((p) => p.name).join('、');
+  const listAllDates = groupDatesByMonth(playDates.map((e) => e.date));
+
+  // Informational split, not the actual amount to pay — rounded up so the shown figure never understates it.
+  const pricePerPersonForSeason = Math.ceil(
+    season.pricePerPersonOverride ?? season.pricePerPersonForSeason ?? 0,
+  );
+
+  return {
+    SEASON: season.name,
+    FROM_TO_MONTH: getSeasonMonthRange(season.name),
+    TOTAL_PEOPLE: String(season.members.length),
+    LIST_ALL_PEOPLE: listAllPeople,
+    PRICE_PER_PERSON_FOR_SEASON: String(pricePerPersonForSeason),
+    WEEK_COUNTS: String(season.weekCounts),
+    PRICE_PER_PERSON_FOR_ONCE: String(season.guestFee),
+    COURT_COUNT: String(season.courts),
+    TOTAL_PRICE: String(season.totalPrice ?? 0),
+    LIST_ALL_DATES: listAllDates,
+    LOCATION: season.location,
+  };
+}
+
+function applySeasonPlaceholders(text: string, placeholders: Record<string, string>): string {
+  return text.replace(/\{([A-Z_]+)\}/g, (match, key: string) => placeholders[key] ?? match);
 }
 
 function blocksToText(blocks: any[]): string {
@@ -23,7 +60,9 @@ function blocksToText(blocks: any[]): string {
       const content = (block as any)[type];
       if (!content) return '';
       const richText: any[] = content.rich_text ?? [];
-      return richText.map((r: any) => r.plain_text ?? '').join('');
+      const text = richText.map((r: any) => r.plain_text ?? '').join('');
+      if (!text) return '';
+      return type === 'bulleted_list_item' ? `• ${text}` : text;
     })
     .filter(Boolean)
     .join('\n');
@@ -31,14 +70,29 @@ function blocksToText(blocks: any[]): string {
 
 export async function handleNews(replyToken: string, botId: string): Promise<void> {
   try {
-    const announcement = await announcementRepo.findByName('NEWS');
+    const announcement = await announcementRepo.findByName('NEWS_TEMPLATE');
     if (!announcement) {
       await replyMessage(replyToken, [{ type: 'text', text: '找不到公告內容' }], botId);
       return;
     }
-    const blocks = await announcementRepo.getBlocks(announcement.pageId);
+
+    const seasonName = getCurrentSeasonName();
+    const season = await seasonRepo.findByName(seasonName);
+    if (!season) {
+      await replyMessage(replyToken, [{ type: 'text', text: `找不到 ${seasonName} 季租資料` }], botId);
+      return;
+    }
+
+    const [blocks, people, playDates] = await Promise.all([
+      announcementRepo.getBlocks(announcement.pageId),
+      peopleRepo.findByPageIds(season.members),
+      calendarRepo.findByPageIds(season.playDatePageIds),
+    ]);
+
     const rawText = blocksToText(blocks);
-    const text = applyPlaceholders(rawText);
+    const withStatic = applyStaticPlaceholders(rawText);
+    const text = applySeasonPlaceholders(withStatic, buildSeasonPlaceholders(season, people, playDates));
+
     await replyMessage(replyToken, [{ type: 'text', text: text || '公告內容為空' }], botId);
   } catch (err) {
     logger.error({ err }, 'News handler error');
