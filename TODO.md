@@ -478,15 +478,20 @@ iPass money
 
 ### 🔴 High（建議優先處理，依風險排序）
 
-- [ ] **[4.2] `capacity-calculator.ts:86-95` `calculateRemoveCapacity` 用 `startsWith` 做名字 prefix 比對，會誤刪別人的報名。** 非季租成員（零打本人）用 `event.guests.filter(g => g.startsWith(prefix))` 找要移除的項目，沒有邊界檢查。若某人的名字（如 `"Al"`）剛好是別人名字（如 `"Alice"`）的前綴，傳 `-1` 會把 Alice 的報名刪掉、卻回覆 Al「取消報名成功」——靜默刪除別人資料的授權/資料完整性漏洞。修法方向：比對時要求完整相等或以空格等明確邊界字元分隔，不能單純 `startsWith`。務必補 `registration-handler.ts` 的整合測試（見下方 `[4.4]`）鎖住此行為。
+- [x] **[4.2] `capacity-calculator.ts:86-95` `calculateRemoveCapacity` 用 `startsWith` 做名字 prefix 比對，會誤刪別人的報名。** 非季租成員（零打本人）用 `event.guests.filter(g => g.startsWith(prefix))` 找要移除的項目，沒有邊界檢查。若某人的名字（如 `"Al"`）剛好是別人名字（如 `"Alice"`）的前綴，傳 `-1` 會把 Alice 的報名刪掉、卻回覆 Al「取消報名成功」——靜默刪除別人資料的授權/資料完整性漏洞。修法方向：比對時要求完整相等或以空格等明確邊界字元分隔，不能單純 `startsWith`。務必補 `registration-handler.ts` 的整合測試（見下方 `[4.4]`）鎖住此行為。
+    - ✅ 已修正：改用完整相等/明確編號後綴邊界的 regex 比對，補 7 個回歸測試（含原漏洞情境）。
 
-- [ ] **[4.1] `mutex.ts:11-45` `withMutex` 逾時機制沒有真正取消 `fn()`，破壞 FIFO 排隊的互斥保證。** 逾時發生時用 `Promise.race([fn(), timeout])`，race 一 reject 就釋放鎖給下一位，但真正的 `fn()`（含 Notion 讀取+寫入）仍在背景繼續跑。情境：A 的報名因 Notion 延遲卡超過 10 秒逾時 → 鎖提早釋放給 B → B 讀到 A 尚未寫入前的舊資料並成功寫入、收到「報名成功」→ A 那個逾時後仍在背景跑的舊寫入才完成，用更舊資料把 B 的結果覆蓋掉。兩人都收到成功訊息，但其中一人的報名被吃掉。修法方向：next-in-queue 要等待「真正的 `fn()` 完成」才釋放鎖，而不是等 race 的結果；或做真正的 abort。
+- [x] **[4.1] `mutex.ts:11-45` `withMutex` 逾時機制沒有真正取消 `fn()`，破壞 FIFO 排隊的互斥保證。** 逾時發生時用 `Promise.race([fn(), timeout])`，race 一 reject 就釋放鎖給下一位，但真正的 `fn()`（含 Notion 讀取+寫入）仍在背景繼續跑。情境：A 的報名因 Notion 延遲卡超過 10 秒逾時 → 鎖提早釋放給 B → B 讀到 A 尚未寫入前的舊資料並成功寫入、收到「報名成功」→ A 那個逾時後仍在背景跑的舊寫入才完成，用更舊資料把 B 的結果覆蓋掉。兩人都收到成功訊息，但其中一人的報名被吃掉。修法方向：next-in-queue 要等待「真正的 `fn()` 完成」才釋放鎖，而不是等 race 的結果；或做真正的 abort。
+    - ✅ 已修正：拆開佇列鏈（只依賴真正 settle）與呼叫端等待（race 結果），佇列清理綁在真正完成上而非等待計數。設計細節見 `docs/adr/0002-mutex-timeout-does-not-cancel-task.md`。
 
-- [ ] **[1.1] `property-helpers.ts:27-31`（`getRelation`）沒處理 Notion API 對 relation 屬性只回傳前 25 筆的限制，影響 `season-repository.ts:12`、`calendar-repository.ts:19,42-44`。** `season.members`（報名人）超過 25 人時，第 26 位以後的成員會被誤判「非本季成員」擋下報名/請假，且容量計算全面失真。更嚴重的是 `calendar.absentees`（請假人）的 `updateAbsentees` 是整包覆寫，若請假人數已達 25，下次寫回會**永久刪除**第 26 筆以後的請假紀錄。修法方向：對可能超過 25 筆的 relation 屬性改走 Notion 的分頁 property item 端點（`/pages/{id}/properties/{property_id}`），或至少讀到剛好 25 筆時 log 警告。
+- [x] **[1.1] `property-helpers.ts:27-31`（`getRelation`）沒處理 Notion API 對 relation 屬性只回傳前 25 筆的限制，影響 `season-repository.ts:12`、`calendar-repository.ts:19,42-44`。** `season.members`（報名人）超過 25 人時，第 26 位以後的成員會被誤判「非本季成員」擋下報名/請假，且容量計算全面失真。更嚴重的是 `calendar.absentees`（請假人）的 `updateAbsentees` 是整包覆寫，若請假人數已達 25，下次寫回會**永久刪除**第 26 筆以後的請假紀錄。修法方向：對可能超過 25 筆的 relation 屬性改走 Notion 的分頁 property item 端點（`/pages/{id}/properties/{property_id}`），或至少讀到剛好 25 筆時 log 警告。
+    - ✅ 已修正：新增 `getFullRelation`（讀到剛好 25 筆才走分頁端點補齊），`season-repository.ts`/`calendar-repository.ts` 改用它，呼叫端不用改。已發生過的截斷資料無法從程式碼復原，建議人工核對正式環境有沒有已卡在 25 筆的紀錄。見 `docs/notion/databases.md`。
 
-- [ ] **[5.2] `routes/logs.ts`（掛載於 `index.ts:12`）`/logs` 路由完全沒有身份驗證，任何知道網址的人都能看完整近 7 天 log。** 搭配 `push-service.ts:16` 用 `logger.info` 記錄每次推播的完整訊息內容（含真實姓名）與 LINE ID，構成個資外洩風險。修法方向：`/logs` 加上簡單 token/Basic Auth 驗證，或限制只能內網存取。
+- [x] **[5.2] `routes/logs.ts`（掛載於 `index.ts:12`）`/logs` 路由完全沒有身份驗證，任何知道網址的人都能看完整近 7 天 log。** 搭配 `push-service.ts:16` 用 `logger.info` 記錄每次推播的完整訊息內容（含真實姓名）與 LINE ID，構成個資外洩風險。修法方向：`/logs` 加上簡單 token/Basic Auth 驗證，或限制只能內網存取。
+    - ✅ 已修正：加上 `LOGS_ACCESS_TOKEN` 共享密鑰驗證（timing-safe 比對），設為必填環境變數。部署環境需記得設定此變數。
 
-- [ ] **[5.1] `display-name-update.ts:19` 顯示名稱批次更新排程實質上永遠不會成功。** `getProfile(userId)` 沒有帶 `groupId`，打的是「一對一好友」API 而非文件要求、真正該用的 `getGroupMemberProfile(groupId, userId)`。社團成員多半只在群組互動、沒加 Dobby 為個人好友，導致幾乎所有查詢回 404 → null。建議先用真實資料實測確認現況（可能兩個 bot 都中招），再改用 `usersRepo` 資料裡使用者所屬的 `groupId` 呼叫正確 API。
+- [x] **[5.1] `display-name-update.ts:19` 顯示名稱批次更新排程實質上永遠不會成功。** `getProfile(userId)` 沒有帶 `groupId`，打的是「一對一好友」API 而非文件要求、真正該用的 `getGroupMemberProfile(groupId, userId)`。社團成員多半只在群組互動、沒加 Dobby 為個人好友，導致幾乎所有查詢回 404 → null。建議先用真實資料實測確認現況（可能兩個 bot 都中招），再改用 `usersRepo` 資料裡使用者所屬的 `groupId` 呼叫正確 API。
+    - ✅ 已修正：改依序嘗試使用者 `groups` 欄位裡每個 group 查詢，第一個成功即用，全部失敗才跳過該使用者。
 
 ### 🟠 Medium-High
 
@@ -517,7 +522,8 @@ iPass money
 
 - [ ] **[5.4] `display-name-update.ts:10-34` 整個迴圈包在單一 try/catch，任一筆使用者更新失敗會中斷整批，後面排隊的人當週全部不會被處理，無 retry。** 修法方向：改成逐筆 try/catch，單筆失敗只 log 該筆錯誤並繼續下一筆。
 
-- [ ] **[5.5] `log-cleanup.ts:30` `unlink` 沒包 try/catch，單一檔案刪除失敗會變成 unhandled rejection（呼叫端是 `void cleanOldLogs()`），後面排隊要刪的檔案全部被跳過且無 log 線索。** 修法方向：逐檔案包 try/catch，失敗記 log 並繼續處理下一個檔案。
+- [x] **[5.5] `log-cleanup.ts:30` `unlink` 沒包 try/catch，單一檔案刪除失敗會變成 unhandled rejection（呼叫端是 `void cleanOldLogs()`），後面排隊要刪的檔案全部被跳過且無 log 線索。** 修法方向：逐檔案包 try/catch，失敗記 log 並繼續處理下一個檔案。
+    - ✅ 已修正：每個檔案的 `unlink` 各自包 try/catch，失敗只記 warning 繼續處理下一個；`startLogCleanup` 呼叫端也加了 `.catch()` 保險。順便一起修的還有 `initLogger()` 缺錯誤處理、log 路徑改成錨定絕對路徑（不受啟動當下 cwd 影響，見 `docs/adr/0003-log-dir-anchored-via-argv.md`）、`/logs` 顯示時間改台北時區、加上 graceful shutdown（`SIGTERM`/`SIGINT`）。**[5.6] 的時區問題（檔名日期解析用 UTC、cutoff 用本地時區）本輪未修，仍是獨立待辦。**
 
 ### 🟢 Low
 

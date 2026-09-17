@@ -51,7 +51,7 @@ USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員�
 | 欄位 | 用途 |
 |------|------|
 | `季租時段` | 季度名稱，如 `2025-Q1`（`findByName()` 用此欄位查詢當季） |
-| `報名人` | Relation，關聯至「人員清單」，定義該季的固定成員 |
+| `報名人` | Relation，關聯至「人員清單」，定義該季的固定成員。⚠️ Notion 對 relation 屬性一律只回傳前 25 筆，超過的部分由 `src/services/notion/paginated-relation.ts` 的 `getFullRelation` 自動補齊（讀到剛好 25 筆才多打一次分頁查詢），不要繞過它直接用 `property-helpers.ts` 的 `getRelation` 讀這個欄位 |
 | `場地數` | 場地數，用於容量計算 |
 | `零打費用` | 當季零打（單次）價格 |
 | `地點` | 打球地點，`news` 指令 `{LOCATION}` |
@@ -75,8 +75,8 @@ USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員�
 | 欄位 | 用途 |
 |------|------|
 | 日期 | 活動日期（通常是週六），用於查詢 |
-| `請假人` | Relation，關聯至「人員清單」，記錄本週請假的季租球員 |
-| `零打` | Multi-select，記錄本週補位名單（guest 名稱字串） |
+| `請假人` | Relation，關聯至「人員清單」，記錄本週請假的季租球員。⚠️ 同樣受 25 筆截斷限制，且 `updateAbsentees` 是整包覆寫（非增量 patch）——若讀取時沒有透過 `getFullRelation` 補齊完整清單就整包寫回，會把第 26 筆以後的請假紀錄永久刪除。唯一安全的來源是 `calendar-repository.ts` 的 `pageToEvent()`，不要用其他管道拼湊這個陣列 |
+| `零打` | Multi-select，記錄本週補位名單（guest 名稱字串）。⚠️ multi_select 的選項用名稱去重，陣列裡出現重複字串會被 Notion 靜默合併成一筆、無聲遺失資料，寫入前必須確保完整清單裡沒有重複字串，見 `docs/adr/0004-guest-name-must-be-globally-unique.md` |
 | `類型` | 若為「打球暫停」，報名和推播都會顯示暫停 |
 
 `零打` 欄位的命名規則見 [registration.md](../registration.md#guest-命名規則)。

@@ -41,24 +41,31 @@ Dobby 是羽球社的 LINE 機器人，負責：
 | `POST /webhook/dobby` | Dobby bot 的 LINE webhook |
 | `POST /webhook/batting` | 球來就打 bot 的 LINE webhook |
 | `GET /health` | 健康檢查 |
-| `GET /logs` | 日誌查看器（開發用） |
+| `GET /logs` | 日誌查看器，需要 `LOGS_ACCESS_TOKEN`（`Authorization: Bearer <token>` 或 `?token=`） |
 
 ## 部署
 
-### Docker（建議）
+### Docker Compose（目前實際使用的方式）
 
 ```bash
-# 建置
-docker build -t dobby .
+# 建置並在背景啟動
+docker compose up -d --build
 
-# 啟動（搭配 .env）
-docker compose up -d
+# 看 container log（跟應用自己的 /logs 頁面是兩回事，這是整個 container 的 stdout）
+docker compose logs -f app
+
+# 停止（不會刪掉 logs volume；千萬不要加 -v，會把 log 歷史一起清掉）
+docker compose down
 ```
+
+`docker-compose.yml` 有設 `restart: unless-stopped`，process 若因為未預期的例外 crash 會自動重啟，不需要額外裝 pm2/systemd。2026-09 以前是用手動 `node` + screen/tmux 跑，沒有任何自動重啟機制，process crash 後會直接停擺到有人發現為止；改用 Docker Compose 就是為了解決這個問題，見下方「日誌」一節的相關背景。
+
+`logs` 是具名 volume（`docker-compose.yml` 裡的 `volumes: logs:`），log 檔案會持久化在這個 volume 裡，容器重啟或重新部署都不會遺失。
 
 ### Zeabur
 
-專案使用 Docker multi-stage build，可直接部署至 Zeabur。將 `.env` 中的變數設定為 Zeabur 的環境變數即可。
+專案使用 Docker multi-stage build，理論上可以直接部署至 Zeabur（把 `.env` 的變數設成 Zeabur 的環境變數即可），但**目前實際上沒有這樣用**——如果之後改用 Zeabur 或其他 PaaS，切記那類平台通常沒有持久化本機磁碟，`docker-compose.yml` 宣告的 volume 不會被沿用，需要另外在平台上設定持久化儲存，否則容器重啟會讓 `logs/` 整批消失。
 
 ### 日誌
 
-啟動後日誌會寫入 `logs/` 資料夾，每日輪替，自動保留最近 7 天。開發模式下同時輸出至 console（pino-pretty 格式）。
+啟動後日誌會寫入 `logs/` 資料夾，每日輪替，自動保留最近 7 天。開發模式下同時輸出至 console（pino-pretty 格式）。`logs/` 的實際路徑固定錨定在專案根目錄（`src/index.ts` 用 `process.argv[1]` 算出，往下傳給需要的模組），不會受到啟動當下的工作目錄影響，見 `docs/adr/0003-log-dir-anchored-via-argv.md`。`/logs` 這個路由（見上方端點表）需要 `LOGS_ACCESS_TOKEN` 驗證，頁面顯示時間是台北時間，不是 UTC。
