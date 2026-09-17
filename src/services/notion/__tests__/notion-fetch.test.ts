@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { notionGet, notionPost, notionPatch } from '../notion-fetch.js';
+import { notionGet, notionPost, notionPatch, notionGetAllResults } from '../notion-fetch.js';
 import { logger } from '../../../utils/logger.js';
 
 vi.mock('../../../utils/logger.js', () => ({
@@ -95,5 +95,40 @@ describe('notion-fetch', () => {
       expect.objectContaining({ method: 'PATCH', path: '/pages/x', status: 500 }),
       'Notion API error',
     );
+  });
+
+  describe('notionGetAllResults', () => {
+    it('returns results directly when there is only one page', async () => {
+      fetchMock.mockResolvedValue(
+        jsonResponse(200, { results: [{ id: 'a' }, { id: 'b' }], has_more: false, next_cursor: null }),
+      );
+
+      const results = await notionGetAllResults('/pages/page-1/properties/prop-1');
+
+      expect(results).toEqual([{ id: 'a' }, { id: 'b' }]);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('follows cursor across multiple pages and merges results', async () => {
+      fetchMock
+        .mockResolvedValueOnce(
+          jsonResponse(200, { results: [{ id: 'a' }], has_more: true, next_cursor: 'cursor-1' }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse(200, { results: [{ id: 'b' }], has_more: false, next_cursor: null }),
+        );
+
+      const results = await notionGetAllResults('/pages/page-1/properties/prop-1');
+
+      expect(results).toEqual([{ id: 'a' }, { id: 'b' }]);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      const firstUrl = fetchMock.mock.calls[0][0] as string;
+      const secondUrl = fetchMock.mock.calls[1][0] as string;
+      expect(firstUrl).toBe('https://api.notion.com/v1/pages/page-1/properties/prop-1?page_size=100');
+      expect(secondUrl).toBe(
+        'https://api.notion.com/v1/pages/page-1/properties/prop-1?page_size=100&start_cursor=cursor-1',
+      );
+    });
   });
 });

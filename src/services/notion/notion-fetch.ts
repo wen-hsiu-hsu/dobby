@@ -60,3 +60,22 @@ export function notionPost(path: string, body: unknown): Promise<unknown> {
 export function notionPatch(path: string, body: unknown): Promise<unknown> {
   return request('PATCH', path, body);
 }
+
+export async function notionGetAllResults(path: string): Promise<unknown[]> {
+  const results: unknown[] = [];
+  let cursor: string | undefined;
+  do {
+    const qs = new URLSearchParams({
+      page_size: '100',
+      ...(cursor ? { start_cursor: cursor } : {}),
+    });
+    const page = (await request('GET', `${path}?${qs}`)) as {
+      results: unknown[];
+      has_more: boolean;
+      next_cursor: string | null;
+    };
+    results.push(...page.results);
+    cursor = page.has_more ? (page.next_cursor ?? undefined) : undefined;
+  } while (cursor);
+  return results;
+}
