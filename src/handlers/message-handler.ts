@@ -19,7 +19,14 @@ export async function handleMessage(event: MessageEvent, botId: string): Promise
   const multiChatId = event.source.type === 'room' ? event.source.roomId : undefined;
 
   // Lazy-load admin status from USERS DB (result reused below for tracking, no duplicate query)
-  const notionUser = await findByUserId(userId);
+  let notionUser;
+  try {
+    notionUser = await findByUserId(userId);
+  } catch (err) {
+    logger.error({ err }, 'Message handler error');
+    await replyMessage(event.replyToken, [{ type: 'text', text: '系統錯誤，請稍後再試' }], botId);
+    return;
+  }
   const isAdmin = notionUser?.isAdmin ?? false;
   logger.debug({ userId, text, isAdmin, sourceType: event.source.type }, 'handleMessage');
 
