@@ -9,11 +9,18 @@ describe('isCommand', () => {
   it('returns false for non-command', () => {
     expect(isCommand('hello')).toBe(false);
   });
+  it('returns false for lowercase @dobby — the bot name is case-sensitive by design', () => {
+    expect(isCommand('@dobby +1')).toBe(false);
+  });
 });
 
 describe('parseCommand', () => {
   it('returns null for non-command', () => {
     expect(parseCommand('hello')).toBeNull();
+  });
+
+  it('returns null for lowercase @dobby — the bot name is case-sensitive by design', () => {
+    expect(parseCommand('@dobby +1')).toBeNull();
   });
 
   it('parses @Dobby alone as INTRODUCE', () => {

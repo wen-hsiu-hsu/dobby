@@ -12,7 +12,7 @@ export function parseCommand(text: string): ParsedCommand | null {
   if (!text.startsWith('@Dobby')) return null;
 
   const normalized = normalizeFullWidth(text);
-  const body = normalized.replace(/^@Dobby\s*/i, '').trim().replace(/\s+/g, ' ');
+  const body = normalized.replace(/^@Dobby\s*/, '').trim().replace(/\s+/g, ' ');
 
   // Exact @Dobby → introduce
   if (body === '') {
