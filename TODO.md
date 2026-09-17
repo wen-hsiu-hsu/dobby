@@ -29,26 +29,6 @@
 
 > 全專案依模組（Notion 資料層 / LINE 整合 / 指令系統 / 報名請假核心 / 排程與基礎設施）分開派 subagent 審查。**完整技術細節、程式碼片段、每個模組「確認沒問題」的部分見 [`docs/code-review-2026-09-17.md`](docs/code-review-2026-09-17.md)**，章節編號（如 `[4.1]`）與下方清單一一對應。已修復且有文件記錄的項目已移除，見對應 `docs/*.md`／`docs/adr/*.md`。
 
-### 🟡 Medium
-
-- [ ] **[1.3] `calendar-repository.ts:33-38`、`people-repository.ts:17-22` `findByPageIds` 用 `Promise.all` 完全平行呼叫 Notion，違反「批次操作要加 delay」慣例（對照 `display-name-update.ts` 的 400ms），且 `notion-fetch.ts:30-36` 對 429 沒有 `Retry-After` 重試。** 修法方向：比照 `display-name-update.ts` 加節流，並在 `notion-fetch.ts` 對 429 做基本重試。
-
-- [ ] **[1.4] `season-repository.ts:13-14,16` `courts`/`guestFee`/`weekCounts` 用 `?? 預設值` 掩蓋 Notion 欄位缺值（如忘填「場地數」會悄悄用 2 片場地算容量），與同函式內 formula 欄位保留 `null` 的處理方式不一致。** 修法方向：缺值時至少 log 警告，或讓後續邏輯明確處理 `null` 而非猜測預設值。
-
-- [ ] **[2.2] `message-handler.ts:22` `findByUserId` 沒有 try/catch，與其他 command handler 不一致。** Notion 在判斷 admin 身分的早期呼叫失敗時，例外會一路丟到外層只記 log，使用者完全收不到任何回應。修法方向：比照 `owe.ts`/`news.ts` 等，包 try/catch 並回覆「系統錯誤，請稍後再試」。
-
-- [ ] **[2.3] `line-signature.ts:11-13` 未知 `botId`（webhook URL 打錯字/大小寫錯）靜默 fallback 用 Dobby 的 channel secret 驗簽，而非明確拒絕。** 且全專案沒有 Express 錯誤處理 middleware，驗簽失敗只會落到預設處理，難以定位根因。修法方向：`botId` 不在白名單時直接回 404；補上全域錯誤處理 middleware。
-
-- [ ] **[3.1] `payment.ts:5-16` 自己重複定義了一份 `blocksToText()`，漏了 `bulleted_list_item` 補 `• ` 前綴的邏輯（commit `fb72fbd` 只改了 `introduce.ts`/`news.ts`，漏改這裡）。** `docs/commands.md` 明確寫 payment 支援 bulleted list，目前不支援且無測試覆蓋。修法方向：改用共用 `src/services/notion/blocks-to-text.ts`，並比照 `news.test.ts` 補項目符號測試案例。
-
-- [ ] **[3.2] `command-parser.ts:12,15,90` `parseCommand`/`isCommand` 用大小寫敏感的 `startsWith('@Dobby')` 守門，但剝離前綴卻用 `/^@Dobby\s*/i` 忽略大小寫——這段大小寫容忍其實是死碼，實際不支援手動打字 `@dobby +1`。** 修法方向：決定要不要真的支援大小寫不敏感輸入，兩處判斷邏輯要一致（要嘛都不分大小寫，要嘛拿掉誤導性的 `/i`）。
-
-- [ ] **[4.4] `registration-handler.ts`（`handleRegistration`）完全沒有測試檔，這是串起 mutex + 容量計算 + Notion 寫入的主流程，也是 `[4.1]`/`[4.2]`/`[4.3]` 實際發生的入口。** 修法方向：比照 `leave-handler.test.ts` 補上，驗證 mutex lock key、`calendarRepo.updateGuests` 呼叫參數、cappedAt 標題文案等。
-
-- [ ] **[5.3] `display-name-update.ts:11` 查詢 USERS 資料庫沒有分頁處理，使用者數超過 100 時後面的人永遠不會被排程處理到；且直接呼叫 `notionPost` 繞過 repository 慣例。** 修法方向：補分頁迴圈，並改走 `users-repository.ts`（可能需要新增一個分頁安全的 list-all 函式）。
-
-- [ ] **[5.4] `display-name-update.ts:10-34` 整個迴圈包在單一 try/catch，任一筆使用者更新失敗會中斷整批，後面排隊的人當週全部不會被處理，無 retry。** 修法方向：改成逐筆 try/catch，單筆失敗只 log 該筆錯誤並繼續下一筆。
-
 ### 🟢 Low
 
 - [ ] **[1.5] `users-repository.ts:78-82` `incrementMessageCount` + `user-management.ts:47` 讀取→計算→寫回沒套 `withMutex`，連續訊息可能遺失計數。** 僅影響統計欄位，非報名核心邏輯，優先度低。
