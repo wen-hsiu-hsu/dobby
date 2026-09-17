@@ -2,7 +2,16 @@ import { Router, type Request, type Response } from 'express';
 import { readRecentLogs, type LogEntry } from '../utils/log-reader.js';
 import { logsAuthMiddleware } from '../middleware/logs-auth.js';
 
-export const logsRouter = Router();
+const taipeiFormatter = new Intl.DateTimeFormat('sv-SE', {
+  timeZone: 'Asia/Taipei',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+});
 
 const LEVEL_NAMES: Record<number, string> = {
   10: 'trace',
@@ -38,7 +47,7 @@ function escapeHtml(str: string): string {
 }
 
 function formatTime(epochMs: number): string {
-  return new Date(epochMs).toISOString().replace('T', ' ').replace('Z', '');
+  return taipeiFormatter.format(new Date(epochMs));
 }
 
 function renderEntry(entry: LogEntry): string {
@@ -194,7 +203,7 @@ function renderHtml(entries: LogEntry[]): string {
 
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Time (UTC)</th><th>Level</th><th>reqId</th><th>Message</th></tr></thead>
+      <thead><tr><th>Time (台北時間)</th><th>Level</th><th>reqId</th><th>Message</th></tr></thead>
       <tbody id="log-body">${rows}</tbody>
     </table>
     <div id="no-results">No matching log entries</div>
@@ -304,8 +313,14 @@ function renderHtml(entries: LogEntry[]): string {
 </html>`;
 }
 
-logsRouter.get('/', logsAuthMiddleware, async (_req: Request, res: Response) => {
-  const entries = await readRecentLogs();
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(renderHtml(entries));
-});
+export function createLogsRouter(logDir: string): Router {
+  const router = Router();
+
+  router.get('/', logsAuthMiddleware, async (_req: Request, res: Response) => {
+    const entries = await readRecentLogs(logDir);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(renderHtml(entries));
+  });
+
+  return router;
+}

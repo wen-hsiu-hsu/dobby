@@ -1,7 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-const LOG_DIR = 'logs';
 const RETENTION_DAYS = 7;
 
 export interface LogEntry {
@@ -12,10 +11,10 @@ export interface LogEntry {
   [key: string]: unknown;
 }
 
-export async function readRecentLogs(): Promise<LogEntry[]> {
+export async function readRecentLogs(logDir: string): Promise<LogEntry[]> {
   let files: string[];
   try {
-    files = await readdir(LOG_DIR);
+    files = await readdir(logDir);
   } catch {
     return [];
   }
@@ -34,7 +33,7 @@ export async function readRecentLogs(): Promise<LogEntry[]> {
   const entries: LogEntry[] = [];
 
   for (const file of jsonFiles) {
-    const content = await readFile(join(LOG_DIR, file), 'utf8');
+    const content = await readFile(join(logDir, file), 'utf8');
     for (const line of content.split('\n')) {
       const trimmed = line.trim();
       if (!trimmed) continue;

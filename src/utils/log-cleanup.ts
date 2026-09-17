@@ -2,13 +2,12 @@ import { readdir, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { logger } from './logger.js';
 
-const LOG_DIR = 'logs';
 const RETENTION_DAYS = 7;
 
-export async function cleanOldLogs(): Promise<void> {
+export async function cleanOldLogs(logDir: string): Promise<void> {
   let files: string[];
   try {
-    files = await readdir(LOG_DIR);
+    files = await readdir(logDir);
   } catch {
     return; // logs/ doesn't exist yet
   }
@@ -26,15 +25,26 @@ export async function cleanOldLogs(): Promise<void> {
 
     const fileDate = new Date(match[1]);
     if (fileDate < cutoff) {
-      const filePath = join(LOG_DIR, file);
-      await unlink(filePath);
-      logger.info({ file }, 'Deleted old log file');
+      const filePath = join(logDir, file);
+      try {
+        await unlink(filePath);
+        logger.info({ file }, 'Deleted old log file');
+      } catch (err) {
+        logger.warn({ file, err }, 'Failed to delete old log file');
+      }
     }
   }
 }
 
-export function startLogCleanup(): void {
-  void cleanOldLogs();
+export function startLogCleanup(logDir: string): void {
+  cleanOldLogs(logDir).catch((err: unknown) => {
+    logger.error({ err }, 'Log cleanup run failed');
+  });
+
   const INTERVAL_MS = 24 * 60 * 60 * 1000;
-  setInterval(() => { void cleanOldLogs(); }, INTERVAL_MS);
+  setInterval(() => {
+    cleanOldLogs(logDir).catch((err: unknown) => {
+      logger.error({ err }, 'Log cleanup run failed');
+    });
+  }, INTERVAL_MS);
 }

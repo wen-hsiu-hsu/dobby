@@ -1,4 +1,5 @@
 import pino from 'pino';
+import { join } from 'node:path';
 import { getReqId } from './request-context.js';
 
 const isDev = process.env['NODE_ENV'] !== 'production';
@@ -17,24 +18,28 @@ let base: pino.Logger = pino({
   }),
 });
 
-export async function initLogger(): Promise<void> {
+export async function initLogger(logDir: string): Promise<void> {
   if (isDev) return;
 
-  const build = await import('pino-roll');
-  const fileStream = await build.default({
-    file: 'logs/app',
-    frequency: 'daily',
-    dateFormat: 'yyyy-MM-dd',
-    mkdir: true,
-  });
+  try {
+    const build = await import('pino-roll');
+    const fileStream = await build.default({
+      file: join(logDir, 'app'),
+      frequency: 'daily',
+      dateFormat: 'yyyy-MM-dd',
+      mkdir: true,
+    });
 
-  base = pino(
-    { level: 'info' },
-    pino.multistream([
-      { stream: process.stdout, level: 'info' },
-      { stream: fileStream, level: 'info' },
-    ])
-  );
+    base = pino(
+      { level: 'info' },
+      pino.multistream([
+        { stream: process.stdout, level: 'info' },
+        { stream: fileStream, level: 'info' },
+      ])
+    );
+  } catch (err) {
+    base.error({ err }, 'Failed to initialize log file stream, logging to stdout only');
+  }
 }
 
 export const logger = new Proxy({} as pino.Logger, {
