@@ -15,10 +15,13 @@ function pageToRecord(page: PageObjectResponse): PersonRecord {
 }
 
 export async function findByPageIds(pageIds: string[]): Promise<PersonRecord[]> {
-  const results = await Promise.all(
-    pageIds.map((id) => notionGet(`/pages/${id}`)),
-  );
-  return results.map((r) => pageToRecord(r as PageObjectResponse));
+  const records: PersonRecord[] = [];
+  for (const [i, id] of pageIds.entries()) {
+    if (i > 0) await new Promise((r) => setTimeout(r, 400));
+    const page = await notionGet(`/pages/${id}`);
+    records.push(pageToRecord(page as PageObjectResponse));
+  }
+  return records;
 }
 
 export async function findByName(name: string): Promise<PersonRecord | null> {

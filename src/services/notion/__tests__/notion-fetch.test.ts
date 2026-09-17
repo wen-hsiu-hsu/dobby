@@ -3,18 +3,19 @@ import { notionGet, notionPost, notionPatch, notionGetAllResults } from '../noti
 import { logger } from '../../../utils/logger.js';
 
 vi.mock('../../../utils/logger.js', () => ({
-  logger: { debug: vi.fn(), error: vi.fn() },
+  logger: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
 const fetchMock = vi.fn();
 vi.stubGlobal('fetch', fetchMock);
 
-function jsonResponse(status: number, body: unknown): Response {
+function jsonResponse(status: number, body: unknown, headers: Record<string, string> = {}): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: { get: (name: string) => headers[name] ?? null },
     json: async () => body,
-  } as Response;
+  } as unknown as Response;
 }
 
 describe('notion-fetch', () => {
@@ -95,6 +96,30 @@ describe('notion-fetch', () => {
       expect.objectContaining({ method: 'PATCH', path: '/pages/x', status: 500 }),
       'Notion API error',
     );
+  });
+
+  describe('429 retry', () => {
+    it('retries after Retry-After seconds and succeeds', async () => {
+      fetchMock
+        .mockResolvedValueOnce(jsonResponse(429, { message: 'rate limited' }, { 'Retry-After': '0' }))
+        .mockResolvedValueOnce(jsonResponse(200, { ok: true }));
+
+      const result = await notionGet('/pages/abc');
+
+      expect(result).toEqual({ ok: true });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ method: 'GET', path: '/pages/abc', attempt: 1 }),
+        'Notion API rate limited, retrying',
+      );
+    });
+
+    it('throws after exceeding the retry limit', async () => {
+      fetchMock.mockResolvedValue(jsonResponse(429, { message: 'rate limited' }, { 'Retry-After': '0' }));
+
+      await expect(notionGet('/pages/abc')).rejects.toThrow('Notion API error');
+      expect(fetchMock).toHaveBeenCalledTimes(4); // 1 initial + 3 retries
+    });
   });
 
   describe('notionGetAllResults', () => {

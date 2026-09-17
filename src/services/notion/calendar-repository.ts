@@ -31,10 +31,13 @@ export async function findByDate(date: string): Promise<CalendarEvent | null> {
 }
 
 export async function findByPageIds(pageIds: string[]): Promise<CalendarEvent[]> {
-  const results = await Promise.all(
-    pageIds.map((id) => notionGet(`/pages/${id}`)),
-  );
-  return Promise.all(results.map((r) => pageToEvent(r as PageObjectResponse)));
+  const events: CalendarEvent[] = [];
+  for (const [i, id] of pageIds.entries()) {
+    if (i > 0) await new Promise((r) => setTimeout(r, 400));
+    const page = await notionGet(`/pages/${id}`);
+    events.push(await pageToEvent(page as PageObjectResponse));
+  }
+  return events;
 }
 
 // updateAbsentees 是整包覆寫（非增量 patch），呼叫端必須確保傳入完整的 absentees 清單

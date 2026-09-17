@@ -35,7 +35,15 @@ async function assertOk(res: Response, method: string, path: string): Promise<vo
   }
 }
 
-async function request(method: string, path: string, body?: unknown): Promise<unknown> {
+const MAX_RETRIES = 3;
+const DEFAULT_RETRY_DELAY_MS = 1000;
+
+function retryDelayMs(res: Response): number {
+  const retryAfter = Number(res.headers.get('Retry-After'));
+  return Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : DEFAULT_RETRY_DELAY_MS;
+}
+
+async function request(method: string, path: string, body?: unknown, attempt = 0): Promise<unknown> {
   const db = getDbName(path);
   logger.debug({ method, path, db, ...(body !== undefined && { body }) }, 'Notion API request');
   const res = await fetch(`${BASE_URL}${path}`, {
@@ -43,6 +51,12 @@ async function request(method: string, path: string, body?: unknown): Promise<un
     headers: notionHeaders(),
     ...(body !== undefined && { body: JSON.stringify(body) }),
   });
+  if (res.status === 429 && attempt < MAX_RETRIES) {
+    const delayMs = retryDelayMs(res);
+    logger.warn({ method, path, db, attempt: attempt + 1, delayMs }, 'Notion API rate limited, retrying');
+    await new Promise((r) => setTimeout(r, delayMs));
+    return request(method, path, body, attempt + 1);
+  }
   await assertOk(res, method, path);
   const data = await res.json();
   logger.debug({ method, path, db, result: data }, 'Notion API response');
