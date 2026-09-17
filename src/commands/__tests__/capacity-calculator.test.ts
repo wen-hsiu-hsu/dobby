@@ -97,6 +97,55 @@ describe('calculateRemoveCapacity', () => {
     expect(result.canAdd).toBe(false);
     expect(result.error).toMatch(/找不到/);
   });
+
+  it('removes the second/third entry for a non-season member with existing numbered entries', () => {
+    const event: CalendarEventData = { ...baseEvent, guests: ['Alice', 'Alice 2', 'Alice 3', 'Bob'] };
+    const result = calculateRemoveCapacity(event, 'Alice', -1, false);
+    expect(result.canAdd).toBe(true);
+    // removes the first match in list order; the important part is only one Alice entry is removed
+    expect(result.newGuests).toHaveLength(3);
+    expect(result.newGuests).toContain('Bob');
+    expect(result.newGuests?.filter((g) => g === 'Alice' || g === 'Alice 2' || g === 'Alice 3')).toHaveLength(2);
+  });
+
+  it('does NOT match an unrelated name that is a string prefix of another guest (non-season)', () => {
+    // Regression test for the "Al" vs "Alice"/"Alice 2" data-deletion bug.
+    const event: CalendarEventData = { ...baseEvent, guests: ['Alice', 'Alice 2'] };
+    const result = calculateRemoveCapacity(event, 'Al', -1, false);
+    expect(result.canAdd).toBe(false);
+    expect(result.error).toMatch(/找不到/);
+    expect(event.guests).toEqual(['Alice', 'Alice 2']);
+  });
+
+  it('does NOT match a guest whose name merely starts with the target name (non-season)', () => {
+    const event: CalendarEventData = { ...baseEvent, guests: ['Peter Wang'] };
+    const result = calculateRemoveCapacity(event, 'Peter', -1, false);
+    expect(result.canAdd).toBe(false);
+    expect(result.error).toMatch(/找不到/);
+  });
+
+  it('removes own exact-name entry without touching a longer, unrelated same-prefix name (non-season)', () => {
+    const event: CalendarEventData = { ...baseEvent, guests: ['Peter', 'Peter Wang'] };
+    const result = calculateRemoveCapacity(event, 'Peter', -1, false);
+    expect(result.canAdd).toBe(true);
+    expect(result.newGuests).toEqual(['Peter Wang']);
+  });
+
+  it('does NOT match an unrelated name that is a string prefix of a friend entry (season member)', () => {
+    // "Bo" should not accidentally match "Bob的朋友" / "Bob的朋友2".
+    const event: CalendarEventData = { ...baseEvent, guests: ['Bob的朋友', 'Bob的朋友2'] };
+    const result = calculateRemoveCapacity(event, 'Bo', -1, true);
+    expect(result.canAdd).toBe(false);
+    expect(result.error).toMatch(/找不到/);
+    expect(event.guests).toEqual(['Bob的朋友', 'Bob的朋友2']);
+  });
+
+  it('removes a numbered friend entry for a season member', () => {
+    const event: CalendarEventData = { ...baseEvent, guests: ['Bob的朋友', 'Bob的朋友2', 'Carol的朋友'] };
+    const result = calculateRemoveCapacity(event, 'Bob', -2, true);
+    expect(result.canAdd).toBe(true);
+    expect(result.newGuests).toEqual(['Carol的朋友']);
+  });
 });
 
 describe('calculateTotalSlots', () => {

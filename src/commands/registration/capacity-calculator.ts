@@ -77,6 +77,10 @@ export function calculateAddCapacity(
   };
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export function calculateRemoveCapacity(
   event: CalendarEventData,
   targetName: string,
@@ -84,7 +88,14 @@ export function calculateRemoveCapacity(
   isSelfSeasonMember: boolean
 ): CapacityResult {
   const prefix = isSelfSeasonMember ? `${targetName}的朋友` : targetName;
-  const toRemove = event.guests.filter((g) => g.startsWith(prefix));
+  // Match the prefix exactly, or the prefix followed by the numbering suffix that
+  // calculateAddCapacity actually produces ("{prefix}2" for season-member friends,
+  // "{prefix} 2" for non-season members' own entries). A plain startsWith would also
+  // match unrelated names that merely share this name as a string prefix (e.g. target
+  // "Al" would wrongly match existing guests "Alice"/"Alice 2").
+  const suffixPattern = isSelfSeasonMember ? '\\d+' : ' \\d+';
+  const exactOrNumberedPattern = new RegExp(`^${escapeRegExp(prefix)}(${suffixPattern})?$`);
+  const toRemove = event.guests.filter((g) => exactOrNumberedPattern.test(g));
 
   if (toRemove.length === 0) {
     return { canAdd: false, error: `找不到 ${targetName} 的報名紀錄` };
