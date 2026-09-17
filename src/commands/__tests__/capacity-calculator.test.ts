@@ -75,6 +75,108 @@ describe('calculateAddCapacity', () => {
     expect(result.newGuests).toHaveLength(14);
     expect(result.newGuests).toContain('New 5');
   });
+
+  // Regression tests for the "Notion multi_select silently merges duplicate-name
+  // options" data-loss bug: calculateAddCapacity used to number every call's entries
+  // starting from 0 without looking at event.guests, so a season member calling "+1"
+  // repeatedly (each call re-reading the latest Notion data, as withFreshCalendarEvent
+  // does) produced the exact same "{Name}的朋友" string every time. Notion's 零打
+  // property is multi_select, whose options are deduplicated by name, so the second
+  // (and third, and fourth) identically-named guest silently vanished even though the
+  // app believed each call had registered a new person.
+  describe('repeated calls continue numbering instead of duplicating names', () => {
+    it('season member calling +1 four times in a row each gets a distinct friend name', () => {
+      // Each call simulates withFreshCalendarEvent re-reading Notion, which by then
+      // already contains the guest written by the previous call.
+      let event: CalendarEventData = { ...baseEvent, guests: [] };
+      const producedNames: string[] = [];
+
+      for (let call = 0; call < 4; call++) {
+        const result = calculateAddCapacity(event, season, '許文修', 1, true);
+        expect(result.canAdd).toBe(true);
+        const newGuests = result.newGuests ?? [];
+        const added = newGuests.filter((g) => !event.guests.includes(g));
+        expect(added).toHaveLength(1);
+        producedNames.push(added[0] as string);
+        event = { ...event, guests: newGuests };
+      }
+
+      // All four calls must have produced four distinct, non-colliding names.
+      expect(new Set(producedNames).size).toBe(4);
+      expect(producedNames).toEqual(['許文修的朋友', '許文修的朋友2', '許文修的朋友3', '許文修的朋友4']);
+      expect(event.guests).toHaveLength(4);
+    });
+
+    it('non-season member calling +1 repeatedly each gets a distinct numbered name', () => {
+      let event: CalendarEventData = { ...baseEvent, guests: [] };
+      const producedNames: string[] = [];
+
+      for (let call = 0; call < 3; call++) {
+        const result = calculateAddCapacity(event, season, 'Alice', 1, false);
+        expect(result.canAdd).toBe(true);
+        const newGuests = result.newGuests ?? [];
+        const added = newGuests.filter((g) => !event.guests.includes(g));
+        expect(added).toHaveLength(1);
+        producedNames.push(added[0] as string);
+        event = { ...event, guests: newGuests };
+      }
+
+      expect(new Set(producedNames).size).toBe(3);
+      expect(producedNames).toEqual(['Alice', 'Alice 2', 'Alice 3']);
+    });
+
+    it('numbering for one target is not thrown off by unrelated existing guest names (season members)', () => {
+      // Alice already has a friend registered; Bob then registers his first friend.
+      // Bob's numbering must start fresh, not continue from Alice's.
+      const event: CalendarEventData = { ...baseEvent, guests: ['Alice的朋友'] };
+      const result = calculateAddCapacity(event, season, 'Bob', 1, true);
+
+      expect(result.canAdd).toBe(true);
+      expect(result.newGuests).toEqual(['Alice的朋友', 'Bob的朋友']);
+    });
+
+    it('a target with existing entries continues numbering correctly even with unrelated guests interleaved', () => {
+      const event: CalendarEventData = {
+        ...baseEvent,
+        guests: ['Alice的朋友', 'Bob的朋友', 'Alice的朋友2'],
+      };
+      const result = calculateAddCapacity(event, season, 'Bob', 1, true);
+
+      expect(result.canAdd).toBe(true);
+      // Bob already has one entry ("Bob的朋友"), so the new one must be "Bob的朋友2",
+      // not another "Bob的朋友" (which would collide) and not influenced by Alice's
+      // own "2" suffix.
+      expect(result.newGuests).toEqual(['Alice的朋友', 'Bob的朋友', 'Alice的朋友2', 'Bob的朋友2']);
+    });
+
+    it('a non-season target with existing entries continues numbering without being thrown off by unrelated names', () => {
+      const event: CalendarEventData = { ...baseEvent, guests: ['Alice', 'Bob', 'Alice 2'] };
+      const result = calculateAddCapacity(event, season, 'Bob', 1, false);
+
+      expect(result.canAdd).toBe(true);
+      expect(result.newGuests).toEqual(['Alice', 'Bob', 'Alice 2', 'Bob 2']);
+    });
+
+    it('picks up numbering after a gap left by a previous removal', () => {
+      // e.g. "Bob的朋友" was removed earlier via -1, leaving only "Bob的朋友2" behind;
+      // the next +1 must not reuse "Bob的朋友2" and collide.
+      const event: CalendarEventData = { ...baseEvent, guests: ['Bob的朋友2'] };
+      const result = calculateAddCapacity(event, season, 'Bob', 1, true);
+
+      expect(result.canAdd).toBe(true);
+      expect(result.newGuests).toEqual(['Bob的朋友2', 'Bob的朋友3']);
+    });
+
+    it('requesting multiple entries in a single call still avoids colliding with existing ones', () => {
+      const event: CalendarEventData = { ...baseEvent, guests: ['許文修的朋友'] };
+      const result = calculateAddCapacity(event, season, '許文修', 2, true);
+
+      expect(result.canAdd).toBe(true);
+      expect(result.newGuests).toEqual(['許文修的朋友', '許文修的朋友2', '許文修的朋友3']);
+      // No duplicate strings in the array that gets sent to Notion's multi_select.
+      expect(new Set(result.newGuests)).toHaveProperty('size', result.newGuests?.length);
+    });
+  });
 });
 
 describe('calculateRemoveCapacity', () => {

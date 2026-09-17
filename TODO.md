@@ -490,7 +490,8 @@ iPass money
 
 ### 🟠 Medium-High
 
-- [ ] **[4.3] `capacity-calculator.ts:58-71` `calculateAddCapacity` 的 guest 命名編號每次呼叫都從 0 重算，導致重複命名。** 同一人分兩次 `+1`（如季租成員 Bob 先後兩次各帶一位朋友）會產生兩筆一模一樣的「Bob的朋友」，而非規格要求的「Bob的朋友」+「Bob的朋友2」；非季租成員命名（「Alice」/「Alice 2」）同樣有此問題。`capacity-calculator.test.ts` 目前沒有測試「`event.guests` 已含同一人先前條目」的情境。修法方向：先掃描 `event.guests` 找出同一 `targetName` 已存在的最大編號，再接續編號；並補測試。
+- [x] **[4.3] `capacity-calculator.ts:58-71` `calculateAddCapacity` 的 guest 命名編號每次呼叫都從 0 重算，導致重複命名。** 同一人分兩次 `+1`（如季租成員 Bob 先後兩次各帶一位朋友）會產生兩筆一模一樣的「Bob的朋友」，而非規格要求的「Bob的朋友」+「Bob的朋友2」；非季租成員命名（「Alice」/「Alice 2」）同樣有此問題。`capacity-calculator.test.ts` 目前沒有測試「`event.guests` 已含同一人先前條目」的情境。修法方向：先掃描 `event.guests` 找出同一 `targetName` 已存在的最大編號，再接續編號；並補測試。
+    - ✅ **已修正並在正式環境實際發生後確認**：2026-09-17 使用者「許文修」連續 4 次 `@Dobby +1` 只成功報名 1 位——因為重複命名產生的相同字串被 Notion `零打`（multi_select）欄位靜默去重合併成一筆，其餘 3 次報名在 Notion 端無聲遺失，程式端也沒有任何錯誤或警告。已新增 `findMaxExistingIndex` 掃描既有清單接續編號，並加上寫入前重複字串偵測的 `logger.warn` 防護（未來若還有其他路徑產生重複字串，至少會留下 log 線索）。已補 7 個測試案例，全專案測試通過。**已發生的那 4 次操作無法從程式碼層面復原**（Notion 的去重發生在伺服器端當下、無審計日誌可回溯），需人工跟許文修確認原本想報名的朋友是誰，手動在 Notion 補上。
 
 ### 🟡 Medium
 

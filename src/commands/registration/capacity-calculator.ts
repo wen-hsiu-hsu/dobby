@@ -1,3 +1,5 @@
+import { logger } from '../../utils/logger.js';
+
 export interface CalendarEventData {
   pageId: string;
   date: string;
@@ -23,6 +25,38 @@ export interface CapacityResult {
 export function calculateTotalSlots(event: Pick<CalendarEventData, 'absentees'>, seasonData: SeasonData): number {
   const COURTS_DENSITY = 7;
   return seasonData.courts * COURTS_DENSITY - seasonData.members.length + event.absentees.length;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Finds the highest existing numbering already used for `prefix` inside `guests`,
+ * so a new batch of entries can continue from there instead of restarting at 0.
+ *
+ * Matches the unsuffixed prefix itself (treated as index 1) and the numbered form
+ * that calculateAddCapacity produces ("{prefix}2" for season-member friends,
+ * "{prefix} 2" for non-season members). Anchored to the full string so an unrelated
+ * guest that merely starts with `prefix` (e.g. "Alice" vs prefix "Al") is never
+ * mistaken for one of this target's entries.
+ */
+function findMaxExistingIndex(guests: string[], prefix: string, numberSuffixPattern: string): number {
+  const exactPattern = new RegExp(`^${escapeRegExp(prefix)}$`);
+  const numberedPattern = new RegExp(`^${escapeRegExp(prefix)}${numberSuffixPattern}$`);
+
+  let max = 0;
+  for (const guest of guests) {
+    if (exactPattern.test(guest)) {
+      max = Math.max(max, 1);
+      continue;
+    }
+    const match = guest.match(numberedPattern);
+    if (match) {
+      max = Math.max(max, parseInt(match[1] as string, 10));
+    }
+  }
+  return max;
 }
 
 export function calculateAddCapacity(
@@ -55,30 +89,54 @@ export function calculateAddCapacity(
     cappedAt = availableSlots;
   }
 
-  // Build new guest entries
+  // Build new guest entries. Numbering must continue from whatever already exists in
+  // event.guests for this targetName — not restart at 0 — otherwise repeated calls
+  // (e.g. a season member sending "+1" several times, each one re-reading the latest
+  // Notion data via withFreshCalendarEvent) produce an identically-named entry every
+  // time. Notion's 零打 property is multi_select, whose options are deduplicated by
+  // name: two guests with the exact same string collapse into a single option
+  // server-side, silently discarding one of the registrations even though this code
+  // believed it wrote two.
+  const prefix = isSelfSeasonMember ? `${targetName}的朋友` : targetName;
+  // Season member's friends: "{Name}的朋友" or "{Name}的朋友2", etc.
+  // Non-season members: "{Name}" or "{Name} 2", etc.
+  const numberSuffixPattern = isSelfSeasonMember ? '(\\d+)' : ' (\\d+)';
+  const startIndex = findMaxExistingIndex(event.guests, prefix, numberSuffixPattern);
+
   const newEntries: string[] = [];
-  if (isSelfSeasonMember) {
-    // Season member's friends: "{Name}的朋友" or "{Name}的朋友2", etc.
-    for (let i = 0; i < actualDelta; i++) {
-      const suffix = i === 0 ? '' : String(i + 1);
-      newEntries.push(`${targetName}的朋友${suffix}`);
+  for (let i = 0; i < actualDelta; i++) {
+    const index = startIndex + i + 1;
+    if (index === 1) {
+      newEntries.push(prefix);
+    } else {
+      newEntries.push(isSelfSeasonMember ? `${prefix}${index}` : `${prefix} ${index}`);
     }
-  } else {
-    for (let i = 0; i < actualDelta; i++) {
-      const suffix = i === 0 ? '' : ` ${i + 1}`;
-      newEntries.push(`${targetName}${suffix}`);
-    }
+  }
+
+  const newGuests = [...event.guests, ...newEntries];
+
+  // Defense-in-depth: even with the numbering above, anything else that ever produces
+  // a duplicate string in this array (a future bug, an admin path, manual data) would
+  // hit the same silent multi_select dedup and lose a registration with no error. Log
+  // it so it's diagnosable instead of invisible, without blocking the write.
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const guest of newGuests) {
+    if (seen.has(guest)) duplicates.add(guest);
+    seen.add(guest);
+  }
+  if (duplicates.size > 0) {
+    logger.warn(
+      { targetName, duplicates: [...duplicates], newGuests },
+      'calculateAddCapacity: duplicate guest name(s) about to be written to Notion multi_select — Notion will silently merge these into one entry, losing a registration'
+    );
   }
 
   return {
     canAdd: true,
-    newGuests: [...event.guests, ...newEntries],
+    newGuests,
     cappedAt,
   };
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 export function calculateRemoveCapacity(
