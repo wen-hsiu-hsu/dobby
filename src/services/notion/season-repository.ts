@@ -2,8 +2,24 @@ import { env } from '../../config/env.js';
 import { notionPost } from './notion-fetch.js';
 import { getTitle, getRelation, getNumber, getRichText, getFormulaNumber } from './property-helpers.js';
 import { getFullRelation } from './paginated-relation.js';
+import { logger } from '../../utils/logger.js';
 import type { SeasonRecord } from '../../types/notion-models.js';
 import type { PageObjectResponse } from '@notionhq/client/build/src/api-endpoints.js';
+
+const NUMBER_DEFAULTS = {
+  '場地數': 2,
+  '零打費用': 170,
+  '租借次數 (2hrs)': 0,
+} as const;
+
+function getNumberWithDefault(p: PageObjectResponse['properties'], pageId: string, key: keyof typeof NUMBER_DEFAULTS): number {
+  const value = getNumber(p, key);
+  if (value === null) {
+    logger.warn({ seasonPageId: pageId, field: key, fallback: NUMBER_DEFAULTS[key] }, 'Season 欄位缺值，使用預設值');
+    return NUMBER_DEFAULTS[key];
+  }
+  return value;
+}
 
 async function pageToRecord(page: PageObjectResponse): Promise<SeasonRecord> {
   const p = page.properties;
@@ -11,10 +27,10 @@ async function pageToRecord(page: PageObjectResponse): Promise<SeasonRecord> {
     pageId: page.id,
     name: getTitle(p, '季租時段'),
     members: await getFullRelation(p, '報名人', page.id),
-    courts: getNumber(p, '場地數') ?? 2,
-    guestFee: getNumber(p, '零打費用') ?? 170,
+    courts: getNumberWithDefault(p, page.id, '場地數'),
+    guestFee: getNumberWithDefault(p, page.id, '零打費用'),
     location: getRichText(p, '地點'),
-    weekCounts: getNumber(p, '租借次數 (2hrs)') ?? 0,
+    weekCounts: getNumberWithDefault(p, page.id, '租借次數 (2hrs)'),
     pricePerPersonForSeason: getFormulaNumber(p, '每人平均場租'),
     pricePerPersonOverride: getNumber(p, '每人平均場租（特殊狀況）'),
     totalPrice: getFormulaNumber(p, '場租總金額'),

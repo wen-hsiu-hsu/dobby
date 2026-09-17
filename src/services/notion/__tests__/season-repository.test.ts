@@ -84,6 +84,25 @@ describe('season-repository', () => {
 
       expect(season).toBeNull();
     });
+
+    it('falls back to defaults when 場地數/零打費用/租借次數 are missing from Notion', async () => {
+      const props = baseProps();
+      // @ts-expect-error simulate a missing property (e.g. field renamed/deleted in Notion)
+      delete props['場地數'];
+      // @ts-expect-error same as above
+      delete props['零打費用'];
+      // @ts-expect-error same as above
+      delete props['租借次數 (2hrs)'];
+      notionPostMock.mockResolvedValue({
+        results: [makePage(props, 'season-page-1')],
+      });
+
+      const season = await findByName('2025-Q1');
+
+      expect(season?.courts).toBe(2);
+      expect(season?.guestFee).toBe(170);
+      expect(season?.weekCounts).toBe(0);
+    });
   });
 
   describe('findAll', () => {
