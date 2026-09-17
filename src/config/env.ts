@@ -12,6 +12,7 @@ const envSchema = z.object({
   NOTION_DB_PEOPLE: z.string().min(1),
   NOTION_DB_SEASON: z.string().min(1),
   NOTION_DB_ANNOUNCEMENT: z.string().min(1),
+  LOGS_ACCESS_TOKEN: z.string().min(1),
   PORT: z.string().default('3000'),
   NODE_ENV: z.string().default('development'),
 });

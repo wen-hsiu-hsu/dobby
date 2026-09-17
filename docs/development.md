@@ -37,6 +37,7 @@ npm run dev
 | `NOTION_DB_PEOPLE` | ✅ | 人員清單資料庫 ID |
 | `NOTION_DB_SEASON` | ✅ | 季租承租紀錄資料庫 ID |
 | `NOTION_DB_ANNOUNCEMENT` | ✅ | 所有公告資料庫 ID |
+| `LOGS_ACCESS_TOKEN` | ✅ | `/logs` 存取用的共享密鑰，需帶 `Authorization: Bearer <token>` 或 `?token=` query string 才能查看 |
 | `PORT` | ❌ | 伺服器 port（預設 `3000`） |
 | `NODE_ENV` | ❌ | `development` 或 `production` |
 

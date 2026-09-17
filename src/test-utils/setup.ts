@@ -12,4 +12,5 @@ process.env['NOTION_DB_CALENDAR'] = 'test-db-calendar';
 process.env['NOTION_DB_PEOPLE'] = 'test-db-people';
 process.env['NOTION_DB_SEASON'] = 'test-db-season';
 process.env['NOTION_DB_ANNOUNCEMENT'] = 'test-db-announcement';
+process.env['LOGS_ACCESS_TOKEN'] = 'test-logs-token';
 process.env['PORT'] = '3000';

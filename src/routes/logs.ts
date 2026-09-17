@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import { readRecentLogs, type LogEntry } from '../utils/log-reader.js';
+import { logsAuthMiddleware } from '../middleware/logs-auth.js';
 
 export const logsRouter = Router();
 
@@ -303,7 +304,7 @@ function renderHtml(entries: LogEntry[]): string {
 </html>`;
 }
 
-logsRouter.get('/', async (_req: Request, res: Response) => {
+logsRouter.get('/', logsAuthMiddleware, async (_req: Request, res: Response) => {
   const entries = await readRecentLogs();
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(renderHtml(entries));

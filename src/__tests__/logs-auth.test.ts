@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import request from 'supertest';
-import crypto from 'crypto';
+
+const VALID_TOKEN = 'test-logs-token';
 
 // Must set env vars before importing app (env.ts validates at import time)
 beforeAll(() => {
@@ -15,7 +16,7 @@ beforeAll(() => {
   process.env['NOTION_DB_PEOPLE'] = 'test-db-people';
   process.env['NOTION_DB_SEASON'] = 'test-db-season';
   process.env['NOTION_DB_ANNOUNCEMENT'] = 'test-db-announcement';
-  process.env['LOGS_ACCESS_TOKEN'] = 'test-logs-token';
+  process.env['LOGS_ACCESS_TOKEN'] = VALID_TOKEN;
   process.env['PORT'] = '3000';
 });
 
@@ -24,7 +25,7 @@ vi.mock('../handlers/event-router.js', () => ({
   processEvents: vi.fn().mockResolvedValue(undefined),
 }));
 
-// Mock LINE SDK middleware to bypass signature validation in tests
+// Mock LINE SDK middleware (unrelated route, kept for consistency with app import)
 vi.mock('@line/bot-sdk', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@line/bot-sdk')>();
   return {
@@ -33,11 +34,12 @@ vi.mock('@line/bot-sdk', async (importOriginal) => {
   };
 });
 
-function makeSignature(secret: string, body: string): string {
-  return crypto.createHmac('sha256', secret).update(body).digest('base64');
-}
+// Avoid depending on real log files on disk
+vi.mock('../utils/log-reader.js', () => ({
+  readRecentLogs: vi.fn().mockResolvedValue([]),
+}));
 
-describe('POST /webhook/:botId', () => {
+describe('GET /logs', () => {
   let app: any;
 
   beforeAll(async () => {
@@ -45,36 +47,30 @@ describe('POST /webhook/:botId', () => {
     app = mod.app;
   });
 
-  it('returns 200 immediately with valid payload', async () => {
-    const body = JSON.stringify({ events: [] });
-    const sig = makeSignature('test-secret-dobby', body);
-
-    const res = await request(app)
-      .post('/webhook/dobby')
-      .set('x-line-signature', sig)
-      .set('content-type', 'application/json')
-      .send(body);
-
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual({ status: 'ok' });
+  it('rejects requests with no token', async () => {
+    const res = await request(app).get('/logs');
+    expect(res.status).toBe(401);
   });
 
-  it('returns 200 for batting bot', async () => {
-    const body = JSON.stringify({ events: [] });
-    const sig = makeSignature('test-secret-batting', body);
-
-    const res = await request(app)
-      .post('/webhook/batting')
-      .set('x-line-signature', sig)
-      .set('content-type', 'application/json')
-      .send(body);
-
-    expect(res.status).toBe(200);
+  it('rejects requests with a wrong Bearer token', async () => {
+    const res = await request(app).get('/logs').set('Authorization', 'Bearer wrong-token');
+    expect(res.status).toBe(401);
   });
 
-  it('GET /health returns 200', async () => {
-    const res = await request(app).get('/health');
+  it('rejects requests with a wrong query token', async () => {
+    const res = await request(app).get('/logs?token=wrong-token');
+    expect(res.status).toBe(401);
+  });
+
+  it('accepts requests with the correct Bearer token', async () => {
+    const res = await request(app).get('/logs').set('Authorization', `Bearer ${VALID_TOKEN}`);
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ status: 'ok' });
+    expect(res.headers['content-type']).toContain('text/html');
+  });
+
+  it('accepts requests with the correct query token', async () => {
+    const res = await request(app).get(`/logs?token=${VALID_TOKEN}`);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('text/html');
   });
 });
