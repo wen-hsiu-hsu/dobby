@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { notionPost, notionPatch } from '../notion-fetch.js';
-import { findByUserId, create, update, incrementMessageCount } from '../users-repository.js';
+import { findByUserId, findAll, create, update, incrementMessageCount } from '../users-repository.js';
 
 vi.mock('../notion-fetch.js');
 
@@ -72,6 +72,39 @@ describe('users-repository', () => {
       const user = await findByUserId('missing');
 
       expect(user).toBeNull();
+    });
+  });
+
+  describe('findAll', () => {
+    it('follows has_more/next_cursor to fetch every page', async () => {
+      notionPostMock
+        .mockResolvedValueOnce({
+          results: [makePage({ user_id: { type: 'title', title: [{ plain_text: 'user-a' }] } }, 'page-a')],
+          has_more: true,
+          next_cursor: 'cursor-1',
+        })
+        .mockResolvedValueOnce({
+          results: [makePage({ user_id: { type: 'title', title: [{ plain_text: 'user-b' }] } }, 'page-b')],
+          has_more: false,
+          next_cursor: null,
+        });
+
+      const users = await findAll();
+
+      expect(users.map((u) => u.userId)).toEqual(['user-a', 'user-b']);
+      expect(notionPostMock).toHaveBeenNthCalledWith(1, `/databases/${process.env['NOTION_DB_USERS']}/query`, { page_size: 100 });
+      expect(notionPostMock).toHaveBeenNthCalledWith(2, `/databases/${process.env['NOTION_DB_USERS']}/query`, {
+        page_size: 100,
+        start_cursor: 'cursor-1',
+      });
+    });
+
+    it('returns an empty array when the database has no users', async () => {
+      notionPostMock.mockResolvedValue({ results: [], has_more: false, next_cursor: null });
+
+      const users = await findAll();
+
+      expect(users).toEqual([]);
     });
   });
 

@@ -1,10 +1,7 @@
 import cron from 'node-cron';
 import * as usersRepo from '../services/notion/users-repository.js';
-import { notionPost } from '../services/notion/notion-fetch.js';
 import { getProfile } from '../services/line/profile-service.js';
-import { getTitle, getRichText, getMultiSelect } from '../services/notion/property-helpers.js';
 import { logger } from '../utils/logger.js';
-import { env } from '../config/env.js';
 
 // Try every group the user has ever been seen in (they may have left some of them,
 // which makes that group's profile lookup 404), stopping at the first one that
@@ -20,31 +17,28 @@ async function resolveDisplayName(userId: string, groups: string[]): Promise<str
 export async function updateDisplayNames(): Promise<void> {
   logger.info('Starting display name batch update');
   try {
-    const response = await notionPost(`/databases/${env.NOTION_DB_USERS}/query`, {}) as any;
-    const pages = response.results as any[];
+    const users = await usersRepo.findAll();
 
     let updated = 0;
     let skipped = 0;
-    for (const page of pages) {
-      const userId = getTitle(page.properties, 'user_id');
-      if (!userId) continue;
+    for (const user of users) {
+      if (!user.userId) continue;
 
-      const groups = getMultiSelect(page.properties, 'groups');
-      if (groups.length === 0) {
-        logger.info({ userId }, 'Skipping display name update: user has no known groups');
+      if (user.groups.length === 0) {
+        logger.info({ userId: user.userId }, 'Skipping display name update: user has no known groups');
         skipped++;
         continue;
       }
 
-      const displayName = await resolveDisplayName(userId, groups);
+      const displayName = await resolveDisplayName(user.userId, user.groups);
       if (displayName === null) {
-        logger.warn({ userId, groups }, 'Could not resolve profile for user in any known group');
+        logger.warn({ userId: user.userId, groups: user.groups }, 'Could not resolve profile for user in any known group');
         skipped++;
         continue;
       }
 
-      if (displayName !== getRichText(page.properties, 'Custom Name')) {
-        await usersRepo.update(page.id, { customName: displayName });
+      if (displayName !== user.customName) {
+        await usersRepo.update(user.pageId, { customName: displayName });
         updated++;
       }
 
@@ -52,7 +46,7 @@ export async function updateDisplayNames(): Promise<void> {
       await new Promise((r) => setTimeout(r, 400));
     }
 
-    logger.info({ updated, skipped, total: pages.length }, 'Display name update complete');
+    logger.info({ updated, skipped, total: users.length }, 'Display name update complete');
   } catch (err) {
     logger.error({ err }, 'Display name update failed');
   }

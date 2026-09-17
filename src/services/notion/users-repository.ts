@@ -33,6 +33,23 @@ export async function findByUserId(userId: string): Promise<NotionUser | null> {
   return pageToUser(response.results[0] as PageObjectResponse);
 }
 
+export async function findAll(): Promise<NotionUser[]> {
+  const users: NotionUser[] = [];
+  let cursor: string | undefined;
+  let first = true;
+  do {
+    if (!first) await new Promise((r) => setTimeout(r, 400)); // Notion rate limit
+    first = false;
+    const response = await notionPost(`/databases/${env.NOTION_DB_USERS}/query`, {
+      page_size: 100,
+      ...(cursor ? { start_cursor: cursor } : {}),
+    }) as { results: PageObjectResponse[]; has_more: boolean; next_cursor: string | null };
+    users.push(...response.results.map(pageToUser));
+    cursor = response.has_more ? (response.next_cursor ?? undefined) : undefined;
+  } while (cursor);
+  return users;
+}
+
 export async function findAdmin(): Promise<NotionUser | null> {
   const response = await notionPost(`/databases/${env.NOTION_DB_USERS}/query`, {
     filter: { property: 'is_admin', checkbox: { equals: true } },
