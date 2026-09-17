@@ -105,4 +105,35 @@ describe('updateDisplayNames', () => {
     expect(updateMock).toHaveBeenCalledTimes(1);
     expect(updateMock).toHaveBeenCalledWith('page-user-good', { customName: 'Good' });
   });
+
+  it('continues processing later users when an earlier user throws (single-user failure does not abort the batch)', async () => {
+    findAllMock.mockResolvedValue([
+      makeUser({ userId: 'user-broken', customName: 'Old', groups: ['group-1'] }),
+      makeUser({ userId: 'user-good', customName: 'OldGood', groups: ['group-1'] }),
+    ]);
+    getProfileMock.mockImplementation(async (userId) => {
+      if (userId === 'user-broken') throw new Error('Notion 429');
+      return { userId, displayName: 'Good' };
+    });
+
+    await expect(updateDisplayNames()).resolves.toBeUndefined();
+
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    expect(updateMock).toHaveBeenCalledWith('page-user-good', { customName: 'Good' });
+  });
+
+  it('does not abort the batch when a single Notion write fails', async () => {
+    findAllMock.mockResolvedValue([
+      makeUser({ userId: 'user-write-fails', customName: 'Old', groups: ['group-1'] }),
+      makeUser({ userId: 'user-good', customName: 'OldGood', groups: ['group-1'] }),
+    ]);
+    getProfileMock.mockImplementation(async (userId) => ({ userId, displayName: `New-${userId}` }));
+    updateMock.mockImplementation(async (pageId) => {
+      if (pageId === 'page-user-write-fails') throw new Error('Notion API error');
+    });
+
+    await expect(updateDisplayNames()).resolves.toBeUndefined();
+
+    expect(updateMock).toHaveBeenCalledWith('page-user-good', { customName: 'New-user-good' });
+  });
 });

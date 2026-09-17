@@ -21,32 +21,39 @@ export async function updateDisplayNames(): Promise<void> {
 
     let updated = 0;
     let skipped = 0;
+    let failed = 0;
     for (const user of users) {
       if (!user.userId) continue;
 
-      if (user.groups.length === 0) {
-        logger.info({ userId: user.userId }, 'Skipping display name update: user has no known groups');
-        skipped++;
-        continue;
-      }
+      try {
+        if (user.groups.length === 0) {
+          logger.info({ userId: user.userId }, 'Skipping display name update: user has no known groups');
+          skipped++;
+          continue;
+        }
 
-      const displayName = await resolveDisplayName(user.userId, user.groups);
-      if (displayName === null) {
-        logger.warn({ userId: user.userId, groups: user.groups }, 'Could not resolve profile for user in any known group');
-        skipped++;
-        continue;
-      }
+        const displayName = await resolveDisplayName(user.userId, user.groups);
+        if (displayName === null) {
+          logger.warn({ userId: user.userId, groups: user.groups }, 'Could not resolve profile for user in any known group');
+          skipped++;
+          continue;
+        }
 
-      if (displayName !== user.customName) {
-        await usersRepo.update(user.pageId, { customName: displayName });
-        updated++;
+        if (displayName !== user.customName) {
+          await usersRepo.update(user.pageId, { customName: displayName });
+          updated++;
+        }
+      } catch (err) {
+        // Isolate per-user failures so one bad record doesn't stop the rest of the batch.
+        logger.error({ err, userId: user.userId, pageId: user.pageId }, 'Failed to update display name for user, skipping');
+        failed++;
       }
 
       // Small delay to avoid Notion rate limit
       await new Promise((r) => setTimeout(r, 400));
     }
 
-    logger.info({ updated, skipped, total: users.length }, 'Display name update complete');
+    logger.info({ updated, skipped, failed, total: users.length }, 'Display name update complete');
   } catch (err) {
     logger.error({ err }, 'Display name update failed');
   }
