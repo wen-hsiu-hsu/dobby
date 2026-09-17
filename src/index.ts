@@ -1,4 +1,5 @@
 import express from 'express';
+import { SignatureValidationFailed } from '@line/bot-sdk';
 import { dirname, join, resolve } from 'node:path';
 import { env } from './config/env.js';
 import { initLogger, logger } from './utils/logger.js';
@@ -40,6 +41,21 @@ export const app = express();
 app.use('/health', healthRouter);
 app.use('/webhook', webhookRouter);
 app.use('/logs', createLogsRouter(LOG_DIR));
+
+const errorHandler: express.ErrorRequestHandler = (err, req, res, next) => {
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
+  if (err instanceof SignatureValidationFailed) {
+    logger.warn({ err, path: req.path, method: req.method }, 'LINE signature validation failed');
+    res.status(401).json({ error: 'Invalid signature' });
+    return;
+  }
+  logger.error({ err, path: req.path, method: req.method }, 'Unhandled request error');
+  res.status(500).json({ error: 'Internal Server Error' });
+};
+app.use(errorHandler);
 
 if (process.env['NODE_ENV'] !== 'test') {
   (async () => {

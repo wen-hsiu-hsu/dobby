@@ -77,4 +77,17 @@ describe('POST /webhook/:botId', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ status: 'ok' });
   });
+
+  it('returns 404 for an unknown botId instead of falling back to dobby', async () => {
+    const body = JSON.stringify({ events: [] });
+    const sig = makeSignature('test-secret-dobby', body);
+
+    const res = await request(app)
+      .post('/webhook/Batting') // wrong case — must not silently match 'batting' or fall back to 'dobby'
+      .set('x-line-signature', sig)
+      .set('content-type', 'application/json')
+      .send(body);
+
+    expect(res.status).toBe(404);
+  });
 });
