@@ -20,6 +20,8 @@
 ## 已評估、不採納
 
 - **表格驅動指令解析與路由**（`/improve-codebase-architecture` 報告候選 3，Speculative）— 評估後不採納。理由：(1) 各 command handler 簽名不一致（7 種不同形狀，從 `(replyToken, botId)` 到 `(event, delta, botId, isAdmin)`），單一表格 row 形狀塞不下這些差異；(2) 報告自己也承認 deletion test 不明確，拆掉 `command-parser.ts`/`command-router.ts` 可能只是把 switch 搬位置，不會真正集中複雜度；(3) 唯一有具體壞味道支撐的症狀（courtOverride 解析邏輯被拆到兩個 module）已用小範圍修法解決，`next?c=N` what-if 預覽見 `docs/commands.md`。若未來新增指令的頻率明顯提高、且 handler 簽名先被拉齊，可重新評估。
+- **[1.2] `people-repository.ts`/`season-repository.ts`/`announcement-repository.ts` 查詢分頁處理** — 評估後不採納。目前社團規模（未結清人數、season 數、公告內容）遠低於 Notion 單頁 100 筆上限，此狀況實務上不會發生，不需為此增加分頁邏輯的複雜度。
+- **[2.1] `member-joined-handler.ts` 多人同時加入群組時用 `pushMessage` 補發歡迎訊息** — 評估後不採納，不修正。原因：此專案原則上不使用 `pushMessage`（唯一例外是既有的 `weekly-push.ts` 週報推播，見 `CLAUDE.md` 專案慣例），不為此問題新增 push 用法。第一位以外的成員收不到歡迎訊息維持現況。
 
 ---
 
@@ -29,13 +31,9 @@
 
 ### 🟡 Medium
 
-- [ ] **[1.2] `people-repository.ts:32-37`、`season-repository.ts:32-35`、`announcement-repository.ts:25-28` 資料庫查詢/blocks 抓取沒處理 Notion 分頁（`has_more`/`next_cursor`）。** 未結清人數、season 數、公告內容超過 100 筆時會被靜默丟棄且無錯誤訊息。修法方向：補上分頁迴圈或至少加 log 提示可能被截斷。
-
 - [ ] **[1.3] `calendar-repository.ts:33-38`、`people-repository.ts:17-22` `findByPageIds` 用 `Promise.all` 完全平行呼叫 Notion，違反「批次操作要加 delay」慣例（對照 `display-name-update.ts` 的 400ms），且 `notion-fetch.ts:30-36` 對 429 沒有 `Retry-After` 重試。** 修法方向：比照 `display-name-update.ts` 加節流，並在 `notion-fetch.ts` 對 429 做基本重試。
 
 - [ ] **[1.4] `season-repository.ts:13-14,16` `courts`/`guestFee`/`weekCounts` 用 `?? 預設值` 掩蓋 Notion 欄位缺值（如忘填「場地數」會悄悄用 2 片場地算容量），與同函式內 formula 欄位保留 `null` 的處理方式不一致。** 修法方向：缺值時至少 log 警告，或讓後續邏輯明確處理 `null` 而非猜測預設值。
-
-- [ ] **[2.1] `member-joined-handler.ts:12-21` 多人同時加入群組時，迴圈對同一個 `event.replyToken` 重複呼叫 `replyMessage`，LINE replyToken 只能用一次。** 第一位以外的成員收不到歡迎訊息且無告警（`reply-service.ts` 靜默 warn）。修法方向：迴圈內第一次用 `replyMessage`，其餘用 `pushMessage`（handler 已知道 `groupId`）。
 
 - [ ] **[2.2] `message-handler.ts:22` `findByUserId` 沒有 try/catch，與其他 command handler 不一致。** Notion 在判斷 admin 身分的早期呼叫失敗時，例外會一路丟到外層只記 log，使用者完全收不到任何回應。修法方向：比照 `owe.ts`/`news.ts` 等，包 try/catch 並回覆「系統錯誤，請稍後再試」。
 

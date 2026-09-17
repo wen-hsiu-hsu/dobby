@@ -15,6 +15,7 @@
 - **讀取 → 計算 → 寫回的操作用 `withMutex`**（`src/services/mutex.ts`），key 用活動日期字串（例如 `2026-05-09`），不用 Notion 頁面 ID（避免多一次查詢才能知道 lock key）。報名、請假都遵循此模式。
 - **環境變數只能加在 `src/config/env.ts` 的 zod schema**，缺值要 fail-fast，不要用 `?? fallback` 掩蓋。
 - Notion API 有 rate limit（~3 req/s），批次操作間要加 delay（參考 `schedulers/display-name-update.ts` 的 400ms）。
+- **不要用 `pushMessage`**，回覆一律用 `replyMessage`（含 replyToken 用盡等邊界情況也不要用 push 當 fallback）。唯一例外是既有的 `schedulers/weekly-push.ts` 週報推播，其他地方新增功能都不要引入新的 push 用法。
 
 ## 測試
 
