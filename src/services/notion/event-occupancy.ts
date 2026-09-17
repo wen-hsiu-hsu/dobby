@@ -15,10 +15,13 @@ export interface EventOccupancy {
 
 export async function getEventOccupancy(
   date: string,
-  courtsOverride?: number
+  courtsOverride?: number,
+  knownSeason?: SeasonRecord | null
 ): Promise<EventOccupancy | null> {
   const event = await calendarRepo.findByDate(date);
-  const season = await seasonRepo.findByName(getCurrentSeasonName());
+  // Caller may already have the current season (e.g. for a member-check before
+  // locking) — reuse it instead of re-querying the same rarely-changing record.
+  const season = knownSeason !== undefined ? knownSeason : await seasonRepo.findByName(getCurrentSeasonName());
   if (!event || !season) return null;
 
   const slotsSeason = courtsOverride === undefined ? season : { ...season, courts: courtsOverride };

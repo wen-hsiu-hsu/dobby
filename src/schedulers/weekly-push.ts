@@ -3,7 +3,7 @@ import { pushMessage } from '../services/line/push-service.js';
 import * as calendarRepo from '../services/notion/calendar-repository.js';
 import * as seasonRepo from '../services/notion/season-repository.js';
 import { findAdmin } from '../services/notion/users-repository.js';
-import { formatDate, getNextSaturday, getNextSaturdayDateText } from '../utils/date-utils.js';
+import { formatDate, getNextSaturday, getNextSaturdayDateText, getCurrentSeasonName } from '../utils/date-utils.js';
 import { logger } from '../utils/logger.js';
 
 async function sendWeeklyPush(): Promise<void> {
@@ -17,8 +17,7 @@ async function sendWeeklyPush(): Promise<void> {
 
     const nextSaturday = formatDate(getNextSaturday());
     const calEvent = await calendarRepo.findByDate(nextSaturday);
-    const seasons = await seasonRepo.findAll();
-    const activeSeason = seasons[0];
+    const activeSeason = await seasonRepo.findByName(getCurrentSeasonName());
 
     const dateText = getNextSaturdayDateText();
     const seasonMemberCount = activeSeason?.members.length ?? 0;

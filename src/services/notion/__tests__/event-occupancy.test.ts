@@ -67,6 +67,18 @@ describe('getEventOccupancy', () => {
     expect(await getEventOccupancy('2026-05-09')).toBeNull();
   });
 
+  it('reuses a caller-provided season instead of re-querying Notion', async () => {
+    const occupancy = await getEventOccupancy('2026-05-09', undefined, season);
+
+    expect(seasonRepo.findByName).not.toHaveBeenCalled();
+    expect(occupancy?.season).toBe(season);
+  });
+
+  it('returns null when a caller-provided season is null, without querying Notion', async () => {
+    expect(await getEventOccupancy('2026-05-09', undefined, null)).toBeNull();
+    expect(seasonRepo.findByName).not.toHaveBeenCalled();
+  });
+
   it('applies courtsOverride to slots but not attendance', async () => {
     const occupancy = await getEventOccupancy('2026-05-09', 5);
 

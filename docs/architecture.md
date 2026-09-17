@@ -62,7 +62,7 @@ Webhook 收到 LINE 事件後，立即回傳 200，再非同步處理事件。
 
 ### In-Process Mutex
 
-使用 Map-based 的記憶體 mutex，以報名的 Notion 頁面 ID 為 key，TTL 10 秒自動釋放。
+使用 Map-based 的記憶體 mutex，以活動日期字串為 key（不是 Notion 頁面 ID，避免多一次查詢才能知道要鎖哪個 key），TTL 10 秒自動釋放。
 
 **原因：** 單一 server 不需要 Redis。報名和請假操作需要「讀取 → 計算 → 寫回」的原子性，避免並發覆蓋。
 

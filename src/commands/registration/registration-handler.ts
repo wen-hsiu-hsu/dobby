@@ -54,7 +54,7 @@ export async function handleRegistration(
     botId,
     nextSaturday,
     'Registration handler',
-    () => getEventOccupancy(nextSaturday),
+    () => getEventOccupancy(nextSaturday, undefined, activeSeason),
     async (occupancy) => {
       const { event: freshEvent, season: freshSeason } = occupancy;
 

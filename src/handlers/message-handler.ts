@@ -18,15 +18,15 @@ export async function handleMessage(event: MessageEvent, botId: string): Promise
   const groupId = event.source.type === 'group' ? event.source.groupId : undefined;
   const multiChatId = event.source.type === 'room' ? event.source.roomId : undefined;
 
-  // Fire-and-forget user tracking
-  if (event.source.type === 'group' || event.source.type === 'room') {
-    trackUser(userId, { groupId, multiChatId });
-  }
-
-  // Lazy-load admin status from USERS DB
+  // Lazy-load admin status from USERS DB (result reused below for tracking, no duplicate query)
   const notionUser = await findByUserId(userId);
   const isAdmin = notionUser?.isAdmin ?? false;
   logger.debug({ userId, text, isAdmin, sourceType: event.source.type }, 'handleMessage');
+
+  // Fire-and-forget user tracking
+  if (event.source.type === 'group' || event.source.type === 'room') {
+    trackUser(userId, { groupId, multiChatId }, notionUser);
+  }
 
   if (isCommand(text)) {
     const command = parseCommand(text);

@@ -17,7 +17,6 @@
   "type": "module",
   "dependencies": {
     "@line/bot-sdk": "^10.6.0",
-    "@notionhq/client": "^5.9.0",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "node-cron": "^4.2.1",
@@ -26,6 +25,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@notionhq/client": "^5.9.0",
     "@types/express": "^5.0.6",
     "@types/node": "^25.3.1",
     "@types/node-cron": "^3.0.11",

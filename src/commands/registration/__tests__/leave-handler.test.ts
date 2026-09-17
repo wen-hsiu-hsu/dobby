@@ -63,10 +63,10 @@ describe('handleLeave', () => {
     expect(seasonRepo.findAll).not.toHaveBeenCalled();
   });
 
-  it('wraps the read-modify-write in withMutex using the event pageId as key', async () => {
+  it('wraps the read-modify-write in withMutex using the event date as key', async () => {
     await handleLeave(event, false, 'dobby', false);
 
-    expect(mutex.withMutex).toHaveBeenCalledWith('evt-1', expect.any(Function));
+    expect(mutex.withMutex).toHaveBeenCalledWith(expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), expect.any(Function));
     expect(calendarRepo.updateAbsentees).toHaveBeenCalledWith('evt-1', ['person-1']);
   });
 

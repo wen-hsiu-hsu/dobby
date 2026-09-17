@@ -29,10 +29,10 @@ export async function initLogger(): Promise<void> {
   });
 
   base = pino(
-    { level: 'debug' },
+    { level: 'info' },
     pino.multistream([
-      { stream: process.stdout, level: 'debug' },
-      { stream: fileStream, level: 'debug' },
+      { stream: process.stdout, level: 'info' },
+      { stream: fileStream, level: 'info' },
     ])
   );
 }

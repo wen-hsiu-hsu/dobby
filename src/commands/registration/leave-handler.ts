@@ -50,7 +50,7 @@ export async function handleLeave(
     botId,
     nextSaturday,
     'Leave handler',
-    () => getEventOccupancy(nextSaturday),
+    () => getEventOccupancy(nextSaturday, undefined, activeSeason),
     async (occupancy) => {
       const { event: freshEvent, season: freshSeason } = occupancy;
       const isCurrentlyAbsent = freshEvent.absentees.includes(resolved.personPageId);

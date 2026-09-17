@@ -16,12 +16,12 @@ Target Resolver
   └── 判斷操作對象：self / mention userId / name 文字
     │
     ▼
-取得下一個週六的 Calendar 事件 + 當前 Season 資料
+取得當前 Season 資料（供 isSelfSeasonMember 判斷）
     │
     ▼
-獲取 Mutex 鎖（key = calendar 頁面 ID，TTL 10 秒）
+獲取 Mutex 鎖（key = 下一個週六的日期字串，TTL 10 秒）
     │
-    ├── 重新讀取最新 calendar 資料（避免 race condition）
+    ├── 鎖內查詢最新 Calendar 事件（避免 race condition；查無此活動 → 回「找不到活動」，不視為系統錯誤）
     │
     ▼
 Capacity Calculator
@@ -76,7 +76,7 @@ Capacity Calculator
 
 報名和請假都需要「讀取 → 計算 → 寫回」三步驟。若兩個請求同時進行，可能產生資料覆蓋。
 
-Mutex 以 calendar 頁面 ID 為 key，同一個活動一次只允許一個報名操作在執行。
+Mutex 以活動日期字串為 key（不是 calendar 頁面 ID，這樣不用多一次查詢才能知道要鎖哪個 key），同一個活動一次只允許一個報名操作在執行。
 
 同一個 key 的請求會排成 FIFO 佇列，後到的等前一個做完才執行，**不會直接拒絕**、不需要使用者重試。單次執行有 10 秒逾時保護，逾時只影響那一次執行，不會卡住後面排隊的請求。
 
