@@ -53,17 +53,19 @@
 ### 執行流程
 
 1. 查詢所有 USERS 資料庫的使用者
-2. 對每個使用者，呼叫 LINE API 取得最新的 displayName
+2. 對每個使用者，**依序嘗試 `groups` 欄位（該使用者曾出現過的所有群組 ID，可能包含已離開的群組）裡的每一個 group ID**，用 `getGroupMemberProfile(groupId, userId)` 查詢，取第一個查詢成功的 displayName；`groups` 為空或全部查詢失敗則跳過該使用者（記 log，不影響其他使用者）
 3. 若 displayName 有變動，更新 Notion 的 `Custom Name` 欄位
 4. 兩次 Notion 更新之間 delay 400ms（避免觸發 Notion rate limit）
 
+**⚠️ 這裡一定要帶 `groupId` 查詢**：LINE 的 profile API 不帶 `groupId` 查的是「一對一好友」資料，社團成員多半只在群組互動、沒加 bot 為個人好友，不帶 `groupId` 幾乎必定回 404。2026-09-17 曾經因為漏帶這個參數，讓這支排程實質上永遠不會成功更新任何人，詳見 `docs/code-review-2026-09-17.md` 第 5.1 節。
+
 ### 雙 Bot 策略
 
-Profile 查詢會先嘗試 Dobby bot，失敗（如 404）再試 batting bot。兩個都失敗則略過該使用者。
+每一次 group member profile 查詢，`profile-service.ts` 的 `getProfile()` 會先嘗試 Dobby bot 的 client，失敗（如 404）再試 batting bot 的 client（batting 這層 fallback**不會**帶 `groupId`，只查一對一好友，是既有的既知限制，非這次修復範圍）。兩個都失敗則這個 group ID 視為失敗，換下一個 group ID 繼續嘗試。
 
 **原因：** 使用者可能只在其中一個 bot 的群組中，需要用對應的 bot 才能查到 profile。
 
 ### 注意事項
 
-- 使用者必須在 `groups` 欄位中有群組 ID 才能被查詢（profile API 需要 groupId）
-- 若使用者已離開群組，API 會回傳 404，該使用者不會被更新
+- 使用者必須在 `groups` 欄位裡至少有一個目前仍有效（bot 還在其中）的群組 ID 才查得到；若曾經在的所有群組都已離開，API 全部回 404，該使用者會被跳過且不影響其他人
+- 這支排程目前沒有分頁處理（USERS 資料庫查詢一次最多抓 100 筆）、單一使用者更新失敗會中斷整批（無逐筆 try/catch），這兩項是已知但尚未修的問題，見 `TODO.md` 的 `[5.3]`、`[5.4]`

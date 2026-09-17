@@ -24,6 +24,7 @@ Dobby 會介紹自己並 @mention 觸發者和管理員。
 ```
 @Dobby news
 @Dobby 公告
+@Dobby announcement
 ```
 讀取 Notion「所有公告」資料庫中名為 `NEWS_TEMPLATE` 的頁面，套用當季季租資料後回傳。內容裡的 `{PLACEHOLDER}` 會被即時抓取的資料取代：
 

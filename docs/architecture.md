@@ -74,11 +74,16 @@ Webhook 收到 LINE 事件後，立即回傳 200，再非同步處理事件。
 
 **原因：** Fail-fast 比執行到一半才爆炸好排查。
 
-### Request Correlation ID
+### Request Correlation ID + quoteToken 透傳
 
-使用 AsyncLocalStorage 在每個 request 中注入唯一 `requestId`，所有 log 自動帶上這個 ID。
+`src/utils/request-context.ts` 用同一個 AsyncLocalStorage（`runWithContext`，在 `event-router.ts` 對每個事件呼叫一次）注入兩樣東西：
 
-**原因：** Webhook 處理是非同步的，沒有 correlation ID 很難追蹤單一事件的完整日誌。
+- `reqId`：唯一 correlation ID，所有 log 自動帶上，用來追蹤單一事件的完整日誌。
+- `quoteToken`：inbound 文字訊息的 quoteToken（若 LINE webhook 事件有帶）。`reply-service.ts` 的 `replyMessage` 會自動從這個 context 取出並附加到送出的文字訊息上，讓使用者能看到自己的訊息被回應（LINE 的「引用回覆」效果）。
+
+這兩者都靠同一個 context 統一處理，**新增/修改 command handler 不需要逐一手動傳遞 `reqId`/`quoteToken`**——只要最終呼叫的是 `reply-service.ts` 的 `replyMessage`，就會自動帶上；不要繞過它直接呼叫 LINE SDK 送訊息，否則會漏掉這個機制。
+
+**原因：** Webhook 處理是非同步的，沒有 correlation ID 很難追蹤單一事件的完整日誌；quoteToken 若不使用，使用者在群組裡容易搞不清楚機器人是在回應哪一則訊息。
 
 ### 雙 Bot 支援
 
