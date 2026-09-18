@@ -1,6 +1,6 @@
 import pino from 'pino';
 import { join } from 'node:path';
-import { getReqId } from './request-context.js';
+import { getReqId, getPurpose } from './request-context.js';
 import { env } from '../config/env.js';
 
 const isDev = process.env['NODE_ENV'] !== 'production';
@@ -49,7 +49,9 @@ export const logger = new Proxy({} as pino.Logger, {
     if (prop === 'child' || typeof method !== 'function') return method;
     return (obj: object, msg?: string) => {
       const reqId = getReqId();
-      const merged = reqId ? { reqId, ...obj } : obj;
+      const purpose = getPurpose();
+      const context = { ...(reqId && { reqId }), ...(purpose && { purpose }) };
+      const merged = Object.keys(context).length > 0 ? { ...context, ...obj } : obj;
       return (method as Function).call(base, merged, msg);
     };
   },
