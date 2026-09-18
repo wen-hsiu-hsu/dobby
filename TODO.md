@@ -26,41 +26,56 @@
 - `package.json` 的 `"name": "dobby"`、`README.md` 標題「# Dobby」——專案代稱，不要動。
 - 這次**不要**引入 `prod`/`lab` 或任何新的 bot 身份命名——使用者已放棄雙 bot 改名的方向，直接移除即可，不要變成「換一個名字的雙 bot」。
 
+### 已確認的決定（2026-09-19 定案，不用再問）
+
+1. **`botId` 參數整個從所有函式簽名裡拔掉**（不是只簡化路由層）。
+2. **環境變數拿掉 `_DOBBY` 後綴**：`LINE_CHANNEL_SECRET_DOBBY` → `LINE_CHANNEL_SECRET`、`LINE_CHANNEL_ACCESS_TOKEN_DOBBY` → `LINE_CHANNEL_ACCESS_TOKEN`。
+
+**逐檔案查證過，這兩個決定都是機械化改動，沒有發現新的需要使用者決定的問題**：下面 16 個檔案裡 `botId` 全部是單純傳遞或拿去查 log/呼叫 `getClient()`，**沒有任何一處對 `botId` 的值做 if/switch 分支判斷**（唯一有分支邏輯的是路由/設定層的 `getClient()`/`middlewareByBotId`，本來就在「拿掉」範圍內，不是中間層）。所以「拔掉」是單純刪參數+刪呼叫點多餘的引數，不涉及邏輯重新設計。
+
 ### 範圍內：`botId` 概念本身要拿掉的地方
 
-**核心路由/設定層**（這幾個檔案定義了 `botId` 這個概念本身）：
-- `src/config/constants.ts:4-9`：`BOT_IDS`/`BotId` type，兩個 bot 的概念從這裡拿掉。
-- `src/config/line.ts`：`dobbyClient`/`battingClient` 兩個 client + `getClient(botId)` 分派邏輯，簡化成一個 client、不用 `botId` 分派。
-- `src/routes/webhook.ts:9,11`：`POST /:botId` 路由 + `?? 'dobby'` fallback，改成固定路徑（不吃 `:botId` 參數）。
-- `src/middleware/line-signature.ts`：`middlewareByBotId`（`Record<BotId, RequestHandler>`）+ `isBotId()` 判斷，簡化成單一 secret 的 middleware，不用依 `botId` 選 secret。
-- `src/services/line/profile-service.ts`：`getProfile()` 裡「先試 dobby client 失敗再試 batting client」的 fallback 邏輯，改成只查一個 client。
-- `src/schedulers/weekly-push.ts:39`：`pushMessage(dobbyGroupId, ..., 'dobby')` 硬寫的 `'dobby'` botId 參數。
+**核心路由/設定層**（這幾個檔案定義了 `botId` 這個概念本身，內容比原本更具體）：
+- `src/config/constants.ts:4-9`：`BOT_IDS`/`BotId` type 整個刪除。查過 `grep -rln "BOT_IDS\|BotId" src/`，**只有 `src/middleware/line-signature.ts` 這一個地方 import 它**，沒有其他遺漏的引用點。
+- `src/config/line.ts`：`dobbyClient`/`battingClient` 兩個 client + `getClient(botId)` 分派邏輯全部拿掉，改成**匯出單一 client**，命名建議 `lineClient`（不要繼續叫 `dobbyClient`，已經沒有另一個要區分的對象；也不用保留 `getClient()` 這層函式包裝，因為不再需要依 `botId` 分派，`push-service.ts`/`reply-service.ts` 直接 `import { lineClient } from '../../config/line.js'` 用就好，少一層無意義的間接呼叫）。
+- `src/routes/webhook.ts:9,11`：路由從 `webhookRouter.post('/:botId', ...)` 改成 `webhookRouter.post('/', ...)`（`src/index.ts:42` 掛載在 `/webhook`，所以完整路徑會從 `/webhook/dobby`、`/webhook/batting` 兩條變成單一的 `POST /webhook`）。`botId`、`?? 'dobby'` fallback、`logger.info({ botId, ... })` 裡的 `botId` 欄位都一併拿掉。
+- `src/middleware/line-signature.ts`：`middlewareByBotId`（`Record<BotId, RequestHandler>`）+ `isBotId()` 判斷全部拿掉，改成建立單一 `middleware({ channelSecret: env.LINE_CHANNEL_SECRET })` 直接用，不用再依路由參數選 secret。
+- `src/services/line/profile-service.ts`：`getProfile()` 裡「先試 dobby client 失敗再試 batting client」的 fallback 邏輯拿掉，改成只查 `lineClient` 一次，失敗直接回 `null`（不用重試邏輯，因為已經沒有第二個 client 可以 fallback）。
+- `src/schedulers/weekly-push.ts:39`：`pushMessage(dobbyGroupId, [...], 'dobby')` 改成 `pushMessage(dobbyGroupId, [...])`（拿掉最後一個參數，注意 `dobbyGroupId` 這個變數名本身跟 `botId` 概念無關，是 `DOBBY_GROUP_ID` 環境變數的值，不在這次改動範圍，維持原樣不用跟著改名）。
 
-**環境變數**：
-- `LINE_CHANNEL_SECRET_BATTING`、`LINE_CHANNEL_ACCESS_TOKEN_BATTING` 要從 `src/config/env.ts` schema、`.env.example`、`README.md`、`docs/development.md` 移除。
-- `LINE_CHANNEL_SECRET_DOBBY`、`LINE_CHANNEL_ACCESS_TOKEN_DOBBY` 只剩一組——**這兩個變數名稱要不要順便拿掉 `_DOBBY` 後綴（改成 `LINE_CHANNEL_SECRET`/`LINE_CHANNEL_ACCESS_TOKEN`）是一個需要使用者決定的地方，見下方「需要你決定」。**
+**環境變數**（改名對照表，已確認要改的每一處）：
+| 原名 | 新名 | 出現位置 |
+|---|---|---|
+| `LINE_CHANNEL_SECRET_DOBBY` | `LINE_CHANNEL_SECRET` | `src/config/env.ts:5`、`.env.example:1`、`README.md:38`、`docs/development.md:30`、`src/config/line.ts`(建 client 時讀的欄位)、`src/middleware/line-signature.ts:7`、`src/test-utils/setup.ts:5` |
+| `LINE_CHANNEL_ACCESS_TOKEN_DOBBY` | `LINE_CHANNEL_ACCESS_TOKEN` | `src/config/env.ts:6`、`.env.example:2`、`README.md:39`、`docs/development.md:31`、`src/config/line.ts`、`src/test-utils/setup.ts:6` |
+| `LINE_CHANNEL_SECRET_BATTING` | （整個刪除，不是改名） | `src/config/env.ts:7`、`.env.example:3`、`README.md:40`、`docs/development.md:32`、`src/middleware/line-signature.ts:8`、`src/test-utils/setup.ts:7` |
+| `LINE_CHANNEL_ACCESS_TOKEN_BATTING` | （整個刪除，不是改名） | `src/config/env.ts:8`、`.env.example:4`、`README.md:41`、`docs/development.md:33`、`src/config/line.ts`、`src/test-utils/setup.ts:8` |
 
-**`botId` 參數在呼叫鏈裡的傳遞範圍**（這是這次改動裡工程量最大、且有兩種做法的地方，見下方「需要你決定」）：目前 `botId: string` 這個參數貫穿了 16 個檔案的函式簽名：`command-router.ts`、`introduce.ts`、`news.ts`、`next-event.ts`、`owe.ts`、`participants.ts`、`payment.ts`、`registration/leave-handler.ts`、`registration/registration-handler.ts`、`registration/with-fresh-calendar-event.ts`、`handlers/event-router.ts`、`handlers/join-handler.ts`、`handlers/member-joined-handler.ts`、`handlers/message-handler.ts`、`services/line/push-service.ts`、`services/line/reply-service.ts`。
+**`botId` 參數在呼叫鏈裡的傳遞範圍**（16 個檔案，全部確認是純傳遞，改動方式一致，舉 3 個代表性的簽名對照當範本，其餘 13 個照同樣邏輯處理——「拿掉最後一個 `botId: string` 參數，拿掉呼叫下一層時傳的 `botId` 引數，`logger.*` 物件裡如果有 `botId` 欄位也一併拿掉」）：
+- `src/handlers/event-router.ts:8`：`processEvents(events: WebhookEvent[], botId: string)` → `processEvents(events: WebhookEvent[])`。
+- `src/commands/command-router.ts:19-22`：`routeCommand(command: ParsedCommand, event: CommandEvent, botId: string, isAdmin: boolean)` → `routeCommand(command: ParsedCommand, event: CommandEvent, isAdmin: boolean)`；內部呼叫每個 `handleXxx(...)` 時也要拿掉傳的 `botId` 引數。
+- `src/services/line/reply-service.ts:21-26`：`replyMessage(replyToken: string, messages: Message[], botId: string)` → `replyMessage(replyToken: string, messages: Message[])`；內部 `getClient(botId)` 改成直接用 `lineClient`；`logger.info({ botId, ... })`/`logger.debug({ botId, ... })`/`logger.warn({ err, botId }, ...)` 三處都要拿掉 `botId` 欄位。`src/services/line/push-service.ts` 同樣模式（`pushMessage(to, messages, botId)` → `pushMessage(to, messages)`，3 處 log 呼叫拿掉 `botId` 欄位）。
+- 其餘 13 個檔案（`introduce.ts`、`news.ts`、`next-event.ts`、`owe.ts`、`participants.ts`、`payment.ts`、`registration/leave-handler.ts`、`registration/registration-handler.ts`、`registration/with-fresh-calendar-event.ts`、`handlers/join-handler.ts`、`handlers/member-joined-handler.ts`、`handlers/message-handler.ts`）都是「拿掉 `botId: string` 參數 + 拿掉呼叫 `replyMessage(...)`/下一層函式時傳的 `botId` 引數」，沒有例外情況，不用逐一展開。
 
-**測試檔案**（用 `'dobby'`/`'batting'` 當 botId 參數值的，跟上面「範圍內」的程式碼改動連動，需要跟著調整）：`src/__tests__/webhook.test.ts`、`src/handlers/__tests__/event-router.test.ts`、`src/handlers/__tests__/message-handler.test.ts`、`src/schedulers/__tests__/weekly-push.test.ts`、`src/services/line/__tests__/reply-service.test.ts`、`src/routes/__tests__/log-grouping.test.ts`、`src/commands/registration/__tests__/registration-handler.test.ts`、`src/commands/registration/__tests__/leave-handler.test.ts`、`src/commands/registration/__tests__/with-fresh-calendar-event.test.ts`、`src/test-utils/create-test-bot.ts`、`src/test-utils/setup.ts:5-8`（`setup.ts` 只留 `LINE_CHANNEL_SECRET_DOBBY`/`LINE_CHANNEL_ACCESS_TOKEN_DOBBY` 的假值，`_BATTING` 那兩行刪掉）。
+**測試檔案**（跟上面「範圍內」的程式碼改動連動，需要跟著調整呼叫方式，拿掉傳入的 `'dobby'`/`'batting'` 引數）：`src/__tests__/webhook.test.ts`、`src/handlers/__tests__/event-router.test.ts`、`src/handlers/__tests__/message-handler.test.ts`、`src/schedulers/__tests__/weekly-push.test.ts`、`src/services/line/__tests__/reply-service.test.ts`、`src/routes/__tests__/log-grouping.test.ts`（這個檔案裡的 `botId: 'dobby'` 是 log entry 的欄位資料，不是函式呼叫引數，`groupPairedEntries()` 本身不需要改，只是測試資料不用再帶這個欄位）、`src/commands/registration/__tests__/registration-handler.test.ts`、`src/commands/registration/__tests__/leave-handler.test.ts`、`src/commands/registration/__tests__/with-fresh-calendar-event.test.ts`、`src/test-utils/create-test-bot.ts`（`handleMessage(event as any, 'dobby')` 拿掉第二個引數）、`src/test-utils/setup.ts:5-8`（改成只設 `LINE_CHANNEL_SECRET`/`LINE_CHANNEL_ACCESS_TOKEN` 兩行假值，`_BATTING` 那兩行整個刪掉，`_DOBBY` 那兩行改名不刪）。
 
-**文件**：`docs/architecture.md`「雙 Bot 支援」整節（連同 2026-09-18 剛補的「batting 是測試 bot」那段一起，見下方）、`docs/overview.md` 開頭的雙 bot 敘述、`docs/development.md`/`README.md` 的環境變數表格、`docs/schedulers.md`「雙 Bot 策略」整節（`display-name-update.ts` 的 fallback 邏輯敘述）、`CLAUDE.md` 開頭「雙 bot：`dobby`/`batting`」那句、`docs/README.md`（如果目錄表有提到雙 bot）、`docs/adr/0004-guest-name-must-be-globally-unique.md`（確認裡面提到 dobby/batting 的地方是不是需要更新，不確定就照抄現況不用改，這份 ADR 的重點是別的主題）。
+**要直接刪除、不是修改的測試案例**：`src/__tests__/webhook.test.ts` 裡專門測「雙 bot 路由行為本身」的案例，這些測試存在的意義會隨著雙 bot 拿掉而消失，不是要調整成通過，是整個案例刪掉：
+- 第 62 行 `it('returns 200 for batting bot', ...)` 整個 `it` 區塊。
+- 第 86 行那個測「`/webhook/Batting`（大小寫錯誤）不能誤判成 batting 或 fallback 回 dobby」的案例（`wrong case — must not silently match 'batting' or fall back to 'dobby'`）——這個案例測的正是「兩個 bot 之間不能搞混」，雙 bot 拿掉後這個問題不存在了。
+- 第 9-11 行 `beforeEach`/`beforeAll` 裡設的 `LINE_CHANNEL_SECRET_BATTING`/`LINE_CHANNEL_ACCESS_TOKEN_BATTING` 假值，改用 `setup.ts` 的統一設定就好，不用檔案內重複設。
+
+**文件**：`docs/architecture.md`「雙 Bot 支援」整節（連同 2026-09-18 補的「batting 是測試 bot」那段一起刪除，那段記憶已經過時，整個雙 bot 支援的敘述都要拿掉）、`docs/overview.md` 開頭的雙 bot 敘述、`docs/development.md`/`README.md` 的環境變數表格(改名+刪除 BATTING 兩列)、`docs/schedulers.md`「雙 Bot 策略」整節（`display-name-update.ts` 的 fallback 邏輯敘述，`profile-service.ts` 拿掉 fallback 後這整節的內容不再成立）、`CLAUDE.md` 開頭「雙 bot：`dobby`/`batting`」那句、`docs/README.md`（如果目錄表有提到雙 bot）。
+
+**已確認不用改的文件**：`docs/adr/0004-guest-name-must-be-globally-unique.md`——實際讀過，裡面唯一提到的是 `@Dobby +1` 這種使用者呼叫指令的範例文字（第 7 行），屬於「明確排除」清單裡的 `@Dobby` 前綴層，跟 `botId` 無關，**不用改**。
 
 **既有 TODO 項目會因此變成無意義/被連帶解決**：`[5.7]`（`getClient(botId)` 沒用 `BotId` 型別限制）——這條會隨著 `getClient`/`botId` 整個拿掉而自然消失，不用另外處理，完工後直接把 `[5.7]` 從清單移除即可。
 
 **這次順便發現、但不在這次任務範圍內的技術債**：`config/line.ts:13` 的 `getClient()` 對 `'batting'` 是直接硬寫字串比對，沒有用 `constants.ts` 的型別保護——這個問題會隨著整個 `getClient`/`botId` 拿掉而一併消失，不用單獨處理。
 
-### 需要你決定的地方（不是能自己判斷的範圍問題）
-
-1. **`botId` 參數要不要整個從 16 個檔案的函式簽名裡拔掉，還是只簡化路由/設定層、讓 `botId` 繼續在中間層傳遞(但永遠只有一個值)？**
-   - 全拔：改動範圍最大（16 個檔案的函式簽名 + 對應測試），但沒有殘留的無意義參數，最乾淨。
-   - 只簡化外層：只改 `webhook.ts`/`line-signature.ts`/`config/line.ts`/`profile-service.ts` 這幾個定義「botId 概念」的地方，中間層(`command-router.ts` 一路到 `reply-service.ts`)的 `botId: string` 參數維持原樣（傳遞一個固定的假值或空字串），風險/改動量小很多，但程式碼裡會留著一個「看起來還很重要，其實永遠是同一個值」的參數，之後可能造成誤解。
-2. **`LINE_CHANNEL_SECRET_DOBBY`/`LINE_CHANNEL_ACCESS_TOKEN_DOBBY` 這兩個環境變數名稱，要不要順便拿掉 `_DOBBY` 後綴？** 只剩一個 bot 的情況下，這個後綴已經沒有區分作用，但重新命名會連動 `.env`（外部依賴，見下方）。
-
 ### 外部依賴（使用者自行處理，不屬於這次程式碼變更的驗收範圍）
 
-- LINE Developer Console 後台的 webhook URL 設定（原本 `/webhook/dobby`、`/webhook/batting` 各自指向的 LINE Official Account）需要對應調整——**這是人工操作，不是這個 repo 能做的事**，程式碼變更完成後要提醒使用者處理。
-- 正式環境（Zeabur 或使用者的伺服器）的 `.env` 需要同步移除 `_BATTING` 兩個變數（如果決定 1 選「拔掉 `_DOBBY` 後綴」，還要同步改名），**使用者自行處理**。
+- LINE Developer Console 後台的 webhook URL 設定需要改成新的單一路徑（`https://<domain>/webhook`，不再是 `/webhook/dobby`、`/webhook/batting` 兩條）——**這是人工操作，不是這個 repo 能做的事**，程式碼變更完成後要提醒使用者處理，且要提醒這中間會有斷線空窗期（部署新程式碼但 LINE 後台 URL 還沒同步改之前，webhook 打進來對不上路由）。
+- 正式環境（Zeabur 或使用者的伺服器）的 `.env` 需要同步：移除 `_BATTING` 兩個變數、`_DOBBY` 兩個變數改名成不帶後綴，**使用者自行處理**。
 
 ### 附帶調查：`NODE_ENV` 是否真的有在用（2026-09-19 確認過，不用重查）
 
@@ -70,7 +85,8 @@
 
 - [ ] `grep -rniE "\bdobby\b|\bbatting\b" src/` 只剩「明確排除」清單裡那些 `@Dobby`/品牌相關的結果，routing/設定層的結果歸零。
 - [ ] `npm test`、`npx tsc --noEmit`、`npm run build` 全過。
-- [ ] `.env.example` 不再有 `_BATTING` 相關變數。
+- [ ] `.env.example` 不再有 `_BATTING` 相關變數，`_DOBBY` 兩個變數已改名成 `LINE_CHANNEL_SECRET`/`LINE_CHANNEL_ACCESS_TOKEN`。
+- [ ] `webhook.test.ts` 裡「returns 200 for batting bot」跟「wrong case」那兩個 `it` 區塊已刪除，不是修改成通過。
 - [ ] 上面列出的文件都同步更新，不再描述雙 bot 架構。
 - [ ] `TODO.md` 的 `[5.7]` 一併移除。
 
