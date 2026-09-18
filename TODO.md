@@ -8,6 +8,74 @@
 
 ---
 
+## 移除雙 Bot 架構，改為單一 Bot
+
+> 2026-09-19 確立的需求。這個服務目前**還沒上線**，使用者決定不需要維持 `dobby`/`batting` 雙 bot 架構——原本想把兩者改名成 `prod`/`lab` 表示「正式/測試」的想法已經放棄，改用 `NODE_ENV` 或其他環境變數區分即可，不透過多一個 bot identity 來做。這個任務的目標是把 `botId`（`'dobby'` / `'batting'`）這個概念從整個專案裡拿掉，只剩一個 bot。
+>
+> **這份清單是唯一的需求來源，開工前不用回頭問使用者「範圍是什麼」，答案都在這裡。如果執行時發現這裡沒提到的邊界情況，用「保守不動、記錄下來問」的態度處理，不要自行擴大範圍。**
+
+### 明確排除（不在這次改動範圍內，最容易被誤判成同一件事）
+
+`grep -rniE "dobby|batting"` 目前在 `src/` 底下有 239 處、跨 35 個檔案，但**絕大多數是 `@Dobby` 這個使用者呼叫指令的前綴、或是「Dobby」這個品牌/專案名稱，跟 `botId` 完全是兩回事，使用者明確要求要保留**：
+
+- `src/commands/command-parser.ts`、`src/commands/registration/registration-parser.ts`（`@Dobby` 前綴判斷邏輯本身）——**完全不要動**。
+- `src/commands/command-list.ts`、`src/types/commands.ts`（指令說明文字裡的 `@Dobby xxx` 範例）——不要動。
+- `src/commands/registration/event-status-message.ts:45`、`src/services/welcome-message.ts:30,32`（回覆使用者的訊息文字裡提到「Dobby」「@Dobby」）——不要動。
+- `src/data/auto-reply.json`、`docs/notion/databases.md`、`docs/notion/schemas/*.json`（內容/欄位說明提到 `@Dobby` 指令）——不要動。
+- `src/test-utils/create-test-bot.ts`/`README.md` 裡 `bot.run('@Dobby +1', ...)` 這種呼叫指令的文字——不要動（但這個檔案裡 `handleMessage(event as any, 'dobby')` 這種**當作 botId 參數傳的 `'dobby'`** 屬於下面「範圍內」那類，兩者要分開看，不要整個檔案跳過）。
+- `package.json` 的 `"name": "dobby"`、`README.md` 標題「# Dobby」——專案代稱，不要動。
+- 這次**不要**引入 `prod`/`lab` 或任何新的 bot 身份命名——使用者已放棄雙 bot 改名的方向，直接移除即可，不要變成「換一個名字的雙 bot」。
+
+### 範圍內：`botId` 概念本身要拿掉的地方
+
+**核心路由/設定層**（這幾個檔案定義了 `botId` 這個概念本身）：
+- `src/config/constants.ts:4-9`：`BOT_IDS`/`BotId` type，兩個 bot 的概念從這裡拿掉。
+- `src/config/line.ts`：`dobbyClient`/`battingClient` 兩個 client + `getClient(botId)` 分派邏輯，簡化成一個 client、不用 `botId` 分派。
+- `src/routes/webhook.ts:9,11`：`POST /:botId` 路由 + `?? 'dobby'` fallback，改成固定路徑（不吃 `:botId` 參數）。
+- `src/middleware/line-signature.ts`：`middlewareByBotId`（`Record<BotId, RequestHandler>`）+ `isBotId()` 判斷，簡化成單一 secret 的 middleware，不用依 `botId` 選 secret。
+- `src/services/line/profile-service.ts`：`getProfile()` 裡「先試 dobby client 失敗再試 batting client」的 fallback 邏輯，改成只查一個 client。
+- `src/schedulers/weekly-push.ts:39`：`pushMessage(dobbyGroupId, ..., 'dobby')` 硬寫的 `'dobby'` botId 參數。
+
+**環境變數**：
+- `LINE_CHANNEL_SECRET_BATTING`、`LINE_CHANNEL_ACCESS_TOKEN_BATTING` 要從 `src/config/env.ts` schema、`.env.example`、`README.md`、`docs/development.md` 移除。
+- `LINE_CHANNEL_SECRET_DOBBY`、`LINE_CHANNEL_ACCESS_TOKEN_DOBBY` 只剩一組——**這兩個變數名稱要不要順便拿掉 `_DOBBY` 後綴（改成 `LINE_CHANNEL_SECRET`/`LINE_CHANNEL_ACCESS_TOKEN`）是一個需要使用者決定的地方，見下方「需要你決定」。**
+
+**`botId` 參數在呼叫鏈裡的傳遞範圍**（這是這次改動裡工程量最大、且有兩種做法的地方，見下方「需要你決定」）：目前 `botId: string` 這個參數貫穿了 16 個檔案的函式簽名：`command-router.ts`、`introduce.ts`、`news.ts`、`next-event.ts`、`owe.ts`、`participants.ts`、`payment.ts`、`registration/leave-handler.ts`、`registration/registration-handler.ts`、`registration/with-fresh-calendar-event.ts`、`handlers/event-router.ts`、`handlers/join-handler.ts`、`handlers/member-joined-handler.ts`、`handlers/message-handler.ts`、`services/line/push-service.ts`、`services/line/reply-service.ts`。
+
+**測試檔案**（用 `'dobby'`/`'batting'` 當 botId 參數值的，跟上面「範圍內」的程式碼改動連動，需要跟著調整）：`src/__tests__/webhook.test.ts`、`src/handlers/__tests__/event-router.test.ts`、`src/handlers/__tests__/message-handler.test.ts`、`src/schedulers/__tests__/weekly-push.test.ts`、`src/services/line/__tests__/reply-service.test.ts`、`src/routes/__tests__/log-grouping.test.ts`、`src/commands/registration/__tests__/registration-handler.test.ts`、`src/commands/registration/__tests__/leave-handler.test.ts`、`src/commands/registration/__tests__/with-fresh-calendar-event.test.ts`、`src/test-utils/create-test-bot.ts`、`src/test-utils/setup.ts:5-8`（`setup.ts` 只留 `LINE_CHANNEL_SECRET_DOBBY`/`LINE_CHANNEL_ACCESS_TOKEN_DOBBY` 的假值，`_BATTING` 那兩行刪掉）。
+
+**文件**：`docs/architecture.md`「雙 Bot 支援」整節（連同 2026-09-18 剛補的「batting 是測試 bot」那段一起，見下方）、`docs/overview.md` 開頭的雙 bot 敘述、`docs/development.md`/`README.md` 的環境變數表格、`docs/schedulers.md`「雙 Bot 策略」整節（`display-name-update.ts` 的 fallback 邏輯敘述）、`CLAUDE.md` 開頭「雙 bot：`dobby`/`batting`」那句、`docs/README.md`（如果目錄表有提到雙 bot）、`docs/adr/0004-guest-name-must-be-globally-unique.md`（確認裡面提到 dobby/batting 的地方是不是需要更新，不確定就照抄現況不用改，這份 ADR 的重點是別的主題）。
+
+**既有 TODO 項目會因此變成無意義/被連帶解決**：`[5.7]`（`getClient(botId)` 沒用 `BotId` 型別限制）——這條會隨著 `getClient`/`botId` 整個拿掉而自然消失，不用另外處理，完工後直接把 `[5.7]` 從清單移除即可。
+
+**這次順便發現、但不在這次任務範圍內的技術債**：`config/line.ts:13` 的 `getClient()` 對 `'batting'` 是直接硬寫字串比對，沒有用 `constants.ts` 的型別保護——這個問題會隨著整個 `getClient`/`botId` 拿掉而一併消失，不用單獨處理。
+
+### 需要你決定的地方（不是能自己判斷的範圍問題）
+
+1. **`botId` 參數要不要整個從 16 個檔案的函式簽名裡拔掉，還是只簡化路由/設定層、讓 `botId` 繼續在中間層傳遞(但永遠只有一個值)？**
+   - 全拔：改動範圍最大（16 個檔案的函式簽名 + 對應測試），但沒有殘留的無意義參數，最乾淨。
+   - 只簡化外層：只改 `webhook.ts`/`line-signature.ts`/`config/line.ts`/`profile-service.ts` 這幾個定義「botId 概念」的地方，中間層(`command-router.ts` 一路到 `reply-service.ts`)的 `botId: string` 參數維持原樣（傳遞一個固定的假值或空字串），風險/改動量小很多，但程式碼裡會留著一個「看起來還很重要，其實永遠是同一個值」的參數，之後可能造成誤解。
+2. **`LINE_CHANNEL_SECRET_DOBBY`/`LINE_CHANNEL_ACCESS_TOKEN_DOBBY` 這兩個環境變數名稱，要不要順便拿掉 `_DOBBY` 後綴？** 只剩一個 bot 的情況下，這個後綴已經沒有區分作用，但重新命名會連動 `.env`（外部依賴，見下方）。
+
+### 外部依賴（使用者自行處理，不屬於這次程式碼變更的驗收範圍）
+
+- LINE Developer Console 後台的 webhook URL 設定（原本 `/webhook/dobby`、`/webhook/batting` 各自指向的 LINE Official Account）需要對應調整——**這是人工操作，不是這個 repo 能做的事**，程式碼變更完成後要提醒使用者處理。
+- 正式環境（Zeabur 或使用者的伺服器）的 `.env` 需要同步移除 `_BATTING` 兩個變數（如果決定 1 選「拔掉 `_DOBBY` 後綴」，還要同步改名），**使用者自行處理**。
+
+### 附帶調查：`NODE_ENV` 是否真的有在用（2026-09-19 確認過，不用重查）
+
+`env.ts` schema 裡的 `NODE_ENV` 欄位（通過 zod 驗證那個）**完全沒有被讀取過，是死碼**。專案實際上繞過 `env.ts`，在 3 個地方直接讀 `process.env['NODE_ENV']`，而且這 3 個都是真的在運作、不是死碼：`src/index.ts:60`（`!== 'test'` 判斷要不要真的 `app.listen`）、`src/test-utils/setup.ts:4`（測試環境設定成 `'test'`）、`src/utils/logger.ts:6`（`isDev` 判斷決定 log 輸出格式）。這是既有 TODO `[2.6]`/`[5.8]` 記錄過的問題（繞過 `env.ts`），跟這次移除雙 bot 沒有直接關聯，**這次任務不用處理它**，但如果之後真的要用 `NODE_ENV` 取代原本雙 bot 的「正式/測試」區分角色，屆時會是把這個技術債一起清掉的自然時機，不是現在。
+
+### 驗收標準
+
+- [ ] `grep -rniE "\bdobby\b|\bbatting\b" src/` 只剩「明確排除」清單裡那些 `@Dobby`/品牌相關的結果，routing/設定層的結果歸零。
+- [ ] `npm test`、`npx tsc --noEmit`、`npm run build` 全過。
+- [ ] `.env.example` 不再有 `_BATTING` 相關變數。
+- [ ] 上面列出的文件都同步更新，不再描述雙 bot 架構。
+- [ ] `TODO.md` 的 `[5.7]` 一併移除。
+
+---
+
 ## 手動測試追蹤（ngrok 接真實 LINE 帳號測試）
 
 > dobby / batting 兩個 bot 需各測一輪（webhook 路徑與 channel secret 不同）。每項測完打勾，機器人實際回應貼進該項下方的 code block（原文照貼、保留換行），有問題另加「備註：」說明差異。
