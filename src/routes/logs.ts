@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { readRecentLogs, type LogEntry } from '../utils/log-reader.js';
 import { logsAuthMiddleware } from '../middleware/logs-auth.js';
+import { groupPairedEntries, type DisplayRow, type NotionCallRow, type LineSendRow } from './log-grouping.js';
 
 const taipeiFormatter = new Intl.DateTimeFormat('sv-SE', {
   timeZone: 'Asia/Taipei',
@@ -50,6 +51,17 @@ function formatTime(epochMs: number): string {
   return taipeiFormatter.format(new Date(epochMs));
 }
 
+function statusIcon(hasSuccess: boolean, hasFailure: boolean): string {
+  if (hasFailure) return '✕';
+  if (hasSuccess) return '✓';
+  return '⏳';
+}
+
+function reqIdCellHtml(rawReqId: string): string {
+  if (!rawReqId) return `<td class="reqid">—</td>`;
+  return `<td class="reqid"><span class="reqid-link" onclick="filterByReqId(event,'${rawReqId}')">${escapeHtml(rawReqId)}</span></td>`;
+}
+
 function renderEntry(entry: LogEntry): string {
   const levelNum = entry.level ?? 30;
   const levelName = LEVEL_NAMES[levelNum] ?? String(levelNum);
@@ -57,14 +69,14 @@ function renderEntry(entry: LogEntry): string {
   const time = formatTime(entry.time ?? 0);
   const msg = escapeHtml(String(entry.msg ?? ''));
   const rawReqId = String(entry.reqId ?? '');
-  const reqId = escapeHtml(rawReqId);
 
   const { level, time: _t, msg: _m, reqId: _r, pid, hostname, messages: msgList, ...extra } = entry;
 
-  // Notion API inline tags: method badge + db name. Covers both the
-  // lightweight info-level lines ('Notion API request'/'response') and the
-  // debug-level full-payload lines (' ... payload'), so the flat table shows
-  // badges regardless of which LOG_LEVEL produced the entry.
+  // Notion API inline tags: method badge + db name. Under normal operation a
+  // Notion API log line is always absorbed into a merged notion-call row by
+  // groupPairedEntries() before reaching here — this branch only fires for
+  // the rare orphan case (a payload/response/error line whose matching
+  // request row wasn't found), so the badge still shows up even then.
   const NOTION_API_MESSAGES = new Set([
     'Notion API request',
     'Notion API response',
@@ -102,11 +114,6 @@ function renderEntry(entry: LogEntry): string {
 
   const searchableText = (msg + ' ' + JSON.stringify(extra)).toLowerCase();
 
-  // reqId cell: clickable if present
-  const reqIdCell = rawReqId
-    ? `<td class="reqid"><span class="reqid-link" onclick="filterByReqId(event,'${rawReqId}')">${reqId}</span></td>`
-    : `<td class="reqid">—</td>`;
-
   // Full raw JSON for copy
   const rawJson = escapeHtml(JSON.stringify(entry));
 
@@ -114,16 +121,135 @@ function renderEntry(entry: LogEntry): string {
   <tr class="log-row" data-level="${levelName}" data-time="${entry.time ?? 0}" data-msg="${escapeHtml(searchableText)}" data-reqid="${rawReqId}" data-raw="${rawJson}" onclick="toggleExtra(this)">
     <td class="time">${time}</td>
     <td><span class="badge" style="background:${color}">${levelName}</span></td>
-    ${reqIdCell}
+    ${reqIdCellHtml(rawReqId)}
     <td class="msg">${msg}${notionTagsHtml}${purposeHtml}${messagesHtml}</td>
   </tr>
   ${extraJson ? `<tr class="extra-row hidden"><td colspan="4"><pre>${extraJson}</pre></td></tr>` : ''}`;
 }
 
+function notionCallDetail(row: NotionCallRow): string {
+  const parts: string[] = [];
+  const requestBody = row.requestPayload?.['body'];
+  if (row.requestPayload && requestBody !== undefined) {
+    parts.push(`請求內容:\n${JSON.stringify(requestBody, null, 2)}`);
+  } else {
+    parts.push('開 LOG_LEVEL=debug 才能看到完整請求內容');
+  }
+  if (row.error) {
+    parts.push(`錯誤:\n${JSON.stringify(row.error, null, 2)}`);
+  } else {
+    const responseResult = row.responsePayload?.['result'];
+    if (row.responsePayload && responseResult !== undefined) {
+      parts.push(`回應內容:\n${JSON.stringify(responseResult, null, 2)}`);
+    } else if (row.response) {
+      parts.push('開 LOG_LEVEL=debug 才能看到完整回應內容');
+    } else {
+      parts.push('尚無回應記錄');
+    }
+  }
+  return parts.join('\n\n');
+}
+
+function renderNotionCallRow(row: NotionCallRow): string {
+  const levelNum = row.error?.level ?? row.response?.level ?? row.request.level ?? 30;
+  const levelName = LEVEL_NAMES[levelNum] ?? String(levelNum);
+  const color = LEVEL_COLORS[levelName] ?? '#94a3b8';
+  const time = formatTime(row.request.time ?? 0);
+  const rawReqId = String(row.request.reqId ?? '');
+
+  const methodColor = METHOD_COLORS[row.method] ?? '#94a3b8';
+  const methodHtml = `<span class="tag-method" style="color:${methodColor};border-color:${methodColor}">${escapeHtml(row.method)}</span>`;
+  const dbHtml = row.db ? ` <span class="tag-db">${escapeHtml(row.db)}</span>` : '';
+  const purposeHtml = row.purpose ? ` <span class="tag-purpose">${escapeHtml(row.purpose)}</span>` : '';
+  const retryHtml = row.attempts > 1
+    ? ` <span class="tag-method" style="color:#94a3b8;border-color:#94a3b8">重試 ${row.attempts - 1} 次</span>`
+    : '';
+  const icon = statusIcon(!!row.response, !!row.error);
+  const msgHtml = `${icon} Notion API 呼叫${dbHtml ? '' : ''} ${methodHtml}${dbHtml}${purposeHtml}${retryHtml}`;
+
+  const extraJson = escapeHtml(notionCallDetail(row));
+  const searchableText = JSON.stringify(row).toLowerCase();
+  const rawJson = escapeHtml(JSON.stringify(row));
+
+  return `
+  <tr class="log-row" data-level="${levelName}" data-time="${row.request.time ?? 0}" data-msg="${escapeHtml(searchableText)}" data-reqid="${rawReqId}" data-raw="${rawJson}" onclick="toggleExtra(this)">
+    <td class="time">${time}</td>
+    <td><span class="badge" style="background:${color}">${levelName}</span></td>
+    ${reqIdCellHtml(rawReqId)}
+    <td class="msg">${msgHtml}</td>
+  </tr>
+  <tr class="extra-row hidden"><td colspan="4"><pre>${extraJson}</pre></td></tr>`;
+}
+
+function lineSendDetail(row: LineSendRow, messages: string[]): string {
+  const parts: string[] = [`訊息內容:\n${JSON.stringify(messages, null, 2)}`];
+  if (row.failure) {
+    parts.push(`失敗原因:\n${JSON.stringify(row.failure, null, 2)}`);
+  } else if (!row.sent) {
+    parts.push('尚無送出結果記錄');
+  }
+  return parts.join('\n\n');
+}
+
+function renderLineSendRow(row: LineSendRow): string {
+  const levelNum = row.failure?.level ?? row.sent?.level ?? row.start.level ?? 30;
+  const levelName = LEVEL_NAMES[levelNum] ?? String(levelNum);
+  const color = LEVEL_COLORS[levelName] ?? '#94a3b8';
+  const time = formatTime(row.start.time ?? 0);
+  const rawReqId = String(row.start.reqId ?? '');
+  const label = row.kind === 'line-reply' ? 'LINE 回覆' : 'LINE 推播';
+  const rawMessages = row.start['messages'];
+  const messages = Array.isArray(rawMessages) ? rawMessages.map(String) : [];
+  const preview = messages.join(' / ').slice(0, 80);
+  const icon = statusIcon(!!row.sent, !!row.failure);
+  const msgHtml = `${icon} ${escapeHtml(label)}${preview ? `: ${escapeHtml(preview)}` : ''}`;
+
+  const extraJson = escapeHtml(lineSendDetail(row, messages));
+  const searchableText = JSON.stringify(row).toLowerCase();
+  const rawJson = escapeHtml(JSON.stringify(row));
+
+  return `
+  <tr class="log-row" data-level="${levelName}" data-time="${row.start.time ?? 0}" data-msg="${escapeHtml(searchableText)}" data-reqid="${rawReqId}" data-raw="${rawJson}" onclick="toggleExtra(this)">
+    <td class="time">${time}</td>
+    <td><span class="badge" style="background:${color}">${levelName}</span></td>
+    ${reqIdCellHtml(rawReqId)}
+    <td class="msg">${msgHtml}</td>
+  </tr>
+  <tr class="extra-row hidden"><td colspan="4"><pre>${extraJson}</pre></td></tr>`;
+}
+
+function renderDisplayRow(row: DisplayRow): string {
+  switch (row.kind) {
+    case 'single':
+      return renderEntry(row.entry);
+    case 'notion-call':
+      return renderNotionCallRow(row);
+    case 'line-reply':
+    case 'line-push':
+      return renderLineSendRow(row);
+  }
+}
+
 function renderHtml(entries: LogEntry[]): string {
-  const rows = entries.length > 0
-    ? entries.map(renderEntry).join('')
+  // groupPairedEntries() merges request/payload/response/payload(/error) and
+  // reply|push "about to send"/"sent" pairs into single rows so both the
+  // flat table and the flow-table view show one item per logical action
+  // instead of several disjoint log lines. It always returns rows sorted
+  // ascending by representative time; the flat table reverses that to keep
+  // its existing newest-first convention, the flow view (client-side) does
+  // its own per-reqId grouping/sorting from the same data.
+  const displayRows = groupPairedEntries(entries);
+  const flatRows = [...displayRows].reverse();
+
+  const rows = flatRows.length > 0
+    ? flatRows.map(renderDisplayRow).join('')
     : '<tr><td colspan="4" class="empty">No log entries found</td></tr>';
+
+  // Embedded as JSON rather than re-derived from the flat table's DOM so the
+  // flow view consumes the exact same paired data (no second, drifting copy
+  // of the pairing logic living in client-side JS). <\/script> guards against
+  // log content containing a literal closing script tag.
+  const displayRowsJson = JSON.stringify(displayRows).replace(/<\/script/gi, '<\\/script');
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -210,7 +336,7 @@ function renderHtml(entries: LogEntry[]): string {
 <body>
   <header>
     <h1>🐶 Dobby Logs</h1>
-    <span class="count" id="count-label">${entries.length} entries</span>
+    <span class="count" id="count-label">${flatRows.length} entries</span>
   </header>
 
   <div class="toolbar">
@@ -263,16 +389,14 @@ function renderHtml(entries: LogEntry[]): string {
 
   <div id="flow-view"></div>
 
+  <script type="application/json" id="display-rows-data">${displayRowsJson}</script>
+
   <script>
     let activeLevel = 'all';
     let activeRange = 7;
     let activeReqId = '';
     let viewMode = 'flat';
     let flowBuilt = false;
-
-    function unescapeHtml(str) {
-      return str.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"');
-    }
 
     function setViewMode(mode) {
       viewMode = mode;
@@ -286,6 +410,7 @@ function renderHtml(entries: LogEntry[]): string {
     }
 
     const METHOD_COLORS_JS = { GET: '#34d399', POST: '#60a5fa', PATCH: '#fbbf24', DELETE: '#f87171' };
+    const MESSAGE_TYPE_LABELS_JS = { image: '圖片', video: '影片', audio: '語音', location: '位置資訊', file: '檔案', sticker: '貼圖' };
 
     function methodBadge(method, db) {
       const color = METHOD_COLORS_JS[method] || '#94a3b8';
@@ -301,95 +426,48 @@ function renderHtml(entries: LogEntry[]): string {
     }
 
     function formatFlowTime(epochMs) {
-      const row = document.querySelector('tr.log-row[data-time="' + epochMs + '"]');
-      return row ? row.querySelector('td.time').textContent : new Date(epochMs).toISOString();
-    }
-
-    // Groups all loaded entries by reqId, pairing each Notion API request/
-    // response (and their debug-level payload siblings, if present) into a
-    // single step so the flow view can show "purpose → method/db" per call
-    // instead of four separate log lines. Entries without a reqId, or that
-    // don't fit the request/response/processing/reply shape, are kept as
-    // standalone rows so nothing silently disappears from the flow view.
-    function groupEntriesForFlow() {
-      const rows = Array.from(document.querySelectorAll('#log-body tr.log-row'));
-      const entries = rows.map(r => {
-        try { return JSON.parse(unescapeHtml(r.dataset.raw)); } catch { return null; }
-      }).filter(Boolean);
-      entries.sort((a, b) => (a.time || 0) - (b.time || 0)); // chronological for narrative order
-
-      const groups = new Map();
-      const loose = [];
-      for (const e of entries) {
-        if (e.reqId) {
-          if (!groups.has(e.reqId)) groups.set(e.reqId, []);
-          groups.get(e.reqId).push(e);
-        } else {
-          loose.push(e);
-        }
+      try {
+        return new Intl.DateTimeFormat('sv-SE', {
+          timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+        }).format(new Date(epochMs));
+      } catch {
+        return new Date(epochMs).toISOString();
       }
-      return { groups, loose };
     }
 
-    function buildSteps(groupEntries) {
-      let start = null, end = null;
-      const steps = [];
-      const pending = {};
-      const misc = [];
-
-      function keyOf(e) { return e.method + ' ' + e.path; }
-
-      for (const e of groupEntries) {
-        if (e.msg === 'Processing event') { start = e; continue; }
-        if (e.msg === 'LINE reply') { end = e; continue; }
-        if (e.msg === 'Notion API request') {
-          const key = keyOf(e);
-          const step = { method: e.method, path: e.path, db: e.db, purpose: e.purpose, request: e, requestPayload: null, response: null, responsePayload: null, error: null };
-          steps.push(step);
-          (pending[key] = pending[key] || []).push(step);
-          continue;
-        }
-        if (e.msg === 'Notion API request payload') {
-          const key = keyOf(e);
-          const step = (pending[key] || []).find(s => !s.requestPayload);
-          if (step) step.requestPayload = e; else misc.push(e);
-          continue;
-        }
-        if (e.msg === 'Notion API response') {
-          const key = keyOf(e);
-          const step = (pending[key] || []).find(s => !s.response);
-          if (step) step.response = e; else misc.push(e);
-          continue;
-        }
-        if (e.msg === 'Notion API response payload') {
-          const key = keyOf(e);
-          const step = (pending[key] || []).slice().reverse().find(s => s.response && !s.responsePayload);
-          if (step) step.responsePayload = e; else misc.push(e);
-          continue;
-        }
-        if (e.msg === 'Notion API error') {
-          const key = keyOf(e);
-          const step = (pending[key] || []).find(s => !s.response && !s.error);
-          if (step) step.error = e; else misc.push(e);
-          continue;
-        }
-        misc.push(e);
-      }
-      return { start, end, steps, misc };
+    function messageLabel(message) {
+      if (!message) return '';
+      if (message.type === 'text') return message.text || '';
+      if (message.type === 'location' && message.title) return MESSAGE_TYPE_LABELS_JS.location + '(' + message.title + ')';
+      if (message.type === 'file' && message.fileName) return MESSAGE_TYPE_LABELS_JS.file + '(' + message.fileName + ')';
+      return MESSAGE_TYPE_LABELS_JS[message.type] || message.type || '';
     }
 
-    function renderFlowStepDetail(step) {
+    function rowReqId(row) {
+      if (row.kind === 'single') return row.entry.reqId || '';
+      if (row.kind === 'notion-call') return row.request.reqId || '';
+      return row.start.reqId || '';
+    }
+
+    function rowTime(row) {
+      if (row.kind === 'single') return row.entry.time || 0;
+      if (row.kind === 'notion-call') return row.request.time || 0;
+      return row.start.time || 0;
+    }
+
+    function renderFlowStepDetail(row) {
       const parts = [];
-      if (step.requestPayload && step.requestPayload.body !== undefined) {
-        parts.push('<div>請求內容:<pre>' + escapeHtmlJs(JSON.stringify(step.requestPayload.body, null, 2)) + '</pre></div>');
-      } else if (step.request) {
+      if (row.requestPayload && row.requestPayload.body !== undefined) {
+        parts.push('<div>請求內容:<pre>' + escapeHtmlJs(JSON.stringify(row.requestPayload.body, null, 2)) + '</pre></div>');
+      } else {
         parts.push('<div class="hint">開 LOG_LEVEL=debug 才能看到完整請求內容</div>');
       }
-      if (step.responsePayload && step.responsePayload.result !== undefined) {
-        parts.push('<div>回應內容:<pre>' + escapeHtmlJs(JSON.stringify(step.responsePayload.result, null, 2)) + '</pre></div>');
-      } else if (step.error) {
-        parts.push('<div>錯誤:<pre>' + escapeHtmlJs(JSON.stringify(step.error, null, 2)) + '</pre></div>');
-      } else if (step.response) {
+      if (row.error) {
+        parts.push('<div>錯誤:<pre>' + escapeHtmlJs(JSON.stringify(row.error, null, 2)) + '</pre></div>');
+      } else if (row.responsePayload && row.responsePayload.result !== undefined) {
+        parts.push('<div>回應內容:<pre>' + escapeHtmlJs(JSON.stringify(row.responsePayload.result, null, 2)) + '</pre></div>');
+      } else if (row.response) {
         parts.push('<div class="hint">開 LOG_LEVEL=debug 才能看到完整回應內容</div>');
       } else {
         parts.push('<div class="hint">尚無回應記錄</div>');
@@ -397,49 +475,77 @@ function renderHtml(entries: LogEntry[]): string {
       return parts.join('');
     }
 
-    function renderFlowStep(step) {
-      const purpose = step.purpose ? escapeHtmlJs(step.purpose) : '(未標註目的)';
-      const errorTag = step.error ? ' <span class="tag-method" style="color:#f87171;border-color:#f87171">錯誤</span>' : '';
+    function renderFlowStep(row) {
+      const purpose = row.purpose ? escapeHtmlJs(row.purpose) : '(未標註目的)';
+      const icon = row.error ? '✕' : (row.response ? '✓' : '⏳');
+      const retryTag = row.attempts > 1
+        ? ' <span class="tag-method" style="color:#94a3b8;border-color:#94a3b8">重試 ' + (row.attempts - 1) + ' 次</span>'
+        : '';
       return '<div class="flow-step" onclick="event.stopPropagation(); this.classList.toggle(\\'expanded\\')">' +
-        '<span class="flow-step-purpose">' + purpose + '</span> ' +
-        methodBadge(step.method, step.db) + errorTag +
-        '<div class="flow-step-detail">' + renderFlowStepDetail(step) + '</div>' +
+        '<span class="flow-step-purpose">' + icon + ' ' + purpose + '</span> ' +
+        methodBadge(row.method, row.db) + retryTag +
+        '<div class="flow-step-detail">' + renderFlowStepDetail(row) + '</div>' +
         '</div>';
     }
 
-    function renderFlowEndpoint(entry, label) {
-      if (entry.msg === 'Processing event') {
-        const src = entry.source && entry.source.type ? entry.source.type : '';
-        const msgType = entry.type || '';
-        return '<div class="flow-endpoint"><span class="flow-tag">' + label + '</span>' +
-          '事件進來 · ' + escapeHtmlJs(msgType) + (src ? ' · ' + escapeHtmlJs(src) : '') + '</div>';
-      }
-      if (entry.msg === 'LINE reply') {
-        const messages = Array.isArray(entry.messages) ? entry.messages.join(' / ') : '';
-        return '<div class="flow-endpoint"><span class="flow-tag">' + label + '</span>' +
-          'LINE 回覆' + (messages ? ' · ' + escapeHtmlJs(messages.slice(0, 80)) : '') + '</div>';
-      }
-      return '';
+    function renderFlowStartEndpoint(entry, label) {
+      const src = entry.source && entry.source.type ? entry.source.type : '';
+      const msgType = entry.type || '';
+      const content = messageLabel(entry.message);
+      return '<div class="flow-endpoint"><span class="flow-tag">' + label + '</span>' +
+        '事件進來 · ' + escapeHtmlJs(msgType) + (src ? ' · ' + escapeHtmlJs(src) : '') +
+        (content ? ' · ' + escapeHtmlJs(content) : '') + '</div>';
     }
 
-    function renderFlowGroup(reqId, groupEntries) {
-      const { start, end, steps, misc } = buildSteps(groupEntries);
-      const firstTime = groupEntries[0] ? groupEntries[0].time : 0;
-      const summary = (start ? '事件觸發' : '(無 Processing event 記錄)') +
+    function renderFlowEndEndpoint(row, label) {
+      const messages = Array.isArray(row.start.messages) ? row.start.messages.join(' / ') : '';
+      const icon = row.failure ? '✕' : (row.sent ? '✓' : '⏳');
+      return '<div class="flow-endpoint"><span class="flow-tag">' + label + '</span>' +
+        icon + ' LINE 回覆' + (messages ? ' · ' + escapeHtmlJs(messages.slice(0, 80)) : '') + '</div>';
+    }
+
+    function renderFlowMisc(row) {
+      if (row.kind === 'single') {
+        return '<div class="flow-misc">' + escapeHtmlJs(row.entry.msg || '') + '</div>';
+      }
+      // kind === 'line-push': pushes carry no reqId, so a push that lands in
+      // an event's group (or the shared '' bucket) is shown inline rather
+      // than dropped.
+      const messages = Array.isArray(row.start.messages) ? row.start.messages.join(' / ') : '';
+      const icon = row.failure ? '✕' : (row.sent ? '✓' : '⏳');
+      return '<div class="flow-misc">' + icon + ' LINE 推播' + (messages ? ' · ' + escapeHtmlJs(messages.slice(0, 80)) : '') + '</div>';
+    }
+
+    function renderFlowGroup(reqId, rows) {
+      let start = null, end = null;
+      const steps = [];
+      const misc = [];
+      for (const row of rows) {
+        if (row.kind === 'single' && row.entry.msg === 'Processing event') { start = row.entry; continue; }
+        if (row.kind === 'line-reply') { end = row; continue; }
+        if (row.kind === 'notion-call') { steps.push(row); continue; }
+        misc.push(row);
+      }
+
+      const summary = (start ? '事件觸發' : (reqId ? '(無 Processing event 記錄)' : '背景/排程作業')) +
         ' → ' + steps.length + ' 次 API 呼叫 → ' + (end ? 'LINE reply' : '(無回覆記錄)');
+      const firstTime = rows.length ? rowTime(rows[0]) : 0;
+      const reqIdHtml = reqId
+        ? '<span class="reqid-link" onclick="event.stopPropagation(); filterByReqId(event,\\'' + reqId + '\\'); setViewMode(\\'flat\\')">' + escapeHtmlJs(reqId) + '</span>'
+        : '<span class="reqid-link" style="cursor:default;opacity:.6">(無 reqId)</span>';
 
       const stepsHtml = [
-        start ? renderFlowEndpoint(start, '起點') : '',
+        start ? renderFlowStartEndpoint(start, '起點') : '',
         ...steps.map(renderFlowStep),
-        ...misc.map(m => '<div class="flow-misc">' + escapeHtmlJs(m.msg || '') + '</div>'),
-        end ? renderFlowEndpoint(end, '終點') : '',
+        ...misc.map(renderFlowMisc),
+        end ? renderFlowEndEndpoint(end, '終點') : '',
       ].join('');
 
       return '<div class="flow-group">' +
         '<div class="flow-header" onclick="this.parentElement.classList.toggle(\\'expanded\\')">' +
         '<span class="flow-caret">▸</span>' +
         '<span class="time">' + formatFlowTime(firstTime) + '</span>' +
-        '<span class="reqid-link" onclick="event.stopPropagation(); filterByReqId(event,\\'' + reqId + '\\'); setViewMode(\\'flat\\')">' + escapeHtmlJs(reqId) + '</span>' +
+        reqIdHtml +
         '<span class="flow-summary">' + summary + '</span>' +
         '</div>' +
         '<div class="flow-steps">' + stepsHtml + '</div>' +
@@ -447,25 +553,30 @@ function renderHtml(entries: LogEntry[]): string {
     }
 
     function buildFlowView() {
-      const { groups, loose } = groupEntriesForFlow();
       const container = document.getElementById('flow-view');
-      if (groups.size === 0 && loose.length === 0) {
+      let displayRows = [];
+      try {
+        displayRows = JSON.parse(document.getElementById('display-rows-data').textContent);
+      } catch {}
+
+      if (displayRows.length === 0) {
         container.innerHTML = '<div class="flow-empty">No log entries found</div>';
         return;
       }
 
-      const groupEntriesList = Array.from(groups.entries()).map(([reqId, entries]) => ({
-        reqId, entries, firstTime: entries[0] ? entries[0].time : 0,
-      }));
-      const looseItems = loose.map(e => ({ loose: e, firstTime: e.time || 0 }));
-      const combined = [...groupEntriesList, ...looseItems].sort((a, b) => a.firstTime - b.firstTime);
+      const groups = new Map();
+      for (const row of displayRows) {
+        const reqId = rowReqId(row);
+        if (!groups.has(reqId)) groups.set(reqId, []);
+        groups.get(reqId).push(row);
+      }
 
-      container.innerHTML = combined.map(item => {
-        if (item.loose) {
-          return '<div class="flow-misc">' + formatFlowTime(item.firstTime) + ' · ' + escapeHtmlJs(item.loose.msg || '') + '</div>';
-        }
-        return renderFlowGroup(item.reqId, item.entries);
-      }).join('');
+      const groupList = Array.from(groups.entries()).map(([reqId, rows]) => ({
+        reqId, rows, firstTime: rows.length ? rowTime(rows[0]) : 0,
+      }));
+      groupList.sort((a, b) => b.firstTime - a.firstTime); // newest group first; within a group, rows stay chronological (narrative order)
+
+      container.innerHTML = groupList.map(g => renderFlowGroup(g.reqId, g.rows)).join('');
     }
 
     function filterLevel(level) {
