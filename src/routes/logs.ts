@@ -328,7 +328,7 @@ function renderHtml(entries: LogEntry[]): string {
     .flow-step-detail { display: none; padding: 8px 14px 8px 48px; background: #0f172a; font-size: 12px; color: #94a3b8; }
     .flow-step.expanded .flow-step-detail { display: block; }
     .flow-step-detail pre { white-space: pre-wrap; word-break: break-all; margin-top: 4px; }
-    .flow-step-detail .hint { color: #64748b; font-style: italic; }
+    .hint { color: #64748b; font-style: italic; }
     .flow-misc { padding: 6px 14px 6px 32px; font-size: 12px; color: #64748b; border-bottom: 1px solid #1e293b; }
     .flow-empty { text-align: center; padding: 40px; color: #475569; }
   </style>
@@ -488,13 +488,22 @@ function renderHtml(entries: LogEntry[]): string {
         '</div>';
     }
 
-    function renderFlowStartEndpoint(entry, label) {
-      const src = entry.source && entry.source.type ? entry.source.type : '';
+    function renderFlowStartEndpoint(entry, detail, label) {
+      // 'Processing event' (info) carries only type/sourceType — no PII.
+      // The actual message content lives on the paired 'Processing event
+      // detail' (debug) line, if LOG_LEVEL=debug captured one.
+      const src = entry.sourceType || (detail && detail.source && detail.source.type) || '';
       const msgType = entry.type || '';
-      const content = messageLabel(entry.message);
+      let contentHtml = '';
+      if (msgType === 'message') {
+        const content = detail ? messageLabel(detail.message) : '';
+        contentHtml = content
+          ? ' · ' + escapeHtmlJs(content)
+          : ' · <span class="hint">開 LOG_LEVEL=debug 才能看到指令內容</span>';
+      }
       return '<div class="flow-endpoint"><span class="flow-tag">' + label + '</span>' +
         '事件進來 · ' + escapeHtmlJs(msgType) + (src ? ' · ' + escapeHtmlJs(src) : '') +
-        (content ? ' · ' + escapeHtmlJs(content) : '') + '</div>';
+        contentHtml + '</div>';
     }
 
     function renderFlowEndEndpoint(row, label) {
@@ -517,11 +526,12 @@ function renderHtml(entries: LogEntry[]): string {
     }
 
     function renderFlowGroup(reqId, rows) {
-      let start = null, end = null;
+      let start = null, startDetail = null, end = null;
       const steps = [];
       const misc = [];
       for (const row of rows) {
         if (row.kind === 'single' && row.entry.msg === 'Processing event') { start = row.entry; continue; }
+        if (row.kind === 'single' && row.entry.msg === 'Processing event detail') { startDetail = row.entry; continue; }
         if (row.kind === 'line-reply') { end = row; continue; }
         if (row.kind === 'notion-call') { steps.push(row); continue; }
         misc.push(row);
@@ -535,7 +545,7 @@ function renderHtml(entries: LogEntry[]): string {
         : '<span class="reqid-link" style="cursor:default;opacity:.6">(無 reqId)</span>';
 
       const stepsHtml = [
-        start ? renderFlowStartEndpoint(start, '起點') : '',
+        start ? renderFlowStartEndpoint(start, startDetail, '起點') : '',
         ...steps.map(renderFlowStep),
         ...misc.map(renderFlowMisc),
         end ? renderFlowEndEndpoint(end, '終點') : '',

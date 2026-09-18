@@ -9,7 +9,13 @@ export async function processEvents(events: WebhookEvent[], botId: string): Prom
   for (const event of events) {
     const quoteToken = event.type === 'message' && event.message.type === 'text' ? event.message.quoteToken : undefined;
     await runWithContext(async () => {
-    logger.info({ type: event.type, source: event.source, message: 'message' in event ? event.message : undefined }, 'Processing event');
+    // Split like notion-fetch.ts's request/response logging: an info-level
+    // summary with no PII (source/message can carry a LINE userId/groupId
+    // and the user's raw message text) so the flow-table view always has a
+    // starting point to show, and a debug-level line with the full detail
+    // for when someone actually needs to see what was sent.
+    logger.info({ type: event.type, sourceType: event.source?.type }, 'Processing event');
+    logger.debug({ type: event.type, source: event.source, message: 'message' in event ? event.message : undefined }, 'Processing event detail');
     try {
       switch (event.type) {
         case 'message':
