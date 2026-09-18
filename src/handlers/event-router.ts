@@ -9,7 +9,7 @@ export async function processEvents(events: WebhookEvent[], botId: string): Prom
   for (const event of events) {
     const quoteToken = event.type === 'message' && event.message.type === 'text' ? event.message.quoteToken : undefined;
     await runWithContext(async () => {
-    logger.debug({ type: event.type, source: event.source, message: 'message' in event ? event.message : undefined }, 'Processing event');
+    logger.info({ type: event.type, source: event.source, message: 'message' in event ? event.message : undefined }, 'Processing event');
     try {
       switch (event.type) {
         case 'message':
