@@ -65,6 +65,20 @@ describe('createLogsRouter', () => {
     expect(res.text.match(/tag-db/g)?.length).toBeGreaterThanOrEqual(2);
   });
 
+  it('shows the API endpoint path for a Notion API call, not just its method/db', async () => {
+    const app = express();
+    app.use('/logs', createLogsRouter('/unused/because/reader/is/mocked'));
+
+    const res = await request(app)
+      .get('/logs')
+      .query({ token: process.env['LOGS_ACCESS_TOKEN'] });
+
+    // GET /pages/{id} calls carry no database ID in their path, so db can be
+    // absent — path is the only thing that identifies the actual endpoint.
+    expect(res.text).toContain('tag-path');
+    expect(res.text).toContain('/pages/abc');
+  });
+
   it('shows a purpose tag when the entry carries one', async () => {
     const app = express();
     app.use('/logs', createLogsRouter('/unused/because/reader/is/mocked'));

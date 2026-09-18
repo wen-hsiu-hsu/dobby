@@ -128,7 +128,7 @@ function renderEntry(entry: LogEntry): string {
 }
 
 function notionCallDetail(row: NotionCallRow): string {
-  const parts: string[] = [];
+  const parts: string[] = [`${row.method} ${row.path}`];
   const requestBody = row.requestPayload?.['body'];
   if (row.requestPayload && requestBody !== undefined) {
     parts.push(`請求內容:\n${JSON.stringify(requestBody, null, 2)}`);
@@ -159,13 +159,23 @@ function renderNotionCallRow(row: NotionCallRow): string {
 
   const methodColor = METHOD_COLORS[row.method] ?? '#94a3b8';
   const methodHtml = `<span class="tag-method" style="color:${methodColor};border-color:${methodColor}">${escapeHtml(row.method)}</span>`;
-  const dbHtml = row.db ? ` <span class="tag-db">${escapeHtml(row.db)}</span>` : '';
-  const purposeHtml = row.purpose ? ` <span class="tag-purpose">${escapeHtml(row.purpose)}</span>` : '';
+  const dbHtml = row.db ? `<span class="tag-db">${escapeHtml(row.db)}</span>` : '';
+  // Not every call has a db tag — GET /pages/{id} calls carry no database ID
+  // in their path at all (page IDs and database IDs are different things),
+  // so getDbName() can't guess one. The path itself is the only way to tell
+  // which endpoint was actually hit in that case.
+  const pathHtml = `<span class="tag-path" title="${escapeHtml(row.path)}">${escapeHtml(row.path)}</span>`;
+  const purposeHtml = row.purpose ? `<span class="tag-purpose">${escapeHtml(row.purpose)}</span>` : '';
   const retryHtml = row.attempts > 1
-    ? ` <span class="tag-method" style="color:#94a3b8;border-color:#94a3b8">重試 ${row.attempts - 1} 次</span>`
+    ? `<span class="tag-method" style="color:#94a3b8;border-color:#94a3b8">重試 ${row.attempts - 1} 次</span>`
     : '';
   const icon = statusIcon(!!row.response, !!row.error);
-  const msgHtml = `${icon} Notion API 呼叫${dbHtml ? '' : ''} ${methodHtml}${dbHtml}${purposeHtml}${retryHtml}`;
+  const msgHtml = `<div class="action-row">` +
+    `<span class="action-icon">${icon}</span>` +
+    `<span class="action-label">Notion API 呼叫</span>` +
+    `<span class="action-badges">${methodHtml}${dbHtml}${pathHtml}${retryHtml}</span>` +
+    `<span class="action-content">${purposeHtml}</span>` +
+    `</div>`;
 
   const extraJson = escapeHtml(notionCallDetail(row));
   const searchableText = JSON.stringify(row).toLowerCase();
@@ -202,7 +212,16 @@ function renderLineSendRow(row: LineSendRow): string {
   const messages = Array.isArray(rawMessages) ? rawMessages.map(String) : [];
   const preview = messages.join(' / ').slice(0, 80);
   const icon = statusIcon(!!row.sent, !!row.failure);
-  const msgHtml = `${icon} ${escapeHtml(label)}${preview ? `: ${escapeHtml(preview)}` : ''}`;
+  // Same four-column shape as renderNotionCallRow's .action-row (icon /
+  // label / badges / content) — an empty badges column, not a differently
+  // shaped row, is what keeps LINE rows' content column aligned with Notion
+  // API rows' purpose column when scanning down the flat table.
+  const msgHtml = `<div class="action-row">` +
+    `<span class="action-icon">${icon}</span>` +
+    `<span class="action-label">${escapeHtml(label)}</span>` +
+    `<span class="action-badges"></span>` +
+    `<span class="action-content">${escapeHtml(preview)}</span>` +
+    `</div>`;
 
   const extraJson = escapeHtml(lineSendDetail(row, messages));
   const searchableText = JSON.stringify(row).toLowerCase();
@@ -300,6 +319,18 @@ function renderHtml(entries: LogEntry[]): string {
     .tag-method { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 4px; border: 1px solid; font-size: 11px; font-weight: 700; }
     .tag-db { display: inline-block; margin-left: 4px; padding: 1px 6px; border-radius: 4px; background: #334155; color: #cbd5e1; font-size: 11px; }
     .tag-purpose { display: inline-block; margin-left: 4px; padding: 1px 6px; border-radius: 4px; background: #312e81; color: #c7d2fe; font-size: 11px; }
+    .tag-path { display: inline-block; padding: 1px 6px; border-radius: 4px; background: #1e293b; border: 1px solid #334155; color: #94a3b8; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+
+    /* Merged action rows (Notion API calls, LINE reply/push) in the flat
+       table — a shared 4-column grid so the badges/content of unrelated row
+       kinds (e.g. a long "LINE 回覆: 報名成功..." row next to a short
+       "Notion API 呼叫" row) line up in the same vertical position instead
+       of drifting based on each row's own label length. */
+    .action-row { display: grid; grid-template-columns: 18px 118px 300px 1fr; column-gap: 6px; align-items: center; }
+    .action-icon { text-align: center; }
+    .action-label { color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .action-badges { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; row-gap: 2px; }
+    .action-content { color: #cbd5e1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     tr.extra-row td { background: #1e293b; padding: 0; }
     tr.extra-row pre { padding: 10px 16px; font-size: 12px; color: #94a3b8; white-space: pre-wrap; word-break: break-all; }
     .hidden { display: none; }
@@ -412,10 +443,14 @@ function renderHtml(entries: LogEntry[]): string {
     const METHOD_COLORS_JS = { GET: '#34d399', POST: '#60a5fa', PATCH: '#fbbf24', DELETE: '#f87171' };
     const MESSAGE_TYPE_LABELS_JS = { image: '圖片', video: '影片', audio: '語音', location: '位置資訊', file: '檔案', sticker: '貼圖' };
 
-    function methodBadge(method, db) {
+    function methodBadge(method, db, path) {
       const color = METHOD_COLORS_JS[method] || '#94a3b8';
       let html = '<span class="tag-method" style="color:' + color + ';border-color:' + color + '">' + escapeHtmlJs(method) + '</span>';
       if (db) html += ' <span class="tag-db">' + escapeHtmlJs(db) + '</span>';
+      // GET /pages/{id} calls carry no database ID in their path at all, so
+      // getDbName() can't tag a db for them — path is the only way to tell
+      // which endpoint was actually hit in that case.
+      if (path) html += ' <span class="tag-path" title="' + escapeHtmlJs(path) + '">' + escapeHtmlJs(path) + '</span>';
       return html;
     }
 
@@ -483,7 +518,7 @@ function renderHtml(entries: LogEntry[]): string {
         : '';
       return '<div class="flow-step" onclick="event.stopPropagation(); this.classList.toggle(\\'expanded\\')">' +
         '<span class="flow-step-purpose">' + icon + ' ' + purpose + '</span> ' +
-        methodBadge(row.method, row.db) + retryTag +
+        methodBadge(row.method, row.db, row.path) + retryTag +
         '<div class="flow-step-detail">' + renderFlowStepDetail(row) + '</div>' +
         '</div>';
     }
