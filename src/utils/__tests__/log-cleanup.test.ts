@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const { readdirMock, unlinkMock } = vi.hoisted(() => ({
   readdirMock: vi.fn(),
@@ -71,5 +71,48 @@ describe('cleanOldLogs', () => {
 
     await expect(cleanOldLogs(LOG_DIR)).resolves.toBeUndefined();
     expect(unlinkMock).not.toHaveBeenCalled();
+  });
+
+  describe('UTC-anchored retention cutoff', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('keeps a file exactly at the 7-day boundary and deletes one a day past it, based on UTC calendar dates', async () => {
+      // "Now" is deliberately set to 20:00 UTC — a time-of-day at which the
+      // old local-time cutoff (setDate/setHours, which would reflect
+      // Asia/Taipei's UTC+8 calendar date of the *next* day at this hour)
+      // would compute a cutoff up to ~16h later than the correct UTC-based
+      // one, causing it to wrongly delete the boundary file below.
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-01-08T20:00:00.000Z'));
+
+      readdirMock.mockResolvedValue([
+        'app.2026-01-01.log', // exactly 7 days before 2026-01-08 (UTC) — must survive
+        'app.2025-12-31.log', // 8 days before — must be deleted
+      ]);
+
+      await cleanOldLogs(LOG_DIR);
+
+      expect(unlinkMock).toHaveBeenCalledTimes(1);
+      expect(unlinkMock).toHaveBeenCalledWith(expect.stringContaining('app.2025-12-31.log'));
+      expect(unlinkMock).not.toHaveBeenCalledWith(expect.stringContaining('app.2026-01-01.log'));
+    });
+
+    it('never reads local-timezone-dependent Date fields, so the result cannot depend on server TZ', async () => {
+      const localGetters = ['getDate', 'getFullYear', 'getMonth', 'getHours'] as const;
+      const localSetters = ['setDate', 'setHours'] as const;
+      const spies = [...localGetters, ...localSetters].map((name) =>
+        vi.spyOn(Date.prototype, name)
+      );
+
+      readdirMock.mockResolvedValue(['app.2026-01-01.log']);
+      await cleanOldLogs(LOG_DIR);
+
+      for (const spy of spies) {
+        expect(spy).not.toHaveBeenCalled();
+        spy.mockRestore();
+      }
+    });
   });
 });

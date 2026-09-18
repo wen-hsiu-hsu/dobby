@@ -12,9 +12,15 @@ export async function cleanOldLogs(logDir: string): Promise<void> {
     return; // logs/ doesn't exist yet
   }
 
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - RETENTION_DAYS);
-  cutoff.setHours(0, 0, 0, 0);
+  // UTC-anchored cutoff: file dates come from `new Date('YYYY-MM-DD')`, which
+  // parses date-only ISO strings as UTC midnight. Computing cutoff via
+  // setDate()/setHours() would anchor it to the server's local timezone
+  // instead — harmless today since the container runs with no TZ set (UTC),
+  // but would silently shift the deletion boundary (by an amount that varies
+  // with time-of-day, up to ~1 day) if TZ were ever set to Asia/Taipei,
+  // including deleting a file before it's actually past retention.
+  const now = new Date();
+  const cutoff = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - RETENTION_DAYS);
 
   for (const file of files) {
     if (!file.endsWith('.log')) continue;
@@ -24,7 +30,7 @@ export async function cleanOldLogs(logDir: string): Promise<void> {
     if (!match) continue;
 
     const fileDate = new Date(match[1]);
-    if (fileDate < cutoff) {
+    if (fileDate.getTime() < cutoff) {
       const filePath = join(logDir, file);
       try {
         await unlink(filePath);

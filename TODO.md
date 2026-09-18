@@ -43,7 +43,6 @@
 - [ ] **[4.5] `capacity-calculator.ts:46-52` 名額為負數時錯誤訊息顯示負數（如「剩餘 -3 個名額」），純顯示問題。**
 - [ ] **[4.6] `delta=0`（`+0`/`-0`）邊界情況：目標已有報名時仍會多打一次無意義的 Notion 寫入並回「取消報名成功」，但實際什麼都沒變；目標無報名時則正常回錯誤，行為不一致。**
 - [ ] **[4.7] 一般成員打錯目標語法（漏了 `@`）會收到「你不是管理員」而非「指令格式錯誤」——`handleRegistration` 的管理員檢查順序在 `parseError` 檢查之前，容易誤導使用者，非安全問題。**
-- [ ] **[5.6] `log-cleanup.ts:27-28`/`log-reader.ts:28-30` 檔名日期用 UTC 解析、cutoff 用伺服器本地時區算，時區來源不一致。目前容器預設 UTC 無偏差，若未來把 TZ 設成 Asia/Taipei 會有最多 8 小時邊界誤差。**
 - [ ] **[5.7] `config/line.ts:12-15` `getClient(botId)` 對未知字串靜默 fallback 回 dobbyClient，未用既有 `BotId` 型別做編譯期限制。**
 - [ ] **[5.8] `utils/logger.ts:4` 直接讀 `process.env['NODE_ENV']`，繞過 `env.ts`（目前因 import 順序無實害）。**
 - [ ] **[5.9] `env.ts:15` `PORT` 是 `z.string()` 用 `parseInt` 轉型，填非數字字串會得到 `NaN` 導致 `app.listen(NaN)` 監聽隨機 port 而非 fail-fast。建議改 `z.coerce.number().int().positive()`。**
