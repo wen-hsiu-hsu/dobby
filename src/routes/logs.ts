@@ -61,9 +61,19 @@ function renderEntry(entry: LogEntry): string {
 
   const { level, time: _t, msg: _m, reqId: _r, pid, hostname, messages: msgList, ...extra } = entry;
 
-  // Notion API inline tags: method badge + db name
+  // Notion API inline tags: method badge + db name. Covers both the
+  // lightweight info-level lines ('Notion API request'/'response') and the
+  // debug-level full-payload lines (' ... payload'), so the flat table shows
+  // badges regardless of which LOG_LEVEL produced the entry.
+  const NOTION_API_MESSAGES = new Set([
+    'Notion API request',
+    'Notion API response',
+    'Notion API request payload',
+    'Notion API response payload',
+    'Notion API error',
+  ]);
   let notionTagsHtml = '';
-  if (entry.method && (entry.msg === 'Notion API request' || entry.msg === 'Notion API response' || entry.msg === 'Notion API error')) {
+  if (entry.method && NOTION_API_MESSAGES.has(String(entry.msg))) {
     const method = String(entry.method);
     const db = entry.db ? String(entry.db) : null;
     const methodColor = METHOD_COLORS[method] ?? '#94a3b8';
@@ -71,13 +81,21 @@ function renderEntry(entry: LogEntry): string {
     if (db) notionTagsHtml += ` <span class="tag-db">${escapeHtml(db)}</span>`;
   }
 
+  // Purpose tag: set by withPurpose() on repository entry points, shows up
+  // on any log line emitted while that context is active — not just Notion
+  // API lines — since the purpose describes the surrounding operation, not
+  // the specific HTTP call.
+  const purposeHtml = entry.purpose
+    ? ` <span class="tag-purpose">${escapeHtml(String(entry.purpose))}</span>`
+    : '';
+
   // LINE message bubbles
   const messagesHtml = Array.isArray(msgList) && msgList.length > 0
     ? `<div class="msg-list">${(msgList as string[]).map((m) => `<span class="msg-bubble">${escapeHtml(m)}</span>`).join('')}</div>`
     : '';
 
   // Extra fields for expand (exclude fields already shown inline)
-  const { method: _method, db: _db, ...expandExtra } = extra;
+  const { method: _method, db: _db, purpose: _purpose, ...expandExtra } = extra;
   const extraJson = Object.keys(expandExtra).length > 0
     ? escapeHtml(JSON.stringify(expandExtra, null, 2))
     : '';
@@ -97,7 +115,7 @@ function renderEntry(entry: LogEntry): string {
     <td class="time">${time}</td>
     <td><span class="badge" style="background:${color}">${levelName}</span></td>
     ${reqIdCell}
-    <td class="msg">${msg}${notionTagsHtml}${messagesHtml}</td>
+    <td class="msg">${msg}${notionTagsHtml}${purposeHtml}${messagesHtml}</td>
   </tr>
   ${extraJson ? `<tr class="extra-row hidden"><td colspan="4"><pre>${extraJson}</pre></td></tr>` : ''}`;
 }
@@ -155,12 +173,38 @@ function renderHtml(entries: LogEntry[]): string {
     .reqid-link:hover { color: #60a5fa; border-color: #60a5fa; }
     .tag-method { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 4px; border: 1px solid; font-size: 11px; font-weight: 700; }
     .tag-db { display: inline-block; margin-left: 4px; padding: 1px 6px; border-radius: 4px; background: #334155; color: #cbd5e1; font-size: 11px; }
+    .tag-purpose { display: inline-block; margin-left: 4px; padding: 1px 6px; border-radius: 4px; background: #312e81; color: #c7d2fe; font-size: 11px; }
     tr.extra-row td { background: #1e293b; padding: 0; }
     tr.extra-row pre { padding: 10px 16px; font-size: 12px; color: #94a3b8; white-space: pre-wrap; word-break: break-all; }
     .hidden { display: none; }
     #no-results { display: none; text-align: center; padding: 40px; color: #475569; }
     .msg-list { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; }
     .msg-bubble { display: inline-block; background: #1e3a5f; border: 1px solid #3b82f6; border-radius: 8px; padding: 3px 10px; font-size: 12px; color: #93c5fd; }
+
+    /* Flow-table view */
+    #flow-view { padding: 16px 24px; display: none; flex-direction: column; gap: 10px; }
+    #flow-view.active { display: flex; }
+    .table-wrap.flow-hidden { display: none; }
+    .flow-group { border: 1px solid #334155; border-radius: 8px; overflow: hidden; background: #16213a; }
+    .flow-header { padding: 10px 14px; cursor: pointer; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .flow-header:hover { background: #1e293b; }
+    .flow-header .reqid-link { font-family: monospace; color: #93c5fd; }
+    .flow-summary { color: #cbd5e1; font-size: 13px; }
+    .flow-caret { color: #64748b; font-size: 11px; transition: transform .15s; }
+    .flow-group.expanded .flow-caret { transform: rotate(90deg); }
+    .flow-steps { display: none; flex-direction: column; gap: 0; border-top: 1px solid #334155; }
+    .flow-group.expanded .flow-steps { display: flex; }
+    .flow-endpoint { padding: 8px 14px 8px 32px; font-size: 13px; color: #e2e8f0; border-bottom: 1px solid #1e293b; background: #0f172a; }
+    .flow-endpoint .flow-tag { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: #64748b; margin-right: 8px; }
+    .flow-step { padding: 8px 14px 8px 32px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #1e293b; }
+    .flow-step:hover { background: #1e293b; }
+    .flow-step-purpose { color: #e2e8f0; }
+    .flow-step-detail { display: none; padding: 8px 14px 8px 48px; background: #0f172a; font-size: 12px; color: #94a3b8; }
+    .flow-step.expanded .flow-step-detail { display: block; }
+    .flow-step-detail pre { white-space: pre-wrap; word-break: break-all; margin-top: 4px; }
+    .flow-step-detail .hint { color: #64748b; font-style: italic; }
+    .flow-misc { padding: 6px 14px 6px 32px; font-size: 12px; color: #64748b; border-bottom: 1px solid #1e293b; }
+    .flow-empty { text-align: center; padding: 40px; color: #475569; }
   </style>
 </head>
 <body>
@@ -170,6 +214,14 @@ function renderHtml(entries: LogEntry[]): string {
   </header>
 
   <div class="toolbar">
+    <div class="filter-group">
+      <span class="filter-label">View</span>
+      <div id="view-mode-filters" style="display:flex;gap:6px">
+        <button data-view="flat" class="active" onclick="setViewMode('flat')">平面模式</button>
+        <button data-view="flow" onclick="setViewMode('flow')">流程表模式</button>
+      </div>
+    </div>
+    <div class="divider"></div>
     <div class="filter-group">
       <span class="filter-label">Level</span>
       <div id="level-filters" style="display:flex;gap:6px">
@@ -201,7 +253,7 @@ function renderHtml(entries: LogEntry[]): string {
     <button onclick="clearReqIdFilter()">✕ Clear</button>
   </div>
 
-  <div class="table-wrap">
+  <div class="table-wrap" id="table-wrap">
     <table>
       <thead><tr><th>Time (台北時間)</th><th>Level</th><th>reqId</th><th>Message</th></tr></thead>
       <tbody id="log-body">${rows}</tbody>
@@ -209,10 +261,212 @@ function renderHtml(entries: LogEntry[]): string {
     <div id="no-results">No matching log entries</div>
   </div>
 
+  <div id="flow-view"></div>
+
   <script>
     let activeLevel = 'all';
     let activeRange = 7;
     let activeReqId = '';
+    let viewMode = 'flat';
+    let flowBuilt = false;
+
+    function unescapeHtml(str) {
+      return str.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"');
+    }
+
+    function setViewMode(mode) {
+      viewMode = mode;
+      document.querySelectorAll('#view-mode-filters button').forEach(b => b.classList.toggle('active', b.dataset.view === mode));
+      document.getElementById('table-wrap').classList.toggle('flow-hidden', mode === 'flow');
+      document.getElementById('flow-view').classList.toggle('active', mode === 'flow');
+      if (mode === 'flow' && !flowBuilt) {
+        buildFlowView();
+        flowBuilt = true;
+      }
+    }
+
+    const METHOD_COLORS_JS = { GET: '#34d399', POST: '#60a5fa', PATCH: '#fbbf24', DELETE: '#f87171' };
+
+    function methodBadge(method, db) {
+      const color = METHOD_COLORS_JS[method] || '#94a3b8';
+      let html = '<span class="tag-method" style="color:' + color + ';border-color:' + color + '">' + escapeHtmlJs(method) + '</span>';
+      if (db) html += ' <span class="tag-db">' + escapeHtmlJs(db) + '</span>';
+      return html;
+    }
+
+    function escapeHtmlJs(str) {
+      const div = document.createElement('div');
+      div.textContent = String(str);
+      return div.innerHTML;
+    }
+
+    function formatFlowTime(epochMs) {
+      const row = document.querySelector('tr.log-row[data-time="' + epochMs + '"]');
+      return row ? row.querySelector('td.time').textContent : new Date(epochMs).toISOString();
+    }
+
+    // Groups all loaded entries by reqId, pairing each Notion API request/
+    // response (and their debug-level payload siblings, if present) into a
+    // single step so the flow view can show "purpose → method/db" per call
+    // instead of four separate log lines. Entries without a reqId, or that
+    // don't fit the request/response/processing/reply shape, are kept as
+    // standalone rows so nothing silently disappears from the flow view.
+    function groupEntriesForFlow() {
+      const rows = Array.from(document.querySelectorAll('#log-body tr.log-row'));
+      const entries = rows.map(r => {
+        try { return JSON.parse(unescapeHtml(r.dataset.raw)); } catch { return null; }
+      }).filter(Boolean);
+      entries.sort((a, b) => (a.time || 0) - (b.time || 0)); // chronological for narrative order
+
+      const groups = new Map();
+      const loose = [];
+      for (const e of entries) {
+        if (e.reqId) {
+          if (!groups.has(e.reqId)) groups.set(e.reqId, []);
+          groups.get(e.reqId).push(e);
+        } else {
+          loose.push(e);
+        }
+      }
+      return { groups, loose };
+    }
+
+    function buildSteps(groupEntries) {
+      let start = null, end = null;
+      const steps = [];
+      const pending = {};
+      const misc = [];
+
+      function keyOf(e) { return e.method + ' ' + e.path; }
+
+      for (const e of groupEntries) {
+        if (e.msg === 'Processing event') { start = e; continue; }
+        if (e.msg === 'LINE reply') { end = e; continue; }
+        if (e.msg === 'Notion API request') {
+          const key = keyOf(e);
+          const step = { method: e.method, path: e.path, db: e.db, purpose: e.purpose, request: e, requestPayload: null, response: null, responsePayload: null, error: null };
+          steps.push(step);
+          (pending[key] = pending[key] || []).push(step);
+          continue;
+        }
+        if (e.msg === 'Notion API request payload') {
+          const key = keyOf(e);
+          const step = (pending[key] || []).find(s => !s.requestPayload);
+          if (step) step.requestPayload = e; else misc.push(e);
+          continue;
+        }
+        if (e.msg === 'Notion API response') {
+          const key = keyOf(e);
+          const step = (pending[key] || []).find(s => !s.response);
+          if (step) step.response = e; else misc.push(e);
+          continue;
+        }
+        if (e.msg === 'Notion API response payload') {
+          const key = keyOf(e);
+          const step = (pending[key] || []).slice().reverse().find(s => s.response && !s.responsePayload);
+          if (step) step.responsePayload = e; else misc.push(e);
+          continue;
+        }
+        if (e.msg === 'Notion API error') {
+          const key = keyOf(e);
+          const step = (pending[key] || []).find(s => !s.response && !s.error);
+          if (step) step.error = e; else misc.push(e);
+          continue;
+        }
+        misc.push(e);
+      }
+      return { start, end, steps, misc };
+    }
+
+    function renderFlowStepDetail(step) {
+      const parts = [];
+      if (step.requestPayload && step.requestPayload.body !== undefined) {
+        parts.push('<div>請求內容:<pre>' + escapeHtmlJs(JSON.stringify(step.requestPayload.body, null, 2)) + '</pre></div>');
+      } else if (step.request) {
+        parts.push('<div class="hint">開 LOG_LEVEL=debug 才能看到完整請求內容</div>');
+      }
+      if (step.responsePayload && step.responsePayload.result !== undefined) {
+        parts.push('<div>回應內容:<pre>' + escapeHtmlJs(JSON.stringify(step.responsePayload.result, null, 2)) + '</pre></div>');
+      } else if (step.error) {
+        parts.push('<div>錯誤:<pre>' + escapeHtmlJs(JSON.stringify(step.error, null, 2)) + '</pre></div>');
+      } else if (step.response) {
+        parts.push('<div class="hint">開 LOG_LEVEL=debug 才能看到完整回應內容</div>');
+      } else {
+        parts.push('<div class="hint">尚無回應記錄</div>');
+      }
+      return parts.join('');
+    }
+
+    function renderFlowStep(step) {
+      const purpose = step.purpose ? escapeHtmlJs(step.purpose) : '(未標註目的)';
+      const errorTag = step.error ? ' <span class="tag-method" style="color:#f87171;border-color:#f87171">錯誤</span>' : '';
+      return '<div class="flow-step" onclick="event.stopPropagation(); this.classList.toggle(\\'expanded\\')">' +
+        '<span class="flow-step-purpose">' + purpose + '</span> ' +
+        methodBadge(step.method, step.db) + errorTag +
+        '<div class="flow-step-detail">' + renderFlowStepDetail(step) + '</div>' +
+        '</div>';
+    }
+
+    function renderFlowEndpoint(entry, label) {
+      if (entry.msg === 'Processing event') {
+        const src = entry.source && entry.source.type ? entry.source.type : '';
+        const msgType = entry.type || '';
+        return '<div class="flow-endpoint"><span class="flow-tag">' + label + '</span>' +
+          '事件進來 · ' + escapeHtmlJs(msgType) + (src ? ' · ' + escapeHtmlJs(src) : '') + '</div>';
+      }
+      if (entry.msg === 'LINE reply') {
+        const messages = Array.isArray(entry.messages) ? entry.messages.join(' / ') : '';
+        return '<div class="flow-endpoint"><span class="flow-tag">' + label + '</span>' +
+          'LINE 回覆' + (messages ? ' · ' + escapeHtmlJs(messages.slice(0, 80)) : '') + '</div>';
+      }
+      return '';
+    }
+
+    function renderFlowGroup(reqId, groupEntries) {
+      const { start, end, steps, misc } = buildSteps(groupEntries);
+      const firstTime = groupEntries[0] ? groupEntries[0].time : 0;
+      const summary = (start ? '事件觸發' : '(無 Processing event 記錄)') +
+        ' → ' + steps.length + ' 次 API 呼叫 → ' + (end ? 'LINE reply' : '(無回覆記錄)');
+
+      const stepsHtml = [
+        start ? renderFlowEndpoint(start, '起點') : '',
+        ...steps.map(renderFlowStep),
+        ...misc.map(m => '<div class="flow-misc">' + escapeHtmlJs(m.msg || '') + '</div>'),
+        end ? renderFlowEndpoint(end, '終點') : '',
+      ].join('');
+
+      return '<div class="flow-group">' +
+        '<div class="flow-header" onclick="this.parentElement.classList.toggle(\\'expanded\\')">' +
+        '<span class="flow-caret">▸</span>' +
+        '<span class="time">' + formatFlowTime(firstTime) + '</span>' +
+        '<span class="reqid-link" onclick="event.stopPropagation(); filterByReqId(event,\\'' + reqId + '\\'); setViewMode(\\'flat\\')">' + escapeHtmlJs(reqId) + '</span>' +
+        '<span class="flow-summary">' + summary + '</span>' +
+        '</div>' +
+        '<div class="flow-steps">' + stepsHtml + '</div>' +
+        '</div>';
+    }
+
+    function buildFlowView() {
+      const { groups, loose } = groupEntriesForFlow();
+      const container = document.getElementById('flow-view');
+      if (groups.size === 0 && loose.length === 0) {
+        container.innerHTML = '<div class="flow-empty">No log entries found</div>';
+        return;
+      }
+
+      const groupEntriesList = Array.from(groups.entries()).map(([reqId, entries]) => ({
+        reqId, entries, firstTime: entries[0] ? entries[0].time : 0,
+      }));
+      const looseItems = loose.map(e => ({ loose: e, firstTime: e.time || 0 }));
+      const combined = [...groupEntriesList, ...looseItems].sort((a, b) => a.firstTime - b.firstTime);
+
+      container.innerHTML = combined.map(item => {
+        if (item.loose) {
+          return '<div class="flow-misc">' + formatFlowTime(item.firstTime) + ' · ' + escapeHtmlJs(item.loose.msg || '') + '</div>';
+        }
+        return renderFlowGroup(item.reqId, item.entries);
+      }).join('');
+    }
 
     function filterLevel(level) {
       activeLevel = level;
