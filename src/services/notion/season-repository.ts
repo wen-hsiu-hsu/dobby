@@ -3,6 +3,7 @@ import { notionPost } from './notion-fetch.js';
 import { getTitle, getRelation, getNumber, getRichText, getFormulaNumber } from './property-helpers.js';
 import { getFullRelation } from './paginated-relation.js';
 import { logger } from '../../utils/logger.js';
+import { withPurpose } from '../../utils/request-context.js';
 import type { SeasonRecord } from '../../types/notion-models.js';
 import type { PageObjectResponse } from '@notionhq/client/build/src/api-endpoints.js';
 
@@ -39,14 +40,18 @@ async function pageToRecord(page: PageObjectResponse): Promise<SeasonRecord> {
 }
 
 export async function findByName(name: string): Promise<SeasonRecord | null> {
-  const response = await notionPost(`/databases/${env.NOTION_DB_SEASON}/query`, {
-    filter: { property: '季租時段', title: { equals: name } },
-  }) as any;
-  if (response.results.length === 0) return null;
-  return await pageToRecord(response.results[0] as PageObjectResponse);
+  return withPurpose('查詢本季場地/費用資料', async () => {
+    const response = await notionPost(`/databases/${env.NOTION_DB_SEASON}/query`, {
+      filter: { property: '季租時段', title: { equals: name } },
+    }) as any;
+    if (response.results.length === 0) return null;
+    return await pageToRecord(response.results[0] as PageObjectResponse);
+  });
 }
 
 export async function findAll(): Promise<SeasonRecord[]> {
-  const response = await notionPost(`/databases/${env.NOTION_DB_SEASON}/query`, {}) as any;
-  return Promise.all(response.results.map((r: unknown) => pageToRecord(r as PageObjectResponse)));
+  return withPurpose('查詢全部季租紀錄', async () => {
+    const response = await notionPost(`/databases/${env.NOTION_DB_SEASON}/query`, {}) as any;
+    return Promise.all(response.results.map((r: unknown) => pageToRecord(r as PageObjectResponse)));
+  });
 }
