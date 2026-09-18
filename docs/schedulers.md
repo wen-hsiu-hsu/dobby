@@ -44,6 +44,8 @@
 
 **歷史備註**：這個群組 ID 原本是執行時查 USERS 資料庫裡 `is_admin = true` 管理員的 `groups[0]`（該欄位由 `user-management.ts` 的 `trackUser()` 在使用者發言時自動累加寫入）。改成環境變數是因為那個來源容易被意外改動（`groups` 欄位不是為了這個用途設計的，管理員在別的群組發言就可能讓 `groups[0]` 變成別的群組），而且讓這支排程沒辦法在不打 Notion API 的情況下測試。
 
+**只會推播給 `dobby`，`batting` 不會收到**：`weekly-push.ts:39` 呼叫 `pushMessage(dobbyGroupId, ..., 'dobby')`，botId 寫死是 `'dobby'`，沒有對應 `batting` 的版本。這是刻意的，不是漏做——`batting` 是測試用 bot（見 `docs/architecture.md`「雙 Bot 支援」），沒有正式使用者需要收到每週打球資訊。
+
 ---
 
 ## 顯示名稱批次更新

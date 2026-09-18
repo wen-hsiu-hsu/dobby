@@ -91,6 +91,8 @@ Webhook 收到 LINE 事件後，立即回傳 200，再非同步處理事件。
 
 路由基於 URL 的 `:botId`（`dobby` 或 `batting`），每個 bot 有自己的 channel secret 和 access token。Profile 查詢時先試 Dobby，失敗再試 batting。
 
+**`batting` 是測試用 bot，`dobby` 才是正式環境**——這兩者在程式碼裡是對稱設計（各自獨立的 client、獨立的 webhook 路徑），單看程式碼容易誤判成「兩個對等的正式產品」，但實際定位不是這樣。只有 `dobby` 面向真實社員；`batting` 純粹是開發/測試時用來收發訊息，不用擔心動到真實使用者。這也是為什麼 `weekly-push.ts` 只推播給 `dobby`（見 `docs/schedulers.md`）——batting 沒有正式使用者需要收這則訊息。
+
 ## 目錄結構
 
 ```
