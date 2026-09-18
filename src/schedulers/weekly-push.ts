@@ -2,16 +2,15 @@ import cron from 'node-cron';
 import { pushMessage } from '../services/line/push-service.js';
 import * as calendarRepo from '../services/notion/calendar-repository.js';
 import * as seasonRepo from '../services/notion/season-repository.js';
-import { findAdmin } from '../services/notion/users-repository.js';
+import { env } from '../config/env.js';
 import { formatDate, getNextSaturday, getNextSaturdayDateText, getCurrentSeasonName } from '../utils/date-utils.js';
 import { logger } from '../utils/logger.js';
 
-async function sendWeeklyPush(): Promise<void> {
+export async function sendWeeklyPush(): Promise<void> {
   try {
-    const admin = await findAdmin();
-    const dobbyGroupId = admin?.groups[0];
+    const dobbyGroupId = env.DOBBY_GROUP_ID;
     if (!dobbyGroupId) {
-      logger.error('Weekly push aborted: no admin user found with group ID');
+      logger.error('Weekly push aborted: DOBBY_GROUP_ID is not set');
       return;
     }
 

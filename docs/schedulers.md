@@ -10,7 +10,7 @@
 
 ### 執行流程
 
-1. 查詢 USERS 資料庫，找到 `is_admin = true` 的管理員，取其第一個 group ID
+1. 讀取 `DOBBY_GROUP_ID` 環境變數，作為推播目標的 LINE 群組 ID
 2. 計算下一個週六的日期
 3. 查詢行事曆：找到對應日期的活動
 4. 查詢季租承租紀錄：取得季租成員數
@@ -38,9 +38,11 @@
 ### 除錯
 
 若推播沒有發送，檢查：
-- 管理員帳號是否有 `groups` 欄位（需要 group ID 才能推播）
+- `DOBBY_GROUP_ID` 環境變數是否有設定（沒設定會記一行 `Weekly push aborted: DOBBY_GROUP_ID is not set` 並跳過，不會讓 app 啟動失敗）
 - 下一個週六是否有對應的行事曆頁面
 - 伺服器時區是否正確（應為 Asia/Taipei）
+
+**歷史備註**：這個群組 ID 原本是執行時查 USERS 資料庫裡 `is_admin = true` 管理員的 `groups[0]`（該欄位由 `user-management.ts` 的 `trackUser()` 在使用者發言時自動累加寫入）。改成環境變數是因為那個來源容易被意外改動（`groups` 欄位不是為了這個用途設計的，管理員在別的群組發言就可能讓 `groups[0]` 變成別的群組），而且讓這支排程沒辦法在不打 Notion API 的情況下測試。
 
 ---
 
