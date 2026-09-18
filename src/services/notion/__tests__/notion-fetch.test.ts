@@ -3,7 +3,7 @@ import { notionGet, notionPost, notionPatch, notionGetAllResults } from '../noti
 import { logger } from '../../../utils/logger.js';
 
 vi.mock('../../../utils/logger.js', () => ({
-  logger: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
 const fetchMock = vi.fn();
@@ -119,6 +119,42 @@ describe('notion-fetch', () => {
 
       await expect(notionGet('/pages/abc')).rejects.toThrow('Notion API error');
       expect(fetchMock).toHaveBeenCalledTimes(4); // 1 initial + 3 retries
+    });
+  });
+
+  describe('split-level Notion API logging', () => {
+    it('logs a lightweight info line with method/path/db but no body/result', async () => {
+      fetchMock.mockResolvedValue(jsonResponse(200, { secret: 'should not be here' }));
+
+      await notionPost('/pages', { sensitive: 'payload' });
+
+      expect(logger.info).toHaveBeenCalledWith(
+        { method: 'POST', path: '/pages', db: undefined },
+        'Notion API request',
+      );
+      expect(logger.info).toHaveBeenCalledWith(
+        { method: 'POST', path: '/pages', db: undefined },
+        'Notion API response',
+      );
+      for (const call of vi.mocked(logger.info).mock.calls) {
+        expect(call[0]).not.toHaveProperty('body');
+        expect(call[0]).not.toHaveProperty('result');
+      }
+    });
+
+    it('logs the full body/result only at debug level, under distinct message names', async () => {
+      fetchMock.mockResolvedValue(jsonResponse(200, { id: 'page-1' }));
+
+      await notionPost('/pages', { parent: { database_id: 'db-1' } });
+
+      expect(logger.debug).toHaveBeenCalledWith(
+        expect.objectContaining({ method: 'POST', path: '/pages', body: { parent: { database_id: 'db-1' } } }),
+        'Notion API request payload',
+      );
+      expect(logger.debug).toHaveBeenCalledWith(
+        expect.objectContaining({ method: 'POST', path: '/pages', result: { id: 'page-1' } }),
+        'Notion API response payload',
+      );
     });
   });
 

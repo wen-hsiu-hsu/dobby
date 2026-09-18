@@ -45,7 +45,14 @@ function retryDelayMs(res: Response): number {
 
 async function request(method: string, path: string, body?: unknown, attempt = 0): Promise<unknown> {
   const db = getDbName(path);
-  logger.debug({ method, path, db, ...(body !== undefined && { body }) }, 'Notion API request');
+  // Split into a lightweight info-level line (method/path/db/purpose — always
+  // visible, this is what the /logs flow-table view groups on) and a
+  // debug-level line carrying the full body/result. Keeping them as two log
+  // calls rather than one at a variable level means the flow view still has
+  // *something* to show (that a call happened, and why) even when LOG_LEVEL
+  // is 'info' and the full Notion payload isn't being captured.
+  logger.info({ method, path, db }, 'Notion API request');
+  logger.debug({ method, path, db, ...(body !== undefined && { body }) }, 'Notion API request payload');
   const res = await fetch(`${BASE_URL}${path}`, {
     method,
     headers: notionHeaders(),
@@ -59,7 +66,8 @@ async function request(method: string, path: string, body?: unknown, attempt = 0
   }
   await assertOk(res, method, path);
   const data = await res.json();
-  logger.debug({ method, path, db, result: data }, 'Notion API response');
+  logger.info({ method, path, db }, 'Notion API response');
+  logger.debug({ method, path, db, result: data }, 'Notion API response payload');
   return data;
 }
 
