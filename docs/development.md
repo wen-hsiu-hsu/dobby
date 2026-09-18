@@ -40,6 +40,7 @@ npm run dev
 | `LOGS_ACCESS_TOKEN` | ✅ | `/logs` 存取用的共享密鑰，需帶 `Authorization: Bearer <token>` 或 `?token=` query string 才能查看 |
 | `PORT` | ❌ | 伺服器 port（預設 `3000`） |
 | `NODE_ENV` | ❌ | `development` 或 `production` |
+| `LOG_LEVEL` | ❌ | pino log level（`trace`/`debug`/`info`/`warn`/`error`/`fatal`，預設 `info`）。要臨時診斷正式環境問題（例如看 Notion API 完整 request/response）時，把 Zeabur 上的這個變數改成 `debug` 並重啟服務即可，不用改程式碼重新部署；診斷完記得改回 `info`，否則 debug log 會把 Notion 回傳的完整資料（含姓名、LINE user_id 等）持續寫進 `/logs` 可查到的檔案。 |
 
 Notion 資料庫 ID 可從 Notion 頁面 URL 取得（32 字元的 UUID）。
 

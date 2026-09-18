@@ -1,11 +1,12 @@
 import pino from 'pino';
 import { join } from 'node:path';
 import { getReqId } from './request-context.js';
+import { env } from '../config/env.js';
 
 const isDev = process.env['NODE_ENV'] !== 'production';
 
 let base: pino.Logger = pino({
-  level: isDev ? 'debug' : 'info',
+  level: isDev ? 'debug' : env.LOG_LEVEL,
   ...(isDev && {
     transport: {
       target: 'pino-pretty',
@@ -31,10 +32,10 @@ export async function initLogger(logDir: string): Promise<void> {
     });
 
     base = pino(
-      { level: 'info' },
+      { level: env.LOG_LEVEL },
       pino.multistream([
-        { stream: process.stdout, level: 'info' },
-        { stream: fileStream, level: 'info' },
+        { stream: process.stdout, level: env.LOG_LEVEL },
+        { stream: fileStream, level: env.LOG_LEVEL },
       ])
     );
   } catch (err) {

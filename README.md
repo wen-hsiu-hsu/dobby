@@ -47,6 +47,7 @@ docker compose up -d
 | `NOTION_DB_ANNOUNCEMENT` | 所有公告資料庫 ID |
 | `PORT` | 伺服器 port（預設 3000） |
 | `NODE_ENV` | `development` 或 `production` |
+| `LOG_LEVEL` | pino log level（預設 `info`），臨時診斷問題可改 `debug` |
 
 ## 常用指令
 
