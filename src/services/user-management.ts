@@ -43,6 +43,8 @@ async function _trackUserAsync(
     updates.multiChats = [...existing.multiChats, context.multiChatId];
   }
 
-  await usersRepo.update(existing.pageId, updates);
+  if (Object.keys(updates).length > 0) {
+    await usersRepo.update(existing.pageId, updates);
+  }
   await usersRepo.incrementMessageCount(existing.pageId, existing.messageCount);
 }
