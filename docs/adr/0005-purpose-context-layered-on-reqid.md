@@ -11,3 +11,5 @@
 **為什麼 Notion API log 拆成 info + debug 兩行，而不是維持一行、只是把 level 從 debug 改 info**：原本一行 `logger.debug({ method, path, db, body, result }, ...)` 含完整 request/response payload，如果整行升到 info，會讓 Notion 回傳的完整 raw page object（含姓名、LINE user_id 等 PII）在正式環境預設就持續寫進 `/logs` 可查到的檔案，違背 `LOG_LEVEL` 這個功能原本「預設 info、要診斷才臨時開 debug」的設計初衷（見 `docs/development.md` 裡 `LOG_LEVEL` 那條的說明）。拆成兩行——info 只帶 method/path/db/purpose，debug 才帶 body/result——讓流程表在**不開 debug** 的情況下也能顯示每一步「打了什麼、為了什麼」，只是看不到完整內容；要看完整內容才需要臨時切到 debug，PII 曝露面沒有因為這個新功能而擴大。
 
 新增任何會被流程表用到的 log 呼叫時，記得這個分層：摘要級資訊（能安全常駐 info 的）跟載荷級資訊（含使用者資料、只該在主動診斷時短暫出現的）要分開兩行記，不要圖方便合併成一行、也不要把摘要級資訊也降去 debug——那樣流程表在預設 level 下就會變成一片空白。
+
+這不是只有 Notion API 這一處：`event-router.ts` 的 `'Processing event'` 一開始（升到 info 時）沒注意到 `event.source`（LINE userId/groupId）跟 `event.message`（使用者原始訊息）也是同一類 PII，之後才拆成 info 摘要（`type`/`sourceType`）+ debug 明細（`'Processing event detail'`）補上這個分層。之後新增 log 呼叫，先問自己「這行會不會被升到 info 常駐」，會的話要先檢查裡面有沒有欄位屬於這一類，不要等出包才拆。
