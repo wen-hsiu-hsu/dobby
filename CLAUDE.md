@@ -1,6 +1,6 @@
 # Dobby
 
-羽球社 LINE bot（雙 bot：`dobby` / `batting`）。TypeScript + Express，Notion 為主要資料庫。詳細文件見 [`docs/README.md`](docs/README.md) — 不要在這裡重複那邊已有的內容。
+羽球社 LINE bot。TypeScript + Express，Notion 為主要資料庫。詳細文件見 [`docs/README.md`](docs/README.md) — 不要在這裡重複那邊已有的內容。
 
 ## 開發前必讀
 

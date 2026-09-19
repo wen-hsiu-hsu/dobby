@@ -27,10 +27,8 @@ npm run dev
 
 | 變數 | 必要 | 說明 |
 |------|------|------|
-| `LINE_CHANNEL_SECRET_DOBBY` | ✅ | Dobby bot channel secret |
-| `LINE_CHANNEL_ACCESS_TOKEN_DOBBY` | ✅ | Dobby bot access token |
-| `LINE_CHANNEL_SECRET_BATTING` | ✅ | 球來就打 bot channel secret |
-| `LINE_CHANNEL_ACCESS_TOKEN_BATTING` | ✅ | 球來就打 bot access token |
+| `LINE_CHANNEL_SECRET` | ✅ | LINE channel secret |
+| `LINE_CHANNEL_ACCESS_TOKEN` | ✅ | LINE channel access token |
 | `NOTION_API_KEY` | ✅ | Notion Integration token |
 | `NOTION_DB_USERS` | ✅ | USERS 資料庫 ID |
 | `NOTION_DB_CALENDAR` | ✅ | 行事曆資料庫 ID |

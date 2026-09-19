@@ -10,8 +10,6 @@ Dobby 是羽球社的 LINE 機器人，負責：
 - 回應 @Dobby 指令（查詢欠費、公告、付款資訊等）
 - 自動回覆設定的關鍵字訊息
 
-系統支援兩個 LINE bot（Dobby、球來就打），共用同一套邏輯。**球來就打是測試用 bot**，不是對等的第二個正式產品——程式碼層面兩者的路由/client 是對稱設計（見 `docs/architecture.md`「雙 Bot 支援」），容易誤以為兩個都是正式環境，但實際定位不是這樣。
-
 ## 技術棧
 
 | 類別 | 選擇 | 說明 |
@@ -38,8 +36,7 @@ Dobby 是羽球社的 LINE 機器人，負責：
 
 | 路徑 | 用途 |
 |------|------|
-| `POST /webhook/dobby` | Dobby bot 的 LINE webhook |
-| `POST /webhook/batting` | 球來就打 bot 的 LINE webhook |
+| `POST /webhook` | LINE webhook |
 | `GET /health` | 健康檢查 |
 | `GET /logs` | 日誌查看器，需要 `LOGS_ACCESS_TOKEN`（`Authorization: Bearer <token>` 或 `?token=`） |
 

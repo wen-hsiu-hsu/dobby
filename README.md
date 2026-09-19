@@ -35,10 +35,8 @@ docker compose up -d
 
 | 變數 | 說明 |
 |------|------|
-| `LINE_CHANNEL_SECRET_DOBBY` | Dobby bot 的 channel secret |
-| `LINE_CHANNEL_ACCESS_TOKEN_DOBBY` | Dobby bot 的 access token |
-| `LINE_CHANNEL_SECRET_BATTING` | 球來就打 bot 的 channel secret |
-| `LINE_CHANNEL_ACCESS_TOKEN_BATTING` | 球來就打 bot 的 access token |
+| `LINE_CHANNEL_SECRET` | LINE channel secret |
+| `LINE_CHANNEL_ACCESS_TOKEN` | LINE channel access token |
 | `NOTION_API_KEY` | Notion Integration token |
 | `NOTION_DB_USERS` | USERS 資料庫 ID |
 | `NOTION_DB_CALENDAR` | 行事曆資料庫 ID |

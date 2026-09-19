@@ -44,7 +44,7 @@
 
 **歷史備註**：這個群組 ID 原本是執行時查 USERS 資料庫裡 `is_admin = true` 管理員的 `groups[0]`（該欄位由 `user-management.ts` 的 `trackUser()` 在使用者發言時自動累加寫入）。改成環境變數是因為那個來源容易被意外改動（`groups` 欄位不是為了這個用途設計的，管理員在別的群組發言就可能讓 `groups[0]` 變成別的群組），而且讓這支排程沒辦法在不打 Notion API 的情況下測試。
 
-**只會推播給 `dobby`，`batting` 不會收到**：`weekly-push.ts:39` 呼叫 `pushMessage(dobbyGroupId, ..., 'dobby')`，botId 寫死是 `'dobby'`，沒有對應 `batting` 的版本。這是刻意的，不是漏做——`batting` 是測試用 bot（見 `docs/architecture.md`「雙 Bot 支援」），沒有正式使用者需要收到每週打球資訊。
+**只會推播給 `DOBBY_GROUP_ID` 指定的那個群組**：`weekly-push.ts:39` 呼叫 `pushMessage(dobbyGroupId, ...)`，沒有多個推播目標的概念，要推到哪個群組完全由這個環境變數決定。
 
 ---
 
@@ -62,12 +62,6 @@
 4. 兩次 Notion 更新之間 delay 400ms（避免觸發 Notion rate limit）
 
 **⚠️ 這裡一定要帶 `groupId` 查詢**：LINE 的 profile API 不帶 `groupId` 查的是「一對一好友」資料，社團成員多半只在群組互動、沒加 bot 為個人好友，不帶 `groupId` 幾乎必定回 404。2026-09-17 曾經因為漏帶這個參數，讓這支排程實質上永遠不會成功更新任何人，詳見 `docs/code-review-2026-09-17.md` 第 5.1 節。
-
-### 雙 Bot 策略
-
-每一次 group member profile 查詢，`profile-service.ts` 的 `getProfile()` 會先嘗試 Dobby bot 的 client，失敗（如 404）再試 batting bot 的 client（batting 這層 fallback**不會**帶 `groupId`，只查一對一好友，是既有的既知限制，非這次修復範圍）。兩個都失敗則這個 group ID 視為失敗，換下一個 group ID 繼續嘗試。
-
-**原因：** 使用者可能只在其中一個 bot 的群組中，需要用對應的 bot 才能查到 profile。
 
 ### 注意事項
 

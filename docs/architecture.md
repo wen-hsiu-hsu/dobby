@@ -3,7 +3,7 @@
 ## 整體架構
 
 ```
-LINE → POST /webhook/:botId → Signature Verification（per-bot secret）→ Event Router
+LINE → POST /webhook → Signature Verification → Event Router
 ```
 
 Event Router 依事件類型分派：
@@ -86,12 +86,6 @@ Webhook 收到 LINE 事件後，立即回傳 200，再非同步處理事件。
 同一個 `request-context.ts` 還提供 `withPurpose(purpose, fn)`，疊加（不是取代）在這個 context 之上，讓 `*-repository.ts` 的函式能幫自己的 Notion API 呼叫標上「打的目的」，`/logs` 頁面的流程表模式會用這個欄位把一組 `reqId` 的呼叫鏈顯示成「目的 → method/db」的敘事。設計理由（為什麼疊加、為什麼在 repository 函式內部包而不改簽名、為什麼 Notion API log 要分 info/debug 兩行記）見 [`docs/adr/0005-purpose-context-layered-on-reqid.md`](adr/0005-purpose-context-layered-on-reqid.md)。
 
 **原因：** Webhook 處理是非同步的，沒有 correlation ID 很難追蹤單一事件的完整日誌；quoteToken 若不使用，使用者在群組裡容易搞不清楚機器人是在回應哪一則訊息。
-
-### 雙 Bot 支援
-
-路由基於 URL 的 `:botId`（`dobby` 或 `batting`），每個 bot 有自己的 channel secret 和 access token。Profile 查詢時先試 Dobby，失敗再試 batting。
-
-**`batting` 是測試用 bot，`dobby` 才是正式環境**——這兩者在程式碼裡是對稱設計（各自獨立的 client、獨立的 webhook 路徑），單看程式碼容易誤判成「兩個對等的正式產品」，但實際定位不是這樣。只有 `dobby` 面向真實社員；`batting` 純粹是開發/測試時用來收發訊息，不用擔心動到真實使用者。這也是為什麼 `weekly-push.ts` 只推播給 `dobby`（見 `docs/schedulers.md`）——batting 沒有正式使用者需要收這則訊息。
 
 ## 目錄結構
 
