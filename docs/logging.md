@@ -14,7 +14,13 @@
 一次 Notion API 呼叫在底層其實會產生好幾行 log（輕量的 info 摘要 + 完整內容的 debug payload，request 跟 response 各一組），LINE 回覆/推播也是「準備送出」跟「已送出/失敗」各一行。兩種模式都會把這些行自動合併成一個項目顯示，不會讓你在表格裡看到一堆片段的行要自己對應：
 
 - **Notion API 呼叫**：顯示成功/失敗/尚無回應（✓/✕/⏳ 圖示）、method 徽章、資料庫名稱（能猜到的話，見下方「endpoint path」）、目的標籤（`withPurpose()` 設的，說明這次呼叫是為了什麼）。點擊該列可展開看完整的 request/response 內容——如果當時 `LOG_LEVEL` 不是 `debug`，這部分只記錄了摘要沒有完整內容，展開會看到提示文字（例如「開 LOG_LEVEL=debug 才能看到完整回應內容」），不會是空白。
-- **LINE 回覆/推播**：顯示成功/失敗圖示 + 訊息內容預覽，點擊展開看完整訊息陣列跟失敗原因（如果有）。
+- **LINE 回覆/推播**：跟 Notion API 呼叫一樣現在也有 method/path 徽章（例如 `POST /v2/bot/message/reply`），顯示成功/失敗圖示 + 訊息內容預覽，點擊展開看完整訊息陣列跟失敗原因（如果有）。配對同一次呼叫的「準備送出」跟「已送出/失敗」兩行時，底層用的是呼叫當下產生的專屬 `sendId`（不是比對 `to`/`messages` 內容），所以兩個內容完全相同但不同次的呼叫不會被誤配對成同一次。
+
+## 訊息內容跟身分識別資訊只在 debug 層
+
+LINE 回覆/推播的訊息全文，以及 groupId/userId 這類身分識別資訊，比照 Notion API 的 body 一樣搬到 `debug` 層記錄。預設 `LOG_LEVEL=info` 下，`/logs` 頁面的平面模式跟流程表模式都只會看到 method/path 徽章跟「開 `LOG_LEVEL=debug` 才能看到訊息內容」的提示，看不到訊息原文——**這是刻意的設計，不是 bug**。要看訊息實際內容（除錯用），把環境變數 `LOG_LEVEL` 設成 `debug` 再重啟服務即可。
+
+`profile-service.ts` 的 `getProfile()` 現在也有一行摘要 log（`'LINE get profile'`，成功/失敗都有），但沒有被流程表特別合併/配對顯示——會以一般單行的形式出現在平面模式的表格列裡，流程表模式則會落在雜項（misc）區塊。
 
 ## 429 重試怎麼顯示
 
@@ -23,6 +29,8 @@ Notion API 回應 429（rate limit）時程式會自動重試，同一次呼叫�
 ## Endpoint path
 
 Notion API 呼叫的方法/資料庫徽章旁邊會顯示實際打的 path。這對 `GET /pages/{id}` 這類呼叫特別重要——這種 path 裡不含任何資料庫 ID（頁面 ID 跟資料庫 ID 是兩回事），所以猜不出資料庫名稱、不會有資料庫徽章，path 是唯一能看出「這次到底打了哪個 endpoint」的資訊。Path 太長時畫面上會截斷，完整內容可以滑鼠 hover 看，或展開該列的完整明細。
+
+耗時（`durationMs`）也記錄在 Notion API 呼叫的展開明細裡（`耗時: Xms`）——量的是單次 HTTP 呼叫本身的時間，429 重試時每次 attempt 各自獨立量測，不含重試等待時間。
 
 ## reqId 篩選
 

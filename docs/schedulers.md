@@ -67,3 +67,4 @@
 
 - 使用者必須在 `groups` 欄位裡至少有一個目前仍有效（bot 還在其中）的群組 ID 才查得到；若曾經在的所有群組都已離開，API 全部回 404，該使用者會被跳過且不影響其他人
 - 這支排程目前沒有分頁處理（USERS 資料庫查詢一次最多抓 100 筆）、單一使用者更新失敗會中斷整批（無逐筆 try/catch），這兩項是已知但尚未修的問題，見 `TODO.md` 的 `[5.3]`、`[5.4]`
+- `getGroupMemberProfile()` 呼叫的 `profile-service.ts`/`getProfile()` 有摘要 log，跑這支批次作業時 `/logs` 會出現對應數量的 `'LINE get profile'` log 行（每個使用者一行）——這是預期行為，不是 bug，見 `docs/logging.md`。
