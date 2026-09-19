@@ -20,7 +20,8 @@ export async function pushMessage(
   );
   // sendId correlates this call's start/sent/failure/payload log lines so
   // log-grouping.ts can pair them without relying on `to`/`messages` content
-  // (which is now debug-only — see TODO.md's "用 sendId 取代內容比對" note).
+  // (which is now debug-only — see docs/adr/0005-purpose-context-layered-on-reqid.md
+  // "補充（2026-09-20）" section for why).
   const sendId = randomBytes(3).toString('hex');
   logger.info({ method: METHOD, path: PATH, sendId, messageCount: messages.length }, 'LINE push');
   logger.debug({ method: METHOD, path: PATH, sendId, to, messages: messageContents }, 'LINE push payload');
