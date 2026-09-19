@@ -215,11 +215,13 @@ function notionCallRowContent(row: NotionCallRow): RowContent {
     ? `<span class="tag-method" style="color:#94a3b8;border-color:#94a3b8">重試 ${row.attempts - 1} 次</span>`
     : '';
   const icon = statusIcon(!!row.response, !!row.error);
+  // fullContentText 是 purpose 全文，本來就不長，加 title 主要是保險（決定 4）。
+  const fullContentText = row.purpose ?? '';
   const msgHtml = `<div class="action-row">` +
     `<span class="action-icon">${icon}</span>` +
     `<span class="action-label">Notion API 呼叫</span>` +
     `<span class="action-badges">${methodHtml}${dbHtml}${pathHtml}${retryHtml}</span>` +
-    `<span class="action-content">${purposeHtml}</span>` +
+    `<span class="action-content" title="${escapeHtml(fullContentText)}">${purposeHtml}</span>` +
     `</div>`;
 
   return {
@@ -256,6 +258,10 @@ function lineSendDetail(row: LineSendRow): string {
   return parts.join('\n\n');
 }
 
+// LINE 內容預覽長度（決定 4：80 → 160 字元，同時無論長度多少都加上完整內容
+// 的 title，見下方 fullContentText）。
+const LINE_CONTENT_PREVIEW_LEN = 160;
+
 function lineSendRowContent(row: LineSendRow): RowContent {
   const levelNum = row.failure?.level ?? row.sent?.level ?? row.start.level ?? 30;
   const levelName = LEVEL_NAMES[levelNum] ?? String(levelNum);
@@ -268,8 +274,9 @@ function lineSendRowContent(row: LineSendRow): RowContent {
 
   const payloadMessages = row.payload?.['messages'];
   const messages = Array.isArray(payloadMessages) ? payloadMessages.map(String) : null;
+  const fullContentText = messages ? messages.join(' / ') : '';
   const contentHtml = messages
-    ? escapeHtml(messages.join(' / ').slice(0, 80))
+    ? escapeHtml(fullContentText.slice(0, LINE_CONTENT_PREVIEW_LEN))
     : '<span class="hint">開 LOG_LEVEL=debug 才能看到訊息內容</span>';
 
   const icon = statusIcon(!!row.sent, !!row.failure);
@@ -277,7 +284,7 @@ function lineSendRowContent(row: LineSendRow): RowContent {
     `<span class="action-icon">${icon}</span>` +
     `<span class="action-label">${escapeHtml(label)}</span>` +
     `<span class="action-badges">${methodHtml}${pathHtml}</span>` +
-    `<span class="action-content">${contentHtml}</span>` +
+    `<span class="action-content" title="${escapeHtml(fullContentText)}">${contentHtml}</span>` +
     `</div>`;
 
   return {
@@ -490,7 +497,7 @@ function renderHtml(entries: LogEntry[]): string {
     .tag-method { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 4px; border: 1px solid; font-size: 11px; font-weight: 700; }
     .tag-db { display: inline-block; margin-left: 4px; padding: 1px 6px; border-radius: 4px; background: #334155; color: #cbd5e1; font-size: 11px; }
     .tag-purpose { display: inline-block; margin-left: 4px; padding: 1px 6px; border-radius: 4px; background: #312e81; color: #c7d2fe; font-size: 11px; }
-    .tag-path { display: inline-block; padding: 1px 6px; border-radius: 4px; background: #1e293b; border: 1px solid #334155; color: #94a3b8; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+    .tag-path { display: inline-block; padding: 1px 6px; border-radius: 4px; background: #1e293b; border: 1px solid #334155; color: #94a3b8; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
     .tag-field { display: inline-block; margin: 2px 4px 2px 0; padding: 1px 6px; border-radius: 4px; background: #1e293b; border: 1px solid #334155; color: #cbd5e1; font-size: 11px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
     .tag-field-key { color: #64748b; margin-right: 4px; }
     .extra-tags { margin-top: 2px; display: flex; flex-wrap: wrap; }
