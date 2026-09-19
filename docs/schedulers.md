@@ -10,12 +10,12 @@
 
 ### 執行流程
 
-1. 讀取 `DOBBY_GROUP_ID` 環境變數，作為推播目標的 LINE 群組 ID
+1. 讀取 `DOBBY_GROUP_IDS` 環境變數（逗號分隔字串），解析成多個推播目標的 LINE 群組 ID 清單
 2. 計算下一個週六的日期
 3. 查詢行事曆：找到對應日期的活動
 4. 查詢季租承租紀錄：取得季租成員數
 5. 計算出席人數：`季租成員 - 請假人數 + 零打人數`
-6. 發送 Push Message 到 Dobby 群組
+6. 逐一發送 Push Message 到每個群組，個別 try/catch（單一群組失敗只記 log、不影響其他群組、不重試），跑完後記一行總結 log（成功/失敗/總數）
 
 ### 訊息格式
 
@@ -38,13 +38,13 @@
 ### 除錯
 
 若推播沒有發送，檢查：
-- `DOBBY_GROUP_ID` 環境變數是否有設定（沒設定會記一行 `Weekly push aborted: DOBBY_GROUP_ID is not set` 並跳過，不會讓 app 啟動失敗）
+- `DOBBY_GROUP_IDS` 環境變數是否有設定（沒設定會記一行 `Weekly push aborted: DOBBY_GROUP_IDS is not set` 並跳過，不會讓 app 啟動失敗）
 - 下一個週六是否有對應的行事曆頁面
 - 伺服器時區是否正確（應為 Asia/Taipei）
 
 **歷史備註**：這個群組 ID 原本是執行時查 USERS 資料庫裡 `is_admin = true` 管理員的 `groups[0]`（該欄位由 `user-management.ts` 的 `trackUser()` 在使用者發言時自動累加寫入）。改成環境變數是因為那個來源容易被意外改動（`groups` 欄位不是為了這個用途設計的，管理員在別的群組發言就可能讓 `groups[0]` 變成別的群組），而且讓這支排程沒辦法在不打 Notion API 的情況下測試。
 
-**只會推播給 `DOBBY_GROUP_ID` 指定的那個群組**：`weekly-push.ts:39` 呼叫 `pushMessage(dobbyGroupId, ...)`，沒有多個推播目標的概念，要推到哪個群組完全由這個環境變數決定。
+**可同時推播給多個群組**：`DOBBY_GROUP_IDS` 用逗號分隔多個群組 ID（例如 `C123,C456`），`weekly-push.ts` 會逐一推播給每一個，單一群組推播失敗不影響其他群組（個別 try/catch、不重試）。push 呼叫之間刻意不加 delay，因為 LINE 官方 push 端點 rate limit 是 2,000 req/s/channel，遠大於實際會設定的群組數量。
 
 ---
 

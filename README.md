@@ -45,7 +45,7 @@ docker compose up -d
 | `NOTION_DB_ANNOUNCEMENT` | 所有公告資料庫 ID |
 | `PORT` | 伺服器 port（預設 3000） |
 | `NODE_ENV` | `development` 或 `production` |
-| `DOBBY_GROUP_ID` | 每週打球推播訊息的目標 LINE 群組 ID，選填——沒設定的話該排程會跳過並記錄一行 log |
+| `DOBBY_GROUP_IDS` | 每週打球推播訊息的目標 LINE 群組 ID，選填，可用逗號分隔多個群組 ID——沒設定的話該排程會跳過並記錄一行 log |
 | `LOG_LEVEL` | pino log level（預設 `info`），臨時診斷問題可改 `debug` |
 
 ## 常用指令
