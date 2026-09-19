@@ -172,7 +172,7 @@ function processBucket(bucketEntries: LogEntry[], output: DisplayRow[]): void {
   }
 }
 
-function representativeTime(row: DisplayRow): number {
+export function representativeTime(row: DisplayRow): number {
   switch (row.kind) {
     case 'single':
       return row.entry.time ?? 0;
@@ -217,4 +217,71 @@ export function groupPairedEntries(entries: LogEntry[]): DisplayRow[] {
 
   output.sort((a, b) => representativeTime(a) - representativeTime(b));
   return output;
+}
+
+export interface FlowGroup {
+  reqId: string;
+  firstTime: number;
+  /** 'Processing event'（info）——事件觸發的起點。背景/排程觸發的呼叫沒有這個。 */
+  start?: LogEntry;
+  /** 'Processing event detail'（debug）——起點的配對明細，可能不存在（LOG_LEVEL=info 時不會捕捉到）。 */
+  startDetail?: LogEntry;
+  /** 這個 reqId 流程裡的 LINE reply（回覆），一個流程最多一筆。line-push 不算終點，見下方 misc 的說明。 */
+  end?: LineSendRow;
+  /** 這個 reqId 流程裡依序發生的 Notion API 呼叫。 */
+  steps: NotionCallRow[];
+  /** 除了 start/startDetail/end/steps 以外的所有東西，依原順序（時間升冪）保留，包含 line-push（背景推播沒有終點的敘事位置，跟現有 renderFlowMisc 的處理方式一致）跟通用渲染器要處理的 single 行。 */
+  misc: DisplayRow[];
+}
+
+function flowRowReqId(row: DisplayRow): string {
+  switch (row.kind) {
+    case 'single':
+      return typeof row.entry.reqId === 'string' ? row.entry.reqId : '';
+    case 'notion-call':
+      return typeof row.request.reqId === 'string' ? row.request.reqId : '';
+    case 'line-reply':
+    case 'line-push':
+      return typeof row.start.reqId === 'string' ? row.start.reqId : '';
+  }
+}
+
+/**
+ * 把 groupPairedEntries() 的扁平結果依 reqId 分組，並在組內分類成流程表
+ * 敘事需要的四個角色（起點/終點/步驟/雜項）。這是原本活在 buildFlowView()/
+ * renderFlowGroup() 用戶端 JS 裡的邏輯，搬到伺服器端讓 renderHtml() 可以直接
+ * 算出完整流程表 HTML，不再需要瀏覽器重新分組。
+ *
+ * 輸入必須是 groupPairedEntries() 的輸出（已依 time 升冪排序）——因為組內
+ * 順序仰賴這個前提來決定 firstTime 跟敘事順序，不會在這裡重新排序組內項目。
+ * 組跟組之間依 firstTime 由新到舊排序（跟原本 buildFlowView() 的
+ * `groupList.sort((a, b) => b.firstTime - a.firstTime)` 行為一致）。
+ */
+export function buildFlowGroups(displayRows: DisplayRow[]): FlowGroup[] {
+  const buckets = new Map<string, DisplayRow[]>();
+  for (const row of displayRows) {
+    const reqId = flowRowReqId(row);
+    let bucket = buckets.get(reqId);
+    if (!bucket) {
+      bucket = [];
+      buckets.set(reqId, bucket);
+    }
+    bucket.push(row);
+  }
+
+  const groups: FlowGroup[] = [];
+  for (const [reqId, rows] of buckets) {
+    const group: FlowGroup = { reqId, firstTime: rows.length > 0 ? representativeTime(rows[0]) : 0, steps: [], misc: [] };
+    for (const row of rows) {
+      if (row.kind === 'single' && row.entry.msg === 'Processing event') { group.start = row.entry; continue; }
+      if (row.kind === 'single' && row.entry.msg === 'Processing event detail') { group.startDetail = row.entry; continue; }
+      if (row.kind === 'line-reply') { group.end = row; continue; }
+      if (row.kind === 'notion-call') { group.steps.push(row); continue; }
+      group.misc.push(row);
+    }
+    groups.push(group);
+  }
+
+  groups.sort((a, b) => b.firstTime - a.firstTime);
+  return groups;
 }
