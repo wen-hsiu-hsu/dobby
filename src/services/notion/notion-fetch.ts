@@ -27,10 +27,10 @@ function notionHeaders(): Record<string, string> {
   };
 }
 
-async function assertOk(res: Response, method: string, path: string): Promise<void> {
+async function assertOk(res: Response, method: string, path: string, durationMs: number): Promise<void> {
   if (!res.ok) {
     const err = await res.json();
-    logger.error({ method, path, status: res.status, err }, 'Notion API error');
+    logger.error({ method, path, status: res.status, err, durationMs }, 'Notion API error');
     throw new Error(`Notion API error: ${JSON.stringify(err)}`);
   }
 }
@@ -53,20 +53,22 @@ async function request(method: string, path: string, body?: unknown, attempt = 0
   // is 'info' and the full Notion payload isn't being captured.
   logger.info({ method, path, db }, 'Notion API request');
   logger.debug({ method, path, db, ...(body !== undefined && { body }) }, 'Notion API request payload');
+  const startedAt = Date.now();
   const res = await fetch(`${BASE_URL}${path}`, {
     method,
     headers: notionHeaders(),
     ...(body !== undefined && { body: JSON.stringify(body) }),
   });
+  const durationMs = Date.now() - startedAt;
   if (res.status === 429 && attempt < MAX_RETRIES) {
     const delayMs = retryDelayMs(res);
-    logger.warn({ method, path, db, attempt: attempt + 1, delayMs }, 'Notion API rate limited, retrying');
+    logger.warn({ method, path, db, attempt: attempt + 1, delayMs, durationMs }, 'Notion API rate limited, retrying');
     await new Promise((r) => setTimeout(r, delayMs));
     return request(method, path, body, attempt + 1);
   }
-  await assertOk(res, method, path);
+  await assertOk(res, method, path, durationMs);
   const data = await res.json();
-  logger.info({ method, path, db }, 'Notion API response');
+  logger.info({ method, path, db, durationMs }, 'Notion API response');
   logger.debug({ method, path, db, result: data }, 'Notion API response payload');
   return data;
 }

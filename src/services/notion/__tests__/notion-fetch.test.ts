@@ -78,7 +78,7 @@ describe('notion-fetch', () => {
 
     await expect(notionGet('/pages/missing')).rejects.toThrow('Notion API error');
     expect(logger.error).toHaveBeenCalledWith(
-      expect.objectContaining({ method: 'GET', path: '/pages/missing', status: 400 }),
+      expect.objectContaining({ method: 'GET', path: '/pages/missing', status: 400, durationMs: expect.any(Number) }),
       'Notion API error',
     );
   });
@@ -89,11 +89,11 @@ describe('notion-fetch', () => {
     await expect(notionPost('/pages', {})).rejects.toThrow('Notion API error');
     await expect(notionPatch('/pages/x', {})).rejects.toThrow('Notion API error');
     expect(logger.error).toHaveBeenCalledWith(
-      expect.objectContaining({ method: 'POST', path: '/pages', status: 500 }),
+      expect.objectContaining({ method: 'POST', path: '/pages', status: 500, durationMs: expect.any(Number) }),
       'Notion API error',
     );
     expect(logger.error).toHaveBeenCalledWith(
-      expect.objectContaining({ method: 'PATCH', path: '/pages/x', status: 500 }),
+      expect.objectContaining({ method: 'PATCH', path: '/pages/x', status: 500, durationMs: expect.any(Number) }),
       'Notion API error',
     );
   });
@@ -109,7 +109,7 @@ describe('notion-fetch', () => {
       expect(result).toEqual({ ok: true });
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(logger.warn).toHaveBeenCalledWith(
-        expect.objectContaining({ method: 'GET', path: '/pages/abc', attempt: 1 }),
+        expect.objectContaining({ method: 'GET', path: '/pages/abc', attempt: 1, durationMs: expect.any(Number) }),
         'Notion API rate limited, retrying',
       );
     });
@@ -133,7 +133,7 @@ describe('notion-fetch', () => {
         'Notion API request',
       );
       expect(logger.info).toHaveBeenCalledWith(
-        { method: 'POST', path: '/pages', db: undefined },
+        expect.objectContaining({ method: 'POST', path: '/pages', db: undefined, durationMs: expect.any(Number) }),
         'Notion API response',
       );
       for (const call of vi.mocked(logger.info).mock.calls) {

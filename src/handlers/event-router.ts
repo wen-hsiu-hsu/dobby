@@ -16,6 +16,7 @@ export async function processEvents(events: WebhookEvent[]): Promise<void> {
     // for when someone actually needs to see what was sent.
     logger.info({ type: event.type, sourceType: event.source?.type }, 'Processing event');
     logger.debug({ type: event.type, source: event.source, message: 'message' in event ? event.message : undefined }, 'Processing event detail');
+    const startedAt = Date.now();
     try {
       switch (event.type) {
         case 'message':
@@ -30,8 +31,9 @@ export async function processEvents(events: WebhookEvent[]): Promise<void> {
         default:
           logger.debug({ type: event.type }, 'Unhandled event type');
       }
+      logger.info({ type: event.type, durationMs: Date.now() - startedAt }, 'Event processed');
     } catch (err) {
-      logger.error({ err, eventType: event.type }, 'Error handling event');
+      logger.error({ err, eventType: event.type, durationMs: Date.now() - startedAt }, 'Error handling event');
     }
     }, quoteToken); // runWithContext
   }
