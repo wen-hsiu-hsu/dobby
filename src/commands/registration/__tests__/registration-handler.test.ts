@@ -6,6 +6,7 @@ import * as peopleRepo from '../../../services/notion/people-repository.js';
 import * as mutex from '../../../services/mutex.js';
 import { resolveTarget } from '../target-resolver.js';
 import { replyMessage } from '../../../services/line/reply-service.js';
+import { logger } from '../../../utils/logger.js';
 import { getCurrentSeasonName } from '../../../utils/date-utils.js';
 
 vi.mock('../../../services/notion/calendar-repository.js');
@@ -14,6 +15,9 @@ vi.mock('../../../services/notion/people-repository.js');
 vi.mock('../target-resolver.js');
 vi.mock('../../../services/line/reply-service.js');
 vi.mock('../../../services/mutex.js');
+vi.mock('../../../utils/logger.js', () => ({
+  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
 
 function makeEvent(text: string, mentionees: any[] = []) {
   return {
@@ -178,5 +182,35 @@ describe('handleRegistration', () => {
 
     expect(calendarRepo.updateGuests).not.toHaveBeenCalled();
     expect(replyText()).toContain('找不到 Alice 的報名紀錄');
+  });
+
+  it('logs a business summary after a successful registration write, with actorUserId only at debug level', async () => {
+    const event = makeEvent('@Dobby +1');
+
+    await handleRegistration(event, 1, false);
+
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetDisplayName: 'Alice',
+        delta: 1,
+        guestCountAfter: 1,
+      }),
+      'Registration updated',
+    );
+    const infoCall = vi.mocked(logger.info).mock.calls[0]![0];
+    expect(infoCall).not.toHaveProperty('actorUserId');
+
+    expect(logger.debug).toHaveBeenCalledWith(
+      expect.objectContaining({ actorUserId: 'user-alice', targetPersonPageId: 'person-1' }),
+      'Registration updated detail',
+    );
+  });
+
+  it('does not log a business summary when the operation fails validation (!result.canAdd)', async () => {
+    const event = makeEvent('@Dobby -1');
+
+    await handleRegistration(event, -1, false);
+
+    expect(logger.info).not.toHaveBeenCalled();
   });
 });

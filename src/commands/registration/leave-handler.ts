@@ -1,4 +1,5 @@
 import { replyMessage } from '../../services/line/reply-service.js';
+import { logger } from '../../utils/logger.js';
 import * as calendarRepo from '../../services/notion/calendar-repository.js';
 import * as seasonRepo from '../../services/notion/season-repository.js';
 import { getEventOccupancy } from '../../services/notion/event-occupancy.js';
@@ -86,6 +87,20 @@ export async function handleLeave(
         : freshEvent.absentees.filter((id) => id !== resolved.personPageId);
 
       await calendarRepo.updateAbsentees(freshEvent.pageId, newAbsentees);
+
+      logger.info(
+        {
+          date: nextSaturday,
+          isCancel,
+          targetDisplayName: resolved.displayName,
+          absenteeCountAfter: newAbsentees.length,
+        },
+        'Leave status updated'
+      );
+      logger.debug(
+        { actorUserId: event.source.userId, targetPersonPageId: resolved.personPageId },
+        'Leave status updated detail'
+      );
 
       const newTotalSlots = calculateTotalSlots({ absentees: newAbsentees }, freshSeason);
       const newPresentSeasonMembers = freshSeason.members.length - newAbsentees.length;

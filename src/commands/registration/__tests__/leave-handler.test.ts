@@ -6,6 +6,7 @@ import * as peopleRepo from '../../../services/notion/people-repository.js';
 import * as mutex from '../../../services/mutex.js';
 import { resolveTarget } from '../target-resolver.js';
 import { replyMessage } from '../../../services/line/reply-service.js';
+import { logger } from '../../../utils/logger.js';
 import { getCurrentSeasonName } from '../../../utils/date-utils.js';
 
 vi.mock('../../../services/notion/calendar-repository.js');
@@ -14,6 +15,9 @@ vi.mock('../../../services/notion/people-repository.js');
 vi.mock('../target-resolver.js');
 vi.mock('../../../services/line/reply-service.js');
 vi.mock('../../../services/mutex.js');
+vi.mock('../../../utils/logger.js', () => ({
+  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
 
 const event = {
   replyToken: 'token',
@@ -133,5 +137,56 @@ describe('handleLeave', () => {
 
     expect(text).toContain('Alice 目前未請假');
     expect(text).toContain('剩餘名額：');
+  });
+
+  it('logs a business summary after a successful leave write, with actorUserId only at debug level', async () => {
+    await handleLeave(event, false, false);
+
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetDisplayName: 'Alice',
+        isCancel: false,
+        absenteeCountAfter: 1,
+      }),
+      'Leave status updated',
+    );
+    const infoCall = vi.mocked(logger.info).mock.calls[0]![0];
+    expect(infoCall).not.toHaveProperty('actorUserId');
+
+    expect(logger.debug).toHaveBeenCalledWith(
+      expect.objectContaining({ actorUserId: 'user-alice', targetPersonPageId: 'person-1' }),
+      'Leave status updated detail',
+    );
+  });
+
+  it('logs a business summary after a successful cancel-leave write, with isCancel: true', async () => {
+    vi.mocked(calendarRepo.findByDate).mockResolvedValue({
+      pageId: 'evt-1',
+      date: '2026-05-09',
+      absentees: ['person-1'],
+      guests: [],
+      isPaused: false,
+    });
+
+    await handleLeave(event, true, false);
+
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ targetDisplayName: 'Alice', isCancel: true, absenteeCountAfter: 0 }),
+      'Leave status updated',
+    );
+  });
+
+  it('does not log a business summary on the early-return branches (already on leave / not on leave)', async () => {
+    vi.mocked(calendarRepo.findByDate).mockResolvedValue({
+      pageId: 'evt-1',
+      date: '2026-05-09',
+      absentees: ['person-1'],
+      guests: [],
+      isPaused: false,
+    });
+
+    await handleLeave(event, false, false);
+
+    expect(logger.info).not.toHaveBeenCalled();
   });
 });

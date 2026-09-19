@@ -1,4 +1,5 @@
 import { replyMessage } from '../../services/line/reply-service.js';
+import { logger } from '../../utils/logger.js';
 import * as calendarRepo from '../../services/notion/calendar-repository.js';
 import * as seasonRepo from '../../services/notion/season-repository.js';
 import { getEventOccupancy } from '../../services/notion/event-occupancy.js';
@@ -79,6 +80,21 @@ export async function handleRegistration(
 
       const updatedGuests = result.newGuests ?? [];
       await calendarRepo.updateGuests(freshEvent.pageId, updatedGuests);
+
+      logger.info(
+        {
+          date: nextSaturday,
+          delta,
+          targetDisplayName: resolved.displayName,
+          guestCountAfter: updatedGuests.length,
+          cappedAt: result.cappedAt,
+        },
+        'Registration updated'
+      );
+      logger.debug(
+        { actorUserId: event.source.userId, targetPersonPageId: resolved.personPageId },
+        'Registration updated detail'
+      );
 
       let headline: string;
       if (delta <= 0) {
