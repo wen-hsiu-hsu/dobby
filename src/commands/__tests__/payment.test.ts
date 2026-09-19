@@ -23,7 +23,7 @@ describe('handlePayment', () => {
   it('looks up the PAYMENT announcement', async () => {
     vi.mocked(announcementRepo.getBlocks).mockResolvedValue([paragraphBlock('付款方式')] as any);
 
-    await handlePayment('token', 'dobby');
+    await handlePayment('token');
 
     expect(announcementRepo.findByName).toHaveBeenCalledWith('PAYMENT');
   });
@@ -35,7 +35,7 @@ describe('handlePayment', () => {
       bulletedListItemBlock('Line 轉帳'),
     ] as any);
 
-    await handlePayment('token', 'dobby');
+    await handlePayment('token');
 
     const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
     const text = (messages[0] as { text: string }).text;
@@ -45,17 +45,17 @@ describe('handlePayment', () => {
   it('replies "找不到付款資訊" when PAYMENT does not exist', async () => {
     vi.mocked(announcementRepo.findByName).mockResolvedValue(null);
 
-    await handlePayment('token', 'dobby');
+    await handlePayment('token');
 
-    expect(replyMessage).toHaveBeenCalledWith('token', [{ type: 'text', text: '找不到付款資訊' }], 'dobby');
+    expect(replyMessage).toHaveBeenCalledWith('token', [{ type: 'text', text: '找不到付款資訊' }]);
     expect(announcementRepo.getBlocks).not.toHaveBeenCalled();
   });
 
   it('replies "付款資訊為空" when the announcement has no content', async () => {
     vi.mocked(announcementRepo.getBlocks).mockResolvedValue([]);
 
-    await handlePayment('token', 'dobby');
+    await handlePayment('token');
 
-    expect(replyMessage).toHaveBeenCalledWith('token', [{ type: 'text', text: '付款資訊為空' }], 'dobby');
+    expect(replyMessage).toHaveBeenCalledWith('token', [{ type: 'text', text: '付款資訊為空' }]);
   });
 });

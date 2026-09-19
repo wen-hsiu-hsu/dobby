@@ -6,10 +6,8 @@ const VALID_TOKEN = 'test-logs-token';
 // Must set env vars before importing app (env.ts validates at import time)
 beforeAll(() => {
   process.env['NODE_ENV'] = 'test';
-  process.env['LINE_CHANNEL_SECRET_DOBBY'] = 'test-secret-dobby';
-  process.env['LINE_CHANNEL_ACCESS_TOKEN_DOBBY'] = 'test-token-dobby';
-  process.env['LINE_CHANNEL_SECRET_BATTING'] = 'test-secret-batting';
-  process.env['LINE_CHANNEL_ACCESS_TOKEN_BATTING'] = 'test-token-batting';
+  process.env['LINE_CHANNEL_SECRET'] = 'test-secret-dobby';
+  process.env['LINE_CHANNEL_ACCESS_TOKEN'] = 'test-token-dobby';
   process.env['NOTION_API_KEY'] = 'test-notion-key';
   process.env['NOTION_DB_USERS'] = 'test-db-users';
   process.env['NOTION_DB_CALENDAR'] = 'test-db-calendar';

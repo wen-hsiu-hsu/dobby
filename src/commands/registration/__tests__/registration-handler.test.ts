@@ -76,7 +76,7 @@ describe('handleRegistration', () => {
   it('wraps the read-modify-write in withMutex using the event date as key, not the calendar page id', async () => {
     const event = makeEvent('@Dobby +1');
 
-    await handleRegistration(event, 1, 'dobby', false);
+    await handleRegistration(event, 1, false);
 
     expect(mutex.withMutex).toHaveBeenCalledWith(expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), expect.any(Function));
     expect(calendarRepo.updateGuests).toHaveBeenCalledWith('evt-1', ['Alice的朋友']);
@@ -87,7 +87,7 @@ describe('handleRegistration', () => {
     vi.mocked(seasonRepo.findByName).mockResolvedValue(baseSeason({ members: ['person-1'] }));
     const event = makeEvent('@Dobby +1');
 
-    await handleRegistration(event, 1, 'dobby', false);
+    await handleRegistration(event, 1, false);
 
     expect(calendarRepo.updateGuests).toHaveBeenCalledWith('evt-1', ['Bob']);
     expect(replyText()).toContain('報名成功 ✅');
@@ -99,7 +99,7 @@ describe('handleRegistration', () => {
     vi.mocked(seasonRepo.findByName).mockResolvedValue(baseSeason({ members: ['person-1'], courts: 1 }));
     const event = makeEvent('@Dobby +10');
 
-    await handleRegistration(event, 10, 'dobby', false);
+    await handleRegistration(event, 10, false);
 
     expect(calendarRepo.updateGuests).toHaveBeenCalledWith(
       'evt-1',
@@ -113,9 +113,9 @@ describe('handleRegistration', () => {
     vi.mocked(resolveTarget).mockResolvedValue({ personPageId: 'person-2', displayName: 'Bob' });
     const event = makeEvent('@Dobby +1 @Bob', [{ type: 'user', userId: 'u-bob', index: 0, length: 6 }]);
 
-    await handleRegistration(event, 1, 'dobby', true);
+    await handleRegistration(event, 1, true);
 
-    expect(replyMessage).not.toHaveBeenCalledWith('token', [{ type: 'text', text: '你不是管理員' }], 'dobby');
+    expect(replyMessage).not.toHaveBeenCalledWith('token', [{ type: 'text', text: '你不是管理員' }]);
     expect(calendarRepo.updateGuests).toHaveBeenCalled();
     expect(replyText()).toContain('報名成功 ✅');
   });
@@ -123,7 +123,7 @@ describe('handleRegistration', () => {
   it('rejects a non-admin trying to register someone else without touching Notion', async () => {
     const event = makeEvent('@Dobby +1 @Bob', [{ type: 'user', userId: 'u-bob', index: 0, length: 6 }]);
 
-    await handleRegistration(event, 1, 'dobby', false);
+    await handleRegistration(event, 1, false);
 
     expect(replyText()).toBe('你不是管理員');
     expect(seasonRepo.findByName).not.toHaveBeenCalled();
@@ -134,7 +134,7 @@ describe('handleRegistration', () => {
     // Only reachable once the actor passes the admin gate — parseError is checked after it.
     const event = makeEvent('@Dobby +1 Charlie');
 
-    await handleRegistration(event, 1, 'dobby', true);
+    await handleRegistration(event, 1, true);
 
     expect(replyText()).toBe('指令格式錯誤：指定對象需使用 @Name');
     expect(seasonRepo.findByName).not.toHaveBeenCalled();
@@ -145,7 +145,7 @@ describe('handleRegistration', () => {
     vi.mocked(resolveTarget).mockResolvedValue(null);
     const event = makeEvent('@Dobby +1');
 
-    await handleRegistration(event, 1, 'dobby', false);
+    await handleRegistration(event, 1, false);
 
     expect(replyText()).toBe('找不到您的帳號，請先向管理員登記');
     expect(calendarRepo.updateGuests).not.toHaveBeenCalled();
@@ -155,7 +155,7 @@ describe('handleRegistration', () => {
     vi.mocked(seasonRepo.findByName).mockResolvedValue(null);
     const event = makeEvent('@Dobby +1');
 
-    await handleRegistration(event, 1, 'dobby', false);
+    await handleRegistration(event, 1, false);
 
     expect(replyText()).toBe(`找不到 ${getCurrentSeasonName()} 季租資料`);
     expect(calendarRepo.findByDate).not.toHaveBeenCalled();
@@ -165,7 +165,7 @@ describe('handleRegistration', () => {
     vi.mocked(calendarRepo.findByDate).mockResolvedValue(baseCalendarEvent({ guests: ['Alice的朋友'] }));
     const event = makeEvent('@Dobby -1');
 
-    await handleRegistration(event, -1, 'dobby', false);
+    await handleRegistration(event, -1, false);
 
     expect(calendarRepo.updateGuests).toHaveBeenCalledWith('evt-1', []);
     expect(replyText()).toContain('取消報名成功 ✅');
@@ -174,7 +174,7 @@ describe('handleRegistration', () => {
   it('replies with an error and does not write when there is no matching registration to remove', async () => {
     const event = makeEvent('@Dobby -1');
 
-    await handleRegistration(event, -1, 'dobby', false);
+    await handleRegistration(event, -1, false);
 
     expect(calendarRepo.updateGuests).not.toHaveBeenCalled();
     expect(replyText()).toContain('找不到 Alice 的報名紀錄');

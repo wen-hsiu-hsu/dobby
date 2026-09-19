@@ -28,12 +28,11 @@ describe('handleMessage', () => {
   it('replies with a generic error and skips routing when findByUserId throws', async () => {
     vi.mocked(findByUserId).mockRejectedValue(new Error('Notion API error'));
 
-    await handleMessage(textEvent('@Dobby +1'), 'dobby');
+    await handleMessage(textEvent('@Dobby +1'));
 
     expect(replyMessage).toHaveBeenCalledWith(
       'reply-token-1',
       [{ type: 'text', text: '系統錯誤，請稍後再試' }],
-      'dobby',
     );
     expect(routeCommand).not.toHaveBeenCalled();
     expect(trackUser).not.toHaveBeenCalled();

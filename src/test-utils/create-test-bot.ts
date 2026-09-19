@@ -173,13 +173,12 @@ export function createTestBot(overrides: FixtureOverrides = {}): TestBot {
   const captured: Message[] = [];
 
   // Configure LINE client mock to capture replied messages
-  const mockReplyMessage = vi.fn().mockImplementation(
-    ({ messages: msgs }: { replyToken: string; messages: Message[] }) => {
+  vi.mocked(lineConfig.lineClient.replyMessage).mockImplementation(
+    (async ({ messages: msgs }: { replyToken: string; messages: Message[] }) => {
       captured.push(...msgs);
-      return Promise.resolve({});
-    },
+      return {};
+    }) as typeof lineConfig.lineClient.replyMessage,
   );
-  vi.mocked(lineConfig.getClient).mockReturnValue({ replyMessage: mockReplyMessage } as any);
 
   // Configure Notion POST mock — route to fixtures
   vi.mocked(notionFetch.notionPost).mockImplementation(async (path: string) => {
@@ -202,7 +201,7 @@ export function createTestBot(overrides: FixtureOverrides = {}): TestBot {
   async function run(text: string, user: UserContext): Promise<Message[]> {
     captured.length = 0;
     const event = buildLineEvent(text, user);
-    await handleMessage(event as any, 'dobby');
+    await handleMessage(event as any);
     return [...captured];
   }
 

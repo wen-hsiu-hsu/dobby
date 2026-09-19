@@ -1,21 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { replyMessage } from '../reply-service.js';
-import { getClient } from '../../../config/line.js';
+import { lineClient } from '../../../config/line.js';
 import { runWithContext } from '../../../utils/request-context.js';
 
-vi.mock('../../../config/line.js');
+vi.mock('../../../config/line.js', () => ({
+  lineClient: { replyMessage: vi.fn() },
+}));
 
-const mockReplyMessage = vi.fn().mockResolvedValue({});
+const mockReplyMessage = vi.mocked(lineClient.replyMessage);
 
 beforeEach(() => {
   vi.resetAllMocks();
-  mockReplyMessage.mockResolvedValue({});
-  vi.mocked(getClient).mockReturnValue({ replyMessage: mockReplyMessage } as any);
+  mockReplyMessage.mockResolvedValue({ sentMessages: [] });
 });
 
 describe('replyMessage', () => {
   it('sends messages unchanged when there is no quoteToken in context', async () => {
-    await replyMessage('token', [{ type: 'text', text: 'hi' }], 'dobby');
+    await replyMessage('token', [{ type: 'text', text: 'hi' }]);
 
     expect(mockReplyMessage).toHaveBeenCalledWith({
       replyToken: 'token',
@@ -25,7 +26,7 @@ describe('replyMessage', () => {
 
   it('attaches the inbound quoteToken to text messages when running inside request context', async () => {
     await runWithContext(async () => {
-      await replyMessage('token', [{ type: 'text', text: 'hi' }], 'dobby');
+      await replyMessage('token', [{ type: 'text', text: 'hi' }]);
     }, 'q-token-123');
 
     expect(mockReplyMessage).toHaveBeenCalledWith({
@@ -36,7 +37,7 @@ describe('replyMessage', () => {
 
   it('does not override a message that already sets its own quoteToken', async () => {
     await runWithContext(async () => {
-      await replyMessage('token', [{ type: 'text', text: 'hi', quoteToken: 'explicit' }], 'dobby');
+      await replyMessage('token', [{ type: 'text', text: 'hi', quoteToken: 'explicit' }]);
     }, 'q-token-123');
 
     expect(mockReplyMessage).toHaveBeenCalledWith({
@@ -47,7 +48,7 @@ describe('replyMessage', () => {
 
   it('does not attach quoteToken to non-text messages', async () => {
     await runWithContext(async () => {
-      await replyMessage('token', [{ type: 'sticker', packageId: '1', stickerId: '2' } as any], 'dobby');
+      await replyMessage('token', [{ type: 'sticker', packageId: '1', stickerId: '2' } as any]);
     }, 'q-token-123');
 
     expect(mockReplyMessage).toHaveBeenCalledWith({

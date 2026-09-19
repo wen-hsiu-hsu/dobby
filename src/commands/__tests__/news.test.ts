@@ -62,13 +62,13 @@ beforeEach(() => {
 
 describe('handleNews', () => {
   it('looks up the NEWS_TEMPLATE announcement, not NEWS', async () => {
-    await handleNews('token', 'dobby');
+    await handleNews('token');
 
     expect(announcementRepo.findByName).toHaveBeenCalledWith('NEWS_TEMPLATE');
   });
 
   it('substitutes all season/date placeholders with live data', async () => {
-    await handleNews('token', 'dobby');
+    await handleNews('token');
 
     const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
     const text = (messages[0] as { text: string }).text;
@@ -91,16 +91,16 @@ describe('handleNews', () => {
   it('replies "找不到公告內容" when NEWS_TEMPLATE does not exist', async () => {
     vi.mocked(announcementRepo.findByName).mockResolvedValue(null);
 
-    await handleNews('token', 'dobby');
+    await handleNews('token');
 
-    expect(replyMessage).toHaveBeenCalledWith('token', [{ type: 'text', text: '找不到公告內容' }], 'dobby');
+    expect(replyMessage).toHaveBeenCalledWith('token', [{ type: 'text', text: '找不到公告內容' }]);
     expect(seasonRepo.findByName).not.toHaveBeenCalled();
   });
 
   it('replies with a season-not-found message when the current season is missing', async () => {
     vi.mocked(seasonRepo.findByName).mockResolvedValue(null);
 
-    await handleNews('token', 'dobby');
+    await handleNews('token');
 
     const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
     const text = (messages[0] as { text: string }).text;

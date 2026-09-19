@@ -25,7 +25,7 @@ describe('processEvents', () => {
       message: { type: 'text', id: 'm1', text: '@Dobby +1', quoteToken: 'qt-1' },
     };
 
-    await processEvents([event as any], 'dobby');
+    await processEvents([event as any]);
 
     expect(seenToken).toBe('qt-1');
   });
@@ -43,7 +43,7 @@ describe('processEvents', () => {
       message: { type: 'sticker', id: 'm1' },
     };
 
-    await processEvents([event as any], 'dobby');
+    await processEvents([event as any]);
 
     expect(seenToken).toBeUndefined();
   });

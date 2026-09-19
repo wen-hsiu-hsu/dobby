@@ -57,21 +57,21 @@ beforeEach(() => {
 
 describe('handleLeave', () => {
   it('looks up the current season by name, not just the first season record', async () => {
-    await handleLeave(event, false, 'dobby', false);
+    await handleLeave(event, false, false);
 
     expect(seasonRepo.findByName).toHaveBeenCalledWith(getCurrentSeasonName());
     expect(seasonRepo.findAll).not.toHaveBeenCalled();
   });
 
   it('wraps the read-modify-write in withMutex using the event date as key', async () => {
-    await handleLeave(event, false, 'dobby', false);
+    await handleLeave(event, false, false);
 
     expect(mutex.withMutex).toHaveBeenCalledWith(expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), expect.any(Function));
     expect(calendarRepo.updateAbsentees).toHaveBeenCalledWith('evt-1', ['person-1']);
   });
 
   it('replies with the full weekly status (not a bare one-liner) after leave is recorded', async () => {
-    await handleLeave(event, false, 'dobby', false);
+    await handleLeave(event, false, false);
 
     const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
     const text = (messages[0] as { text: string }).text;
@@ -93,7 +93,7 @@ describe('handleLeave', () => {
       isPaused: false,
     });
 
-    await handleLeave(event, true, 'dobby', false);
+    await handleLeave(event, true, false);
 
     expect(calendarRepo.updateAbsentees).toHaveBeenCalledWith('evt-1', []);
     const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
@@ -114,7 +114,7 @@ describe('handleLeave', () => {
       isPaused: false,
     });
 
-    await handleLeave(event, false, 'dobby', false);
+    await handleLeave(event, false, false);
 
     expect(calendarRepo.updateAbsentees).not.toHaveBeenCalled();
     const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
@@ -125,7 +125,7 @@ describe('handleLeave', () => {
   });
 
   it('replies with full status + reason when cancelling leave without having leave recorded (no Notion write)', async () => {
-    await handleLeave(event, true, 'dobby', false);
+    await handleLeave(event, true, false);
 
     expect(calendarRepo.updateAbsentees).not.toHaveBeenCalled();
     const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;

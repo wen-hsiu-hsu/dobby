@@ -80,8 +80,8 @@ describe('groupPairedEntries', () => {
 
   it('pairs a successful LINE reply', () => {
     const entries = [
-      entry({ msg: 'LINE reply', botId: 'dobby', messages: ['ok'], reqId: 'r1' }),
-      entry({ level: 20, msg: 'LINE reply sent', botId: 'dobby', messages: ['ok'], reqId: 'r1' }),
+      entry({ msg: 'LINE reply', messages: ['ok'], reqId: 'r1' }),
+      entry({ level: 20, msg: 'LINE reply sent', messages: ['ok'], reqId: 'r1' }),
     ];
 
     const rows = groupPairedEntries(entries);
@@ -94,8 +94,8 @@ describe('groupPairedEntries', () => {
 
   it('pairs a failed LINE reply (warn, no "sent" line)', () => {
     const entries = [
-      entry({ msg: 'LINE reply', botId: 'dobby', messages: ['ok'], reqId: 'r1' }),
-      entry({ level: 40, msg: 'Reply failed, no fallback available (no groupId for push)', botId: 'dobby', reqId: 'r1' }),
+      entry({ msg: 'LINE reply', messages: ['ok'], reqId: 'r1' }),
+      entry({ level: 40, msg: 'Reply failed, no fallback available (no groupId for push)', reqId: 'r1' }),
     ];
 
     const rows = groupPairedEntries(entries);
@@ -108,10 +108,10 @@ describe('groupPairedEntries', () => {
 
   it('pairs LINE push by content, not reqId (push has none), without cross-matching two different pushes', () => {
     const entries = [
-      entry({ msg: 'LINE push', botId: 'dobby', to: 'group-1', messages: ['a'] }),
-      entry({ msg: 'LINE push', botId: 'dobby', to: 'group-2', messages: ['b'] }),
-      entry({ level: 20, msg: 'LINE push sent', botId: 'dobby', to: 'group-2', messages: ['b'] }),
-      entry({ level: 50, msg: 'Push message failed', botId: 'dobby', to: 'group-1', messages: ['a'] }),
+      entry({ msg: 'LINE push', to: 'group-1', messages: ['a'] }),
+      entry({ msg: 'LINE push', to: 'group-2', messages: ['b'] }),
+      entry({ level: 20, msg: 'LINE push sent', to: 'group-2', messages: ['b'] }),
+      entry({ level: 50, msg: 'Push message failed', to: 'group-1', messages: ['a'] }),
     ];
 
     const rows = groupPairedEntries(entries);

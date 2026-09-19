@@ -2,10 +2,8 @@ import { describe, it, expect, vi, beforeAll } from 'vitest';
 
 beforeAll(() => {
   process.env['NODE_ENV'] = 'test';
-  process.env['LINE_CHANNEL_SECRET_DOBBY'] = 'test-secret-dobby';
-  process.env['LINE_CHANNEL_ACCESS_TOKEN_DOBBY'] = 'test-token-dobby';
-  process.env['LINE_CHANNEL_SECRET_BATTING'] = 'test-secret-batting';
-  process.env['LINE_CHANNEL_ACCESS_TOKEN_BATTING'] = 'test-token-batting';
+  process.env['LINE_CHANNEL_SECRET'] = 'test-secret-dobby';
+  process.env['LINE_CHANNEL_ACCESS_TOKEN'] = 'test-token-dobby';
   process.env['NOTION_API_KEY'] = 'test-notion-key';
   process.env['NOTION_DB_USERS'] = 'test-db-users';
   process.env['NOTION_DB_CALENDAR'] = 'test-db-calendar';
@@ -15,9 +13,7 @@ beforeAll(() => {
 });
 
 vi.mock('../config/line.js', () => ({
-  dobbyClient: { replyMessage: vi.fn().mockResolvedValue({}) },
-  battingClient: { replyMessage: vi.fn().mockResolvedValue({}) },
-  getClient: vi.fn().mockReturnValue({ replyMessage: vi.fn().mockResolvedValue({}) }),
+  lineClient: { replyMessage: vi.fn().mockResolvedValue({ sentMessages: [] }) },
 }));
 
 const ADMIN_USER = { pageId: 'p-admin', userId: 'manager-user-id', customName: 'Manager', isAdmin: true, messageCount: 0, groups: ['group-1'], multiChats: [] };
@@ -57,9 +53,9 @@ describe('auto-reply', () => {
 
   it('message handler skips auto-reply for admin', async () => {
     const { handleMessage } = await import('../handlers/message-handler.js');
-    const { getClient } = await import('../config/line.js');
-    const mockReply = vi.fn();
-    (getClient as any).mockReturnValue({ replyMessage: mockReply });
+    const { lineClient } = await import('../config/line.js');
+    const mockReply = vi.mocked(lineClient.replyMessage);
+    mockReply.mockClear();
 
     const event = {
       type: 'message' as const,
@@ -72,15 +68,16 @@ describe('auto-reply', () => {
       deliveryContext: { isRedelivery: false },
     };
 
-    await handleMessage(event as any, 'dobby');
+    await handleMessage(event as any);
     expect(mockReply).not.toHaveBeenCalled();
   });
 
   it('message handler sends auto-reply for non-admin', async () => {
     const { handleMessage } = await import('../handlers/message-handler.js');
-    const { getClient } = await import('../config/line.js');
-    const mockReply = vi.fn().mockResolvedValue({});
-    (getClient as any).mockReturnValue({ replyMessage: mockReply });
+    const { lineClient } = await import('../config/line.js');
+    const mockReply = vi.mocked(lineClient.replyMessage);
+    mockReply.mockClear();
+    mockReply.mockResolvedValue({ sentMessages: [] });
 
     const event = {
       type: 'message' as const,
@@ -93,7 +90,7 @@ describe('auto-reply', () => {
       deliveryContext: { isRedelivery: false },
     };
 
-    await handleMessage(event as any, 'dobby');
+    await handleMessage(event as any);
     expect(mockReply).toHaveBeenCalledWith(
       expect.objectContaining({
         messages: expect.arrayContaining([

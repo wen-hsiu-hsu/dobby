@@ -63,9 +63,8 @@ describe('sendWeeklyPush', () => {
     await sendWeeklyPush();
 
     expect(pushMessageMock).toHaveBeenCalledTimes(1);
-    const [to, , botId] = pushMessageMock.mock.calls[0]!;
+    const [to] = pushMessageMock.mock.calls[0]!;
     expect(to).toBe('group-test-1');
-    expect(botId).toBe('dobby');
   });
 
   it('does not push and logs an error when DOBBY_GROUP_ID is unset', async () => {

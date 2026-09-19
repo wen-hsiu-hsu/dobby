@@ -27,9 +27,9 @@ describe('withFreshCalendarEvent', () => {
   it('replies with "not found" when refetch finds nothing, without logging an error', async () => {
     const mutation = vi.fn();
 
-    await withFreshCalendarEvent('token', 'dobby', '2026-05-09', 'ctx', () => Promise.resolve(null), mutation);
+    await withFreshCalendarEvent('token', '2026-05-09', 'ctx', () => Promise.resolve(null), mutation);
 
-    expect(replyMessage).toHaveBeenCalledWith('token', [{ type: 'text', text: '找不到 2026-05-09 的活動' }], 'dobby');
+    expect(replyMessage).toHaveBeenCalledWith('token', [{ type: 'text', text: '找不到 2026-05-09 的活動' }]);
     expect(mutation).not.toHaveBeenCalled();
     expect(logger.error).not.toHaveBeenCalled();
   });
@@ -38,7 +38,7 @@ describe('withFreshCalendarEvent', () => {
     const fresh = { ...calEvent, guests: ['Alice'] };
     const mutation = vi.fn();
 
-    await withFreshCalendarEvent('token', 'dobby', '2026-05-09', 'ctx', () => Promise.resolve(fresh), mutation);
+    await withFreshCalendarEvent('token', '2026-05-09', 'ctx', () => Promise.resolve(fresh), mutation);
 
     expect(mutex.withMutex).toHaveBeenCalledWith('2026-05-09', expect.any(Function));
     expect(mutation).toHaveBeenCalledWith(fresh);
@@ -47,18 +47,18 @@ describe('withFreshCalendarEvent', () => {
   it('replies with a generic error when the queued mutex task times out', async () => {
     vi.mocked(mutex.withMutex).mockRejectedValue(new Error('Mutex timeout: 2026-05-09'));
 
-    await withFreshCalendarEvent('token', 'dobby', '2026-05-09', 'ctx', () => Promise.resolve(calEvent), vi.fn());
+    await withFreshCalendarEvent('token', '2026-05-09', 'ctx', () => Promise.resolve(calEvent), vi.fn());
 
-    expect(replyMessage).toHaveBeenCalledWith('token', [{ type: 'text', text: '系統錯誤，請稍後再試' }], 'dobby');
+    expect(replyMessage).toHaveBeenCalledWith('token', [{ type: 'text', text: '系統錯誤，請稍後再試' }]);
     expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ err: expect.any(Error) }), 'ctx error');
   });
 
   it('replies with a generic error and logs when mutation throws', async () => {
     const mutation = vi.fn().mockRejectedValue(new Error('boom'));
 
-    await withFreshCalendarEvent('token', 'dobby', '2026-05-09', 'my-context', () => Promise.resolve(calEvent), mutation);
+    await withFreshCalendarEvent('token', '2026-05-09', 'my-context', () => Promise.resolve(calEvent), mutation);
 
-    expect(replyMessage).toHaveBeenCalledWith('token', [{ type: 'text', text: '系統錯誤，請稍後再試' }], 'dobby');
+    expect(replyMessage).toHaveBeenCalledWith('token', [{ type: 'text', text: '系統錯誤，請稍後再試' }]);
     expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ err: expect.any(Error) }), 'my-context error');
   });
 });
