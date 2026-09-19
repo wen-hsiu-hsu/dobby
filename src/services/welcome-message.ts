@@ -36,9 +36,7 @@ const FALLBACK_MEMBER_TEXT = (displayName: string) =>
  * Uses WELCOME_MESSAGE announcement from Notion if available,
  * replacing {MANAGER} with a mention of the admin user.
  */
-export async function buildJoinWelcome(
-  botId: string,
-): Promise<messagingApi.Message> {
+export async function buildJoinWelcome(): Promise<messagingApi.Message> {
   try {
     const [announcement, admin] = await Promise.all([
       announcementRepo.findByName('WELCOME_MESSAGE'),
@@ -57,7 +55,7 @@ export async function buildJoinWelcome(
       MANAGER: mentionUser(admin.userId),
     });
   } catch (err) {
-    logger.error({ err, botId }, 'buildJoinWelcome error, using fallback');
+    logger.error({ err }, 'buildJoinWelcome error, using fallback');
     return { type: 'text', text: FALLBACK_JOIN_TEXT };
   }
 }
@@ -70,7 +68,6 @@ export async function buildJoinWelcome(
 export async function buildMemberJoinedWelcome(
   newMemberUserId: string,
   displayName: string,
-  botId: string,
 ): Promise<messagingApi.Message> {
   try {
     const [announcement, admin] = await Promise.all([
@@ -91,7 +88,7 @@ export async function buildMemberJoinedWelcome(
       MANAGER: mentionUser(admin.userId),
     });
   } catch (err) {
-    logger.error({ err, newMemberUserId, botId }, 'buildMemberJoinedWelcome error, using fallback');
+    logger.error({ err, newMemberUserId }, 'buildMemberJoinedWelcome error, using fallback');
     return { type: 'text', text: FALLBACK_MEMBER_TEXT(displayName) };
   }
 }

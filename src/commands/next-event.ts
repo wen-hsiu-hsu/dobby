@@ -6,12 +6,11 @@ import type { NextEventQueryParams } from '../types/commands.js';
 
 export async function handleNextEvent(
   replyToken: string,
-  botId: string,
   isAdmin: boolean,
   queryParams?: NextEventQueryParams
 ): Promise<void> {
   if (!isAdmin) {
-    await replyMessage(replyToken, [{ type: 'text', text: '此指令僅限管理員使用' }], botId);
+    await replyMessage(replyToken, [{ type: 'text', text: '此指令僅限管理員使用' }]);
     return;
   }
 
@@ -27,7 +26,7 @@ export async function handleNextEvent(
     const occupancy = await getEventOccupancy(dateStr, courtOverride ?? undefined);
 
     if (!occupancy) {
-      await replyMessage(replyToken, [{ type: 'text', text: `找不到 ${dateStr} 的活動` }], botId);
+      await replyMessage(replyToken, [{ type: 'text', text: `找不到 ${dateStr} 的活動` }]);
       return;
     }
 
@@ -50,9 +49,9 @@ export async function handleNextEvent(
       lines.push(`（若 ${courtOverride} 場地：剩餘名額 ${remainingSlots} 人）`);
     }
 
-    await replyMessage(replyToken, [{ type: 'text', text: lines.join('\n') }], botId);
+    await replyMessage(replyToken, [{ type: 'text', text: lines.join('\n') }]);
   } catch (err) {
     logger.error({ err }, 'Next event handler error');
-    await replyMessage(replyToken, [{ type: 'text', text: '系統錯誤，請稍後再試' }], botId);
+    await replyMessage(replyToken, [{ type: 'text', text: '系統錯誤，請稍後再試' }]);
   }
 }

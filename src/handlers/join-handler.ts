@@ -3,10 +3,10 @@ import { replyMessage } from '../services/line/reply-service.js';
 import { buildJoinWelcome } from '../services/welcome-message.js';
 import { logger } from '../utils/logger.js';
 
-export async function handleJoin(event: JoinEvent, botId: string): Promise<void> {
+export async function handleJoin(event: JoinEvent): Promise<void> {
   try {
-    const message = await buildJoinWelcome(botId);
-    await replyMessage(event.replyToken, [message], botId);
+    const message = await buildJoinWelcome();
+    await replyMessage(event.replyToken, [message]);
   } catch (err) {
     logger.error({ err }, 'Join handler error');
   }

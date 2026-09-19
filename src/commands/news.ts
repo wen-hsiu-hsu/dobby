@@ -54,18 +54,18 @@ function applySeasonPlaceholders(text: string, placeholders: Record<string, stri
   return text.replace(/\{([A-Z_]+)\}/g, (match, key: string) => placeholders[key] ?? match);
 }
 
-export async function handleNews(replyToken: string, botId: string): Promise<void> {
+export async function handleNews(replyToken: string): Promise<void> {
   try {
     const announcement = await announcementRepo.findByName('NEWS_TEMPLATE');
     if (!announcement) {
-      await replyMessage(replyToken, [{ type: 'text', text: '找不到公告內容' }], botId);
+      await replyMessage(replyToken, [{ type: 'text', text: '找不到公告內容' }]);
       return;
     }
 
     const seasonName = getCurrentSeasonName();
     const season = await seasonRepo.findByName(seasonName);
     if (!season) {
-      await replyMessage(replyToken, [{ type: 'text', text: `找不到 ${seasonName} 季租資料` }], botId);
+      await replyMessage(replyToken, [{ type: 'text', text: `找不到 ${seasonName} 季租資料` }]);
       return;
     }
 
@@ -79,9 +79,9 @@ export async function handleNews(replyToken: string, botId: string): Promise<voi
     const withStatic = applyStaticPlaceholders(rawText);
     const text = applySeasonPlaceholders(withStatic, buildSeasonPlaceholders(season, people, playDates));
 
-    await replyMessage(replyToken, [{ type: 'text', text: text || '公告內容為空' }], botId);
+    await replyMessage(replyToken, [{ type: 'text', text: text || '公告內容為空' }]);
   } catch (err) {
     logger.error({ err }, 'News handler error');
-    await replyMessage(replyToken, [{ type: 'text', text: '系統錯誤，請稍後再試' }], botId);
+    await replyMessage(replyToken, [{ type: 'text', text: '系統錯誤，請稍後再試' }]);
   }
 }

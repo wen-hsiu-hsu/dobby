@@ -47,7 +47,7 @@ const COMMAND_LIST_TEXT = `🛠️ 指令列表
 銷假（季租成員限定）
 @Dobby 銷假`;
 
-export async function handleCommandList(replyToken: string, botId: string): Promise<void> {
+export async function handleCommandList(replyToken: string): Promise<void> {
   const messages: messagingApi.Message[] = [
     {
       type: 'text',
@@ -62,5 +62,5 @@ export async function handleCommandList(replyToken: string, botId: string): Prom
       },
     },
   ];
-  await replyMessage(replyToken, messages, botId);
+  await replyMessage(replyToken, messages);
 }

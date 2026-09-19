@@ -36,7 +36,7 @@ export async function sendWeeklyPush(): Promise<void> {
       lines.push(`\n零打名單：\n${calEvent.guests.map((g, i) => `${i + 1}. ${g}`).join('\n')}`);
     }
 
-    await pushMessage(dobbyGroupId, [{ type: 'text', text: lines.join('\n') }], 'dobby');
+    await pushMessage(dobbyGroupId, [{ type: 'text', text: lines.join('\n') }]);
     logger.info({ nextSaturday }, 'Weekly push sent');
   } catch (err) {
     logger.error({ err }, 'Weekly push failed');

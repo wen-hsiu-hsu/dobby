@@ -18,31 +18,30 @@ interface MessageEvent {
 export async function handleRegistration(
   event: MessageEvent,
   delta: number,
-  botId: string,
   isAdmin = false
 ): Promise<void> {
   const target = parseRegistrationTarget(event as any);
 
   if (!target.isSelf && !isAdmin) {
-    await replyMessage(event.replyToken, [{ type: 'text', text: '你不是管理員' }], botId);
+    await replyMessage(event.replyToken, [{ type: 'text', text: '你不是管理員' }]);
     return;
   }
 
   if (target.parseError) {
-    await replyMessage(event.replyToken, [{ type: 'text', text: target.parseError }], botId);
+    await replyMessage(event.replyToken, [{ type: 'text', text: target.parseError }]);
     return;
   }
 
   const resolved = await resolveTarget(target, event.source.userId);
   if (!resolved) {
-    await replyMessage(event.replyToken, [{ type: 'text', text: '找不到您的帳號，請先向管理員登記' }], botId);
+    await replyMessage(event.replyToken, [{ type: 'text', text: '找不到您的帳號，請先向管理員登記' }]);
     return;
   }
 
   // Get current season by name (e.g. "2026-Q1"), not by array index
   const activeSeason = await seasonRepo.findByName(getCurrentSeasonName());
   if (!activeSeason) {
-    await replyMessage(event.replyToken, [{ type: 'text', text: `找不到 ${getCurrentSeasonName()} 季租資料` }], botId);
+    await replyMessage(event.replyToken, [{ type: 'text', text: `找不到 ${getCurrentSeasonName()} 季租資料` }]);
     return;
   }
 
@@ -51,7 +50,6 @@ export async function handleRegistration(
 
   await withFreshCalendarEvent(
     event.replyToken,
-    botId,
     nextSaturday,
     'Registration handler',
     () => getEventOccupancy(nextSaturday, undefined, activeSeason),
@@ -75,7 +73,7 @@ export async function handleRegistration(
           guestFee: occupancy.season.guestFee,
           absenteePageIds: freshEvent.absentees,
         });
-        await replyMessage(event.replyToken, [{ type: 'text', text: replyText }], botId);
+        await replyMessage(event.replyToken, [{ type: 'text', text: replyText }]);
         return;
       }
 
@@ -100,7 +98,7 @@ export async function handleRegistration(
         guestFee: occupancy.season.guestFee,
         absenteePageIds: freshEvent.absentees,
       });
-      await replyMessage(event.replyToken, [{ type: 'text', text: replyText }], botId);
+      await replyMessage(event.replyToken, [{ type: 'text', text: replyText }]);
     }
   );
 }

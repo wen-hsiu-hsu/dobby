@@ -18,20 +18,19 @@ interface MessageEvent {
 export async function handleLeave(
   event: MessageEvent,
   isCancel: boolean,
-  botId: string,
   isAdmin = false
 ): Promise<void> {
   const target = parseRegistrationTarget(event as any);
 
   if (!target.isSelf && !isAdmin) {
-    await replyMessage(event.replyToken, [{ type: 'text', text: '你不是管理員' }], botId);
+    await replyMessage(event.replyToken, [{ type: 'text', text: '你不是管理員' }]);
     return;
   }
 
   const resolved = await resolveTarget(target, event.source.userId);
 
   if (!resolved) {
-    await replyMessage(event.replyToken, [{ type: 'text', text: '找不到您的資料' }], botId);
+    await replyMessage(event.replyToken, [{ type: 'text', text: '找不到您的資料' }]);
     return;
   }
 
@@ -39,7 +38,7 @@ export async function handleLeave(
   if (!activeSeason || !activeSeason.members.includes(resolved.personPageId)) {
     // Target isn't a season member — no calendar event fetched yet, and no meaningful
     // "occupancy" to show for someone who has no leave concept to begin with.
-    await replyMessage(event.replyToken, [{ type: 'text', text: '請假/銷假功能僅限季租成員使用' }], botId);
+    await replyMessage(event.replyToken, [{ type: 'text', text: '請假/銷假功能僅限季租成員使用' }]);
     return;
   }
 
@@ -47,7 +46,6 @@ export async function handleLeave(
 
   await withFreshCalendarEvent(
     event.replyToken,
-    botId,
     nextSaturday,
     'Leave handler',
     () => getEventOccupancy(nextSaturday, undefined, activeSeason),
@@ -65,7 +63,7 @@ export async function handleLeave(
           guestFee: freshSeason.guestFee,
           absenteePageIds: freshEvent.absentees,
         });
-        await replyMessage(event.replyToken, [{ type: 'text', text: replyText }], botId);
+        await replyMessage(event.replyToken, [{ type: 'text', text: replyText }]);
         return;
       }
 
@@ -79,7 +77,7 @@ export async function handleLeave(
           guestFee: freshSeason.guestFee,
           absenteePageIds: freshEvent.absentees,
         });
-        await replyMessage(event.replyToken, [{ type: 'text', text: replyText }], botId);
+        await replyMessage(event.replyToken, [{ type: 'text', text: replyText }]);
         return;
       }
 
@@ -100,7 +98,7 @@ export async function handleLeave(
         guestFee: freshSeason.guestFee,
         absenteePageIds: newAbsentees,
       });
-      await replyMessage(event.replyToken, [{ type: 'text', text: replyText }], botId);
+      await replyMessage(event.replyToken, [{ type: 'text', text: replyText }]);
     }
   );
 }

@@ -7,7 +7,7 @@ import { findByUserId } from '../services/notion/users-repository.js';
 import { trackUser } from '../services/user-management.js';
 import { logger } from '../utils/logger.js';
 
-export async function handleMessage(event: MessageEvent, botId: string): Promise<void> {
+export async function handleMessage(event: MessageEvent): Promise<void> {
   if (event.message.type !== 'text') return;
 
   const text = event.message.text;
@@ -24,7 +24,7 @@ export async function handleMessage(event: MessageEvent, botId: string): Promise
     notionUser = await findByUserId(userId);
   } catch (err) {
     logger.error({ err }, 'Message handler error');
-    await replyMessage(event.replyToken, [{ type: 'text', text: '系統錯誤，請稍後再試' }], botId);
+    await replyMessage(event.replyToken, [{ type: 'text', text: '系統錯誤，請稍後再試' }]);
     return;
   }
   const isAdmin = notionUser?.isAdmin ?? false;
@@ -42,7 +42,7 @@ export async function handleMessage(event: MessageEvent, botId: string): Promise
       return;
     }
     logger.debug({ command, isAdmin }, 'Routing command');
-    await routeCommand(command, event as any, botId, isAdmin);
+    await routeCommand(command, event as any, isAdmin);
     return;
   }
 
@@ -55,6 +55,6 @@ export async function handleMessage(event: MessageEvent, botId: string): Promise
   const reply = findReply(text);
   logger.debug({ text, matched: reply !== null, reply }, 'Auto-reply lookup');
   if (reply) {
-    await replyMessage(event.replyToken, [{ type: 'text', text: reply }], botId);
+    await replyMessage(event.replyToken, [{ type: 'text', text: reply }]);
   }
 }

@@ -6,7 +6,6 @@ class EventNotFoundError extends Error {}
 
 export async function withFreshCalendarEvent<T>(
   replyToken: string,
-  botId: string,
   date: string,
   context: string,
   refetch: () => Promise<T | null>,
@@ -22,10 +21,10 @@ export async function withFreshCalendarEvent<T>(
     });
   } catch (err: unknown) {
     if (err instanceof EventNotFoundError) {
-      await replyMessage(replyToken, [{ type: 'text', text: `找不到 ${date} 的活動` }], botId);
+      await replyMessage(replyToken, [{ type: 'text', text: `找不到 ${date} 的活動` }]);
       return;
     }
     logger.error({ err }, `${context} error`);
-    await replyMessage(replyToken, [{ type: 'text', text: '系統錯誤，請稍後再試' }], botId);
+    await replyMessage(replyToken, [{ type: 'text', text: '系統錯誤，請稍後再試' }]);
   }
 }

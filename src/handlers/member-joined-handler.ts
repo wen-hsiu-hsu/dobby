@@ -4,7 +4,7 @@ import { buildMemberJoinedWelcome } from '../services/welcome-message.js';
 import { getProfile } from '../services/line/profile-service.js';
 import { logger } from '../utils/logger.js';
 
-export async function handleMemberJoined(event: MemberJoinEvent, botId: string): Promise<void> {
+export async function handleMemberJoined(event: MemberJoinEvent): Promise<void> {
   try {
     const members = event.joined.members;
     const groupId = event.source.type === 'group' ? event.source.groupId : undefined;
@@ -16,8 +16,8 @@ export async function handleMemberJoined(event: MemberJoinEvent, botId: string):
       const profile = groupId ? await getProfile(userId, groupId) : null;
       const displayName = profile?.displayName ?? userId;
 
-      const message = await buildMemberJoinedWelcome(userId, displayName, botId);
-      await replyMessage(event.replyToken, [message], botId);
+      const message = await buildMemberJoinedWelcome(userId, displayName);
+      await replyMessage(event.replyToken, [message]);
     }
   } catch (err) {
     logger.error({ err }, 'MemberJoined handler error');

@@ -5,7 +5,7 @@ import { handleMemberJoined } from './member-joined-handler.js';
 import { logger } from '../utils/logger.js';
 import { runWithContext } from '../utils/request-context.js';
 
-export async function processEvents(events: WebhookEvent[], botId: string): Promise<void> {
+export async function processEvents(events: WebhookEvent[]): Promise<void> {
   for (const event of events) {
     const quoteToken = event.type === 'message' && event.message.type === 'text' ? event.message.quoteToken : undefined;
     await runWithContext(async () => {
@@ -19,13 +19,13 @@ export async function processEvents(events: WebhookEvent[], botId: string): Prom
     try {
       switch (event.type) {
         case 'message':
-          await handleMessage(event, botId);
+          await handleMessage(event);
           break;
         case 'join':
-          await handleJoin(event, botId);
+          await handleJoin(event);
           break;
         case 'memberJoined':
-          await handleMemberJoined(event, botId);
+          await handleMemberJoined(event);
           break;
         default:
           logger.debug({ type: event.type }, 'Unhandled event type');

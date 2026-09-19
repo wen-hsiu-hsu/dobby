@@ -19,41 +19,40 @@ interface CommandEvent {
 export async function routeCommand(
   command: ParsedCommand,
   event: CommandEvent,
-  botId: string,
   isAdmin: boolean
 ): Promise<void> {
   switch (command.type) {
     case CommandType.INTRODUCE:
-      await handleIntroduce(event.replyToken, event.source.userId, botId);
+      await handleIntroduce(event.replyToken, event.source.userId);
       break;
     case CommandType.OWE:
-      await handleOwe(event.replyToken, botId);
+      await handleOwe(event.replyToken);
       break;
     case CommandType.COMMAND_LIST:
-      await handleCommandList(event.replyToken, botId);
+      await handleCommandList(event.replyToken);
       break;
     case CommandType.PARTICIPANTS:
-      await handleParticipants(event.replyToken, botId);
+      await handleParticipants(event.replyToken);
       break;
     case CommandType.NEXT_EVENT:
-      await handleNextEvent(event.replyToken, botId, isAdmin, command.queryParams);
+      await handleNextEvent(event.replyToken, isAdmin, command.queryParams);
       break;
     case CommandType.NEWS:
-      await handleNews(event.replyToken, botId);
+      await handleNews(event.replyToken);
       break;
     case CommandType.PAYMENT:
-      await handlePayment(event.replyToken, botId);
+      await handlePayment(event.replyToken);
       break;
     case CommandType.REGISTRATION: {
       const delta = parseInt(command.delta ?? '+1', 10);
-      await handleRegistration(event as any, delta, botId, isAdmin);
+      await handleRegistration(event as any, delta, isAdmin);
       break;
     }
     case CommandType.LEAVE:
-      await handleLeave(event as any, false, botId, isAdmin);
+      await handleLeave(event as any, false, isAdmin);
       break;
     case CommandType.CANCEL_LEAVE:
-      await handleLeave(event as any, true, botId, isAdmin);
+      await handleLeave(event as any, true, isAdmin);
       break;
     default:
       // Unknown command - ignore

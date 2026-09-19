@@ -8,7 +8,6 @@ import { logger } from '../utils/logger.js';
 export async function handleIntroduce(
   replyToken: string,
   actorUserId: string,
-  botId: string,
 ): Promise<void> {
   try {
     const [announcement, admin] = await Promise.all([
@@ -17,14 +16,14 @@ export async function handleIntroduce(
     ]);
 
     if (!announcement) {
-      await replyMessage(replyToken, [{ type: 'text', text: '找不到自我介紹內容' }], botId);
+      await replyMessage(replyToken, [{ type: 'text', text: '找不到自我介紹內容' }]);
       return;
     }
 
     const blocks = await announcementRepo.getBlocks(announcement.pageId);
     const text = blocksToText(blocks);
     if (!text) {
-      await replyMessage(replyToken, [{ type: 'text', text: '自我介紹內容為空' }], botId);
+      await replyMessage(replyToken, [{ type: 'text', text: '自我介紹內容為空' }]);
       return;
     }
 
@@ -39,9 +38,9 @@ export async function handleIntroduce(
     }
 
     const message: messagingApi.TextMessageV2 = { type: 'textV2', text, substitution };
-    await replyMessage(replyToken, [message], botId);
+    await replyMessage(replyToken, [message]);
   } catch (err) {
     logger.error({ err }, 'Introduce handler error');
-    await replyMessage(replyToken, [{ type: 'text', text: '系統錯誤，請稍後再試' }], botId);
+    await replyMessage(replyToken, [{ type: 'text', text: '系統錯誤，請稍後再試' }]);
   }
 }

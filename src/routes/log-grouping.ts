@@ -31,7 +31,7 @@ function notionKey(e: LogEntry): string {
 }
 
 function pushSignature(e: LogEntry): string {
-  return JSON.stringify([e['to'], e['botId'], e['messages']]);
+  return JSON.stringify([e['to'], e['messages']]);
 }
 
 /**
