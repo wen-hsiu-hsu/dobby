@@ -14,7 +14,15 @@ const envSchema = z.object({
   PORT: z.string().default('3000'),
   NODE_ENV: z.string().default('development'),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
-  DOBBY_GROUP_ID: z.string().default(''),
+  DOBBY_GROUP_IDS: z
+    .string()
+    .default('')
+    .transform((val) =>
+      val
+        .split(',')
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0)
+    ),
 });
 
 export type Env = z.infer<typeof envSchema>;

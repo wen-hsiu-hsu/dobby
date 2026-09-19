@@ -8,9 +8,9 @@ import { logger } from '../utils/logger.js';
 
 export async function sendWeeklyPush(): Promise<void> {
   try {
-    const dobbyGroupId = env.DOBBY_GROUP_ID;
-    if (!dobbyGroupId) {
-      logger.error('Weekly push aborted: DOBBY_GROUP_ID is not set');
+    const groupIds = env.DOBBY_GROUP_IDS;
+    if (groupIds.length === 0) {
+      logger.error('Weekly push aborted: DOBBY_GROUP_IDS is not set');
       return;
     }
 
@@ -36,8 +36,26 @@ export async function sendWeeklyPush(): Promise<void> {
       lines.push(`\n零打名單：\n${calEvent.guests.map((g, i) => `${i + 1}. ${g}`).join('\n')}`);
     }
 
-    await pushMessage(dobbyGroupId, [{ type: 'text', text: lines.join('\n') }]);
-    logger.info({ nextSaturday }, 'Weekly push sent');
+    const messages = [{ type: 'text' as const, text: lines.join('\n') }];
+
+    let succeeded = 0;
+    let failed = 0;
+    for (const groupId of groupIds) {
+      try {
+        await pushMessage(groupId, messages);
+        succeeded++;
+      } catch (err) {
+        // Isolate per-group failures so one bad group ID doesn't stop the rest of the batch.
+        logger.error({ err, groupId }, 'Failed to push weekly message to group, skipping');
+        failed++;
+      }
+      // No delay here: LINE's push endpoint rate limit is 2,000 req/s per channel
+      // (official docs), far beyond what looping over a handful of group IDs will
+      // ever approach. Unlike the Notion 400ms delay elsewhere in this codebase
+      // (where the ~3 req/s limit is genuinely tight), no delay is needed.
+    }
+
+    logger.info({ nextSaturday, succeeded, failed, total: groupIds.length }, 'Weekly push complete');
   } catch (err) {
     logger.error({ err }, 'Weekly push failed');
   }
