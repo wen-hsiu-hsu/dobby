@@ -30,6 +30,50 @@ vi.mock('../../utils/log-reader.js', () => ({
       db: 'people',
       reqId: 'req-2',
     },
+    // A fully paired LINE reply (start + debug payload + sent), simulating
+    // LOG_LEVEL=debug capturing everything.
+    {
+      level: 30,
+      time: Date.UTC(2024, 0, 1, 0, 0, 3),
+      msg: 'LINE reply',
+      method: 'POST',
+      path: '/v2/bot/message/reply',
+      sendId: 's-a',
+      reqId: 'req-5',
+    },
+    {
+      level: 20,
+      time: Date.UTC(2024, 0, 1, 0, 0, 4),
+      msg: 'LINE reply payload',
+      sendId: 's-a',
+      messages: ['測試訊息內容A'],
+      reqId: 'req-5',
+    },
+    {
+      level: 30,
+      time: Date.UTC(2024, 0, 1, 0, 0, 5),
+      msg: 'LINE reply sent',
+      sendId: 's-a',
+      reqId: 'req-5',
+    },
+    // A LINE reply with no debug payload line, simulating the default
+    // LOG_LEVEL=info where the payload line was never captured.
+    {
+      level: 30,
+      time: Date.UTC(2024, 0, 1, 0, 0, 6),
+      msg: 'LINE reply',
+      method: 'POST',
+      path: '/v2/bot/message/reply',
+      sendId: 's-b',
+      reqId: 'req-6',
+    },
+    {
+      level: 30,
+      time: Date.UTC(2024, 0, 1, 0, 0, 7),
+      msg: 'LINE reply sent',
+      sendId: 's-b',
+      reqId: 'req-6',
+    },
   ]),
 }));
 
@@ -102,5 +146,30 @@ describe('createLogsRouter', () => {
     expect(res.text).toContain('平面模式');
     expect(res.text).toContain('流程表模式');
     expect(res.text).toContain('id="flow-view"');
+  });
+
+  it('shows method/path badges and the message content for a fully paired LINE reply', async () => {
+    const app = express();
+    app.use('/logs', createLogsRouter('/unused/because/reader/is/mocked'));
+
+    const res = await request(app)
+      .get('/logs')
+      .query({ token: process.env['LOGS_ACCESS_TOKEN'] });
+
+    expect(res.text).toContain('tag-method');
+    expect(res.text).toContain('tag-path');
+    expect(res.text).toContain('/v2/bot/message/reply');
+    expect(res.text).toContain('測試訊息內容A');
+  });
+
+  it('shows the LOG_LEVEL=debug hint instead of message content for a LINE reply with no captured payload', async () => {
+    const app = express();
+    app.use('/logs', createLogsRouter('/unused/because/reader/is/mocked'));
+
+    const res = await request(app)
+      .get('/logs')
+      .query({ token: process.env['LOGS_ACCESS_TOKEN'] });
+
+    expect(res.text).toContain('開 LOG_LEVEL=debug 才能看到訊息內容');
   });
 });

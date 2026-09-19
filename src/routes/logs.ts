@@ -129,6 +129,10 @@ function renderEntry(entry: LogEntry): string {
 
 function notionCallDetail(row: NotionCallRow): string {
   const parts: string[] = [`${row.method} ${row.path}`];
+  const durationMs = row.response?.['durationMs'];
+  if (typeof durationMs === 'number') {
+    parts.push(`耗時: ${durationMs}ms`);
+  }
   const requestBody = row.requestPayload?.['body'];
   if (row.requestPayload && requestBody !== undefined) {
     parts.push(`請求內容:\n${JSON.stringify(requestBody, null, 2)}`);
@@ -191,10 +195,22 @@ function renderNotionCallRow(row: NotionCallRow): string {
   <tr class="extra-row hidden"><td colspan="4"><pre>${extraJson}</pre></td></tr>`;
 }
 
-function lineSendDetail(row: LineSendRow, messages: string[]): string {
-  const parts: string[] = [`訊息內容:\n${JSON.stringify(messages, null, 2)}`];
+function lineSendDetail(row: LineSendRow): string {
+  const parts: string[] = [`${row.method} ${row.path}`];
+  const payloadMessages = row.payload?.['messages'];
+  if (row.payload && payloadMessages !== undefined) {
+    parts.push(`訊息內容:\n${JSON.stringify(payloadMessages, null, 2)}`);
+  } else {
+    parts.push('開 LOG_LEVEL=debug 才能看到完整訊息內容');
+  }
   if (row.failure) {
     parts.push(`失敗原因:\n${JSON.stringify(row.failure, null, 2)}`);
+    const failureMessages = row.failurePayload?.['messages'];
+    if (row.failurePayload && failureMessages !== undefined) {
+      parts.push(`失敗時的訊息內容:\n${JSON.stringify(failureMessages, null, 2)}`);
+    } else {
+      parts.push('開 LOG_LEVEL=debug 才能看到失敗時的完整訊息內容');
+    }
   } else if (!row.sent) {
     parts.push('尚無送出結果記錄');
   }
@@ -208,22 +224,26 @@ function renderLineSendRow(row: LineSendRow): string {
   const time = formatTime(row.start.time ?? 0);
   const rawReqId = String(row.start.reqId ?? '');
   const label = row.kind === 'line-reply' ? 'LINE 回覆' : 'LINE 推播';
-  const rawMessages = row.start['messages'];
-  const messages = Array.isArray(rawMessages) ? rawMessages.map(String) : [];
-  const preview = messages.join(' / ').slice(0, 80);
+
+  const methodColor = METHOD_COLORS[row.method] ?? '#94a3b8';
+  const methodHtml = `<span class="tag-method" style="color:${methodColor};border-color:${methodColor}">${escapeHtml(row.method)}</span>`;
+  const pathHtml = `<span class="tag-path" title="${escapeHtml(row.path)}">${escapeHtml(row.path)}</span>`;
+
+  const payloadMessages = row.payload?.['messages'];
+  const messages = Array.isArray(payloadMessages) ? payloadMessages.map(String) : null;
+  const contentHtml = messages
+    ? escapeHtml(messages.join(' / ').slice(0, 80))
+    : '<span class="hint">開 LOG_LEVEL=debug 才能看到訊息內容</span>';
+
   const icon = statusIcon(!!row.sent, !!row.failure);
-  // Same four-column shape as renderNotionCallRow's .action-row (icon /
-  // label / badges / content) — an empty badges column, not a differently
-  // shaped row, is what keeps LINE rows' content column aligned with Notion
-  // API rows' purpose column when scanning down the flat table.
   const msgHtml = `<div class="action-row">` +
     `<span class="action-icon">${icon}</span>` +
     `<span class="action-label">${escapeHtml(label)}</span>` +
-    `<span class="action-badges"></span>` +
-    `<span class="action-content">${escapeHtml(preview)}</span>` +
+    `<span class="action-badges">${methodHtml}${pathHtml}</span>` +
+    `<span class="action-content">${contentHtml}</span>` +
     `</div>`;
 
-  const extraJson = escapeHtml(lineSendDetail(row, messages));
+  const extraJson = escapeHtml(lineSendDetail(row));
   const searchableText = JSON.stringify(row).toLowerCase();
   const rawJson = escapeHtml(JSON.stringify(row));
 
@@ -542,10 +562,13 @@ function renderHtml(entries: LogEntry[]): string {
     }
 
     function renderFlowEndEndpoint(row, label) {
-      const messages = Array.isArray(row.start.messages) ? row.start.messages.join(' / ') : '';
+      const payloadMessages = row.payload && Array.isArray(row.payload.messages) ? row.payload.messages.join(' / ') : '';
       const icon = row.failure ? '✕' : (row.sent ? '✓' : '⏳');
+      const contentHtml = payloadMessages
+        ? ' · ' + escapeHtmlJs(payloadMessages.slice(0, 80))
+        : ' · <span class="hint">開 LOG_LEVEL=debug 才能看到訊息內容</span>';
       return '<div class="flow-endpoint"><span class="flow-tag">' + label + '</span>' +
-        icon + ' LINE 回覆' + (messages ? ' · ' + escapeHtmlJs(messages.slice(0, 80)) : '') + '</div>';
+        icon + ' LINE 回覆 ' + methodBadge(row.method, null, row.path) + contentHtml + '</div>';
     }
 
     function renderFlowMisc(row) {
@@ -555,9 +578,12 @@ function renderHtml(entries: LogEntry[]): string {
       // kind === 'line-push': pushes carry no reqId, so a push that lands in
       // an event's group (or the shared '' bucket) is shown inline rather
       // than dropped.
-      const messages = Array.isArray(row.start.messages) ? row.start.messages.join(' / ') : '';
+      const payloadMessages = row.payload && Array.isArray(row.payload.messages) ? row.payload.messages.join(' / ') : '';
       const icon = row.failure ? '✕' : (row.sent ? '✓' : '⏳');
-      return '<div class="flow-misc">' + icon + ' LINE 推播' + (messages ? ' · ' + escapeHtmlJs(messages.slice(0, 80)) : '') + '</div>';
+      const contentHtml = payloadMessages
+        ? ' · ' + escapeHtmlJs(payloadMessages.slice(0, 80))
+        : ' · <span class="hint">開 LOG_LEVEL=debug 才能看到訊息內容</span>';
+      return '<div class="flow-misc">' + icon + ' LINE 推播 ' + methodBadge(row.method, null, row.path) + contentHtml + '</div>';
     }
 
     function renderFlowGroup(reqId, rows) {

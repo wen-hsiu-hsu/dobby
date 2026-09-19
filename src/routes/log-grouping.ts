@@ -16,22 +16,24 @@ export interface NotionCallRow {
 
 export interface LineSendRow {
   kind: 'line-reply' | 'line-push';
+  method: string;
+  path: string;
   start: LogEntry;
+  payload?: LogEntry;
   sent?: LogEntry;
   failure?: LogEntry;
+  failurePayload?: LogEntry;
 }
 
 export type DisplayRow = { kind: 'single'; entry: LogEntry } | NotionCallRow | LineSendRow;
 
 const LINE_REPLY_FAILURE_MSG = 'Reply failed, no fallback available (no groupId for push)';
 const LINE_PUSH_FAILURE_MSG = 'Push message failed';
+const LINE_REPLY_FAILURE_PAYLOAD_MSG = 'Reply failed payload';
+const LINE_PUSH_FAILURE_PAYLOAD_MSG = 'Push message failed payload';
 
 function notionKey(e: LogEntry): string {
   return `${String(e['method'])} ${String(e['path'])}`;
-}
-
-function pushSignature(e: LogEntry): string {
-  return JSON.stringify([e['to'], e['messages']]);
 }
 
 /**
@@ -49,8 +51,8 @@ function processBucket(bucketEntries: LogEntry[], output: DisplayRow[]): void {
 
   const openNotionByKey = new Map<string, NotionCallRow>();
   const lastResolvedNotionByKey = new Map<string, NotionCallRow>();
-  const openReplies: LineSendRow[] = [];
-  const openPushes: Array<{ row: LineSendRow; signature: string }> = [];
+  const openLineSendBySendId = new Map<string, LineSendRow>();
+  const lastResolvedLineSendBySendId = new Map<string, LineSendRow>();
 
   for (const e of sorted) {
     switch (e.msg) {
@@ -109,42 +111,59 @@ function processBucket(bucketEntries: LogEntry[], output: DisplayRow[]): void {
         }
         break;
       }
-      case 'LINE reply': {
-        const row: LineSendRow = { kind: 'line-reply', start: e };
-        openReplies.push(row);
-        output.push(row);
-        break;
-      }
-      case 'LINE reply sent': {
-        const row = openReplies.shift();
-        if (row) row.sent = e;
-        else output.push({ kind: 'single', entry: e });
-        break;
-      }
-      case LINE_REPLY_FAILURE_MSG: {
-        const row = openReplies.shift();
-        if (row) row.failure = e;
-        else output.push({ kind: 'single', entry: e });
-        break;
-      }
+      case 'LINE reply':
       case 'LINE push': {
-        const row: LineSendRow = { kind: 'line-push', start: e };
-        openPushes.push({ row, signature: pushSignature(e) });
+        const sendId = String(e['sendId']);
+        const row: LineSendRow = {
+          kind: e.msg === 'LINE reply' ? 'line-reply' : 'line-push',
+          method: String(e['method']),
+          path: String(e['path']),
+          start: e,
+        };
+        openLineSendBySendId.set(sendId, row);
         output.push(row);
         break;
       }
-      case 'LINE push sent':
-      case LINE_PUSH_FAILURE_MSG: {
-        const signature = pushSignature(e);
-        const idx = openPushes.findIndex((p) => p.signature === signature);
-        if (idx >= 0) {
-          const { row } = openPushes[idx]!;
-          if (e.msg === 'LINE push sent') row.sent = e;
-          else row.failure = e;
-          openPushes.splice(idx, 1);
+      case 'LINE reply payload':
+      case 'LINE push payload': {
+        const sendId = String(e['sendId']);
+        const row = openLineSendBySendId.get(sendId);
+        if (row) row.payload = e;
+        else output.push({ kind: 'single', entry: e });
+        break;
+      }
+      case 'LINE reply sent':
+      case 'LINE push sent': {
+        const sendId = String(e['sendId']);
+        const row = openLineSendBySendId.get(sendId);
+        if (row) {
+          row.sent = e;
+          lastResolvedLineSendBySendId.set(sendId, row);
+          openLineSendBySendId.delete(sendId);
         } else {
           output.push({ kind: 'single', entry: e });
         }
+        break;
+      }
+      case LINE_REPLY_FAILURE_MSG:
+      case LINE_PUSH_FAILURE_MSG: {
+        const sendId = String(e['sendId']);
+        const row = openLineSendBySendId.get(sendId);
+        if (row) {
+          row.failure = e;
+          lastResolvedLineSendBySendId.set(sendId, row);
+          openLineSendBySendId.delete(sendId);
+        } else {
+          output.push({ kind: 'single', entry: e });
+        }
+        break;
+      }
+      case LINE_REPLY_FAILURE_PAYLOAD_MSG:
+      case LINE_PUSH_FAILURE_PAYLOAD_MSG: {
+        const sendId = String(e['sendId']);
+        const row = lastResolvedLineSendBySendId.get(sendId);
+        if (row && !row.failurePayload) row.failurePayload = e;
+        else output.push({ kind: 'single', entry: e });
         break;
       }
       default:

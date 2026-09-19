@@ -80,22 +80,25 @@ describe('groupPairedEntries', () => {
 
   it('pairs a successful LINE reply', () => {
     const entries = [
-      entry({ msg: 'LINE reply', messages: ['ok'], reqId: 'r1' }),
-      entry({ level: 20, msg: 'LINE reply sent', messages: ['ok'], reqId: 'r1' }),
+      entry({ msg: 'LINE reply', method: 'POST', path: '/v2/bot/message/reply', sendId: 's1', reqId: 'r1' }),
+      entry({ level: 20, msg: 'LINE reply payload', sendId: 's1', messages: ['ok'], reqId: 'r1' }),
+      entry({ msg: 'LINE reply sent', sendId: 's1', reqId: 'r1' }),
     ];
 
     const rows = groupPairedEntries(entries);
     expect(rows).toHaveLength(1);
     const row = rows[0] as LineSendRow;
     expect(row.kind).toBe('line-reply');
+    expect(row.payload).toBeDefined();
     expect(row.sent).toBeDefined();
     expect(row.failure).toBeUndefined();
   });
 
   it('pairs a failed LINE reply (warn, no "sent" line)', () => {
     const entries = [
-      entry({ msg: 'LINE reply', messages: ['ok'], reqId: 'r1' }),
-      entry({ level: 40, msg: 'Reply failed, no fallback available (no groupId for push)', reqId: 'r1' }),
+      entry({ msg: 'LINE reply', method: 'POST', path: '/v2/bot/message/reply', sendId: 's1', reqId: 'r1' }),
+      entry({ level: 20, msg: 'LINE reply payload', sendId: 's1', messages: ['ok'], reqId: 'r1' }),
+      entry({ level: 40, msg: 'Reply failed, no fallback available (no groupId for push)', sendId: 's1', reqId: 'r1' }),
     ];
 
     const rows = groupPairedEntries(entries);
@@ -106,24 +109,56 @@ describe('groupPairedEntries', () => {
     expect(row.sent).toBeUndefined();
   });
 
-  it('pairs LINE push by content, not reqId (push has none), without cross-matching two different pushes', () => {
+  it('pairs LINE push by sendId, not content, without cross-matching two pushes with identical to/messages', () => {
     const entries = [
-      entry({ msg: 'LINE push', to: 'group-1', messages: ['a'] }),
-      entry({ msg: 'LINE push', to: 'group-2', messages: ['b'] }),
-      entry({ level: 20, msg: 'LINE push sent', to: 'group-2', messages: ['b'] }),
-      entry({ level: 50, msg: 'Push message failed', to: 'group-1', messages: ['a'] }),
+      entry({ msg: 'LINE push', method: 'POST', path: '/v2/bot/message/push', sendId: 's1' }),
+      entry({ msg: 'LINE push', method: 'POST', path: '/v2/bot/message/push', sendId: 's2' }),
+      entry({ level: 20, msg: 'LINE push payload', sendId: 's2', to: 'group-1', messages: ['a'] }),
+      entry({ level: 20, msg: 'LINE push sent', sendId: 's2' }),
+      entry({ level: 20, msg: 'LINE push payload', sendId: 's1', to: 'group-1', messages: ['a'] }),
+      entry({ level: 50, msg: 'Push message failed', sendId: 's1' }),
     ];
 
     const rows = groupPairedEntries(entries);
     const pushRows = rows.filter((r): r is LineSendRow => r.kind === 'line-push');
     expect(pushRows).toHaveLength(2);
 
-    const group1 = pushRows.find((r) => r.start['to'] === 'group-1')!;
-    const group2 = pushRows.find((r) => r.start['to'] === 'group-2')!;
-    expect(group1.failure).toBeDefined();
-    expect(group1.sent).toBeUndefined();
-    expect(group2.sent).toBeDefined();
-    expect(group2.failure).toBeUndefined();
+    const row1 = pushRows.find((r) => r.start['sendId'] === 's1')!;
+    const row2 = pushRows.find((r) => r.start['sendId'] === 's2')!;
+    expect(row1.failure).toBeDefined();
+    expect(row1.sent).toBeUndefined();
+    expect(row2.sent).toBeDefined();
+    expect(row2.failure).toBeUndefined();
+  });
+
+  it('pairs a "Push message failed payload" debug line to the failurePayload of the already-resolved failed row', () => {
+    const entries = [
+      entry({ msg: 'LINE push', method: 'POST', path: '/v2/bot/message/push', sendId: 's1' }),
+      entry({ level: 20, msg: 'LINE push payload', sendId: 's1', to: 'group-1', messages: ['a'] }),
+      entry({ level: 50, msg: 'Push message failed', sendId: 's1' }),
+      entry({ level: 20, msg: 'Push message failed payload', sendId: 's1', to: 'group-1', messages: ['a'] }),
+    ];
+
+    const rows = groupPairedEntries(entries);
+    const pushRows = rows.filter((r): r is LineSendRow => r.kind === 'line-push');
+    expect(pushRows).toHaveLength(1);
+    expect(pushRows[0]!.failurePayload).toBeDefined();
+    expect(pushRows[0]!.failurePayload?.['messages']).toEqual(['a']);
+  });
+
+  it('pairs a "Reply failed payload" debug line to the failurePayload of the already-resolved failed row', () => {
+    const entries = [
+      entry({ msg: 'LINE reply', method: 'POST', path: '/v2/bot/message/reply', sendId: 's1', reqId: 'r1' }),
+      entry({ level: 20, msg: 'LINE reply payload', sendId: 's1', messages: ['ok'], reqId: 'r1' }),
+      entry({ level: 40, msg: 'Reply failed, no fallback available (no groupId for push)', sendId: 's1', reqId: 'r1' }),
+      entry({ level: 20, msg: 'Reply failed payload', sendId: 's1', messages: ['ok'], reqId: 'r1' }),
+    ];
+
+    const rows = groupPairedEntries(entries);
+    const replyRows = rows.filter((r): r is LineSendRow => r.kind === 'line-reply');
+    expect(replyRows).toHaveLength(1);
+    expect(replyRows[0]!.failurePayload).toBeDefined();
+    expect(replyRows[0]!.failurePayload?.['messages']).toEqual(['ok']);
   });
 
   it('passes through unmatched entries as kind: single instead of dropping them', () => {
