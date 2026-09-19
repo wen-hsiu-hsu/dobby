@@ -176,6 +176,29 @@ describe('createLogsRouter', () => {
     expect(res.text).toContain('測試訊息內容A');
   });
 
+  it('lets the flow-table "終點" (LINE reply) be expanded to see the same detail flat mode shows', async () => {
+    const app = express();
+    app.use('/logs', createLogsRouter('/unused/because/reader/is/mocked'));
+
+    const res = await request(app)
+      .get('/logs')
+      .query({ token: process.env['LOGS_ACCESS_TOKEN'] });
+
+    // asFlowEndpoint() previously dropped RowContent.detailText entirely, so
+    // the flow-table's 終點 for req-5 showed the method/path badge but none
+    // of the expandable "訊息內容:" detail that flat mode's asTableRow()
+    // shows for the exact same row. Flow-groups render newest-first (req-6
+    // before req-5), so scan every 終點 block rather than assuming the first
+    // one in the HTML is req-5's.
+    const endpointBlocks = [...res.text.matchAll(/<div class="flow-endpoint"[^>]*>[\s\S]*?<\/div>\s*<\/div>/g)].map(
+      (m) => m[0]
+    );
+    expect(endpointBlocks.length).toBeGreaterThan(0);
+    const reqFiveEndpoint = endpointBlocks.find((html) => html.includes('測試訊息內容A'));
+    expect(reqFiveEndpoint).toBeDefined();
+    expect(reqFiveEndpoint).toContain('flow-step-detail');
+  });
+
   it('shows the LOG_LEVEL=debug hint instead of message content for a LINE reply with no captured payload', async () => {
     const app = express();
     app.use('/logs', createLogsRouter('/unused/because/reader/is/mocked'));

@@ -334,9 +334,14 @@ function asFlowItem(c: RowContent, wrapperClass: 'flow-step' | 'flow-misc'): str
   return `<div class="${wrapperClass}" style="border-left-color:${c.color}" data-level="${c.levelName}" data-time="${c.time}" data-msg="${escapeHtml(c.searchableText)}" data-reqid="${c.reqId}"${clickable}>${c.msgHtml}${detail}</div>`;
 }
 
-/** 起點/終點用專屬 wrapper（見下方流程表渲染），一樣加上等級色標跟 data-* 篩選屬性。 */
+/** 起點/終點用專屬 wrapper（見下方流程表渲染），一樣加上等級色標跟 data-* 篩選屬性。
+ * 「起點」的 detailText 永遠是空字串（見 renderFlowStartEndpointHtml），但「終點」
+ * 帶的是 lineSendRowContent() 算出的 LINE 回覆失敗原因/完整內容——跟 asFlowItem
+ * 一樣要能展開看到，否則平面模式點得開的東西，流程表的終點卻整段看不到。 */
 function asFlowEndpoint(c: RowContent, label: string): string {
-  return `<div class="flow-endpoint" style="border-left-color:${c.color}" data-level="${c.levelName}" data-time="${c.time}" data-msg="${escapeHtml(c.searchableText)}" data-reqid="${c.reqId}"><span class="flow-tag">${label}</span>${c.msgHtml}</div>`;
+  const detail = c.detailText ? `<div class="flow-step-detail"><pre>${c.detailText}</pre></div>` : '';
+  const clickable = c.detailText ? ` onclick="event.stopPropagation(); this.classList.toggle('expanded')"` : '';
+  return `<div class="flow-endpoint" style="border-left-color:${c.color}" data-level="${c.levelName}" data-time="${c.time}" data-msg="${escapeHtml(c.searchableText)}" data-reqid="${c.reqId}"${clickable}><span class="flow-tag">${label}</span>${c.msgHtml}${detail}</div>`;
 }
 
 const MESSAGE_TYPE_LABELS: Record<string, string> = {
@@ -535,11 +540,12 @@ function renderHtml(entries: LogEntry[]): string {
        border-left-color 覆蓋（每列各自的 LEVEL_COLORS 值，見 asFlowItem/asFlowEndpoint）。 */
     .flow-step, .flow-misc, .flow-endpoint { border-left: 3px solid #64748b; }
     .flow-endpoint { padding: 8px 14px 8px 32px; font-size: 13px; color: #e2e8f0; border-bottom: 1px solid #1e293b; background: #0f172a; }
+    .flow-endpoint[onclick] { cursor: pointer; }
     .flow-endpoint .flow-tag { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: #64748b; margin-right: 8px; }
     .flow-step { padding: 8px 14px 8px 32px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #1e293b; }
     .flow-step:hover { background: #1e293b; }
     .flow-step-detail { display: none; padding: 8px 14px 8px 48px; background: #0f172a; font-size: 12px; color: #94a3b8; }
-    .flow-step.expanded .flow-step-detail, .flow-misc.expanded .flow-step-detail { display: block; }
+    .flow-step.expanded .flow-step-detail, .flow-misc.expanded .flow-step-detail, .flow-endpoint.expanded .flow-step-detail { display: block; }
     .flow-step-detail pre { white-space: pre-wrap; word-break: break-all; margin-top: 4px; }
     .hint { color: #64748b; font-style: italic; }
     /* flow-misc 項目不一定可展開（single 行的通用渲染器沒有獨立 detail，
