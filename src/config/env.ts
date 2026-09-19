@@ -2,10 +2,8 @@ import 'dotenv/config';
 import { z } from 'zod';
 
 const envSchema = z.object({
-  LINE_CHANNEL_SECRET_DOBBY: z.string().min(1),
-  LINE_CHANNEL_ACCESS_TOKEN_DOBBY: z.string().min(1),
-  LINE_CHANNEL_SECRET_BATTING: z.string().min(1),
-  LINE_CHANNEL_ACCESS_TOKEN_BATTING: z.string().min(1),
+  LINE_CHANNEL_SECRET: z.string().min(1),
+  LINE_CHANNEL_ACCESS_TOKEN: z.string().min(1),
   NOTION_API_KEY: z.string().min(1),
   NOTION_DB_USERS: z.string().min(1),
   NOTION_DB_CALENDAR: z.string().min(1),

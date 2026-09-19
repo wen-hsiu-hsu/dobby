@@ -6,12 +6,11 @@ import { processEvents } from '../handlers/event-router.js';
 
 export const webhookRouter = Router();
 
-webhookRouter.post('/:botId', lineSignatureMiddleware, (req, res) => {
+webhookRouter.post('/', lineSignatureMiddleware, (req, res) => {
   res.status(200).json({ status: 'ok' });
-  const botId = (req.params['botId'] as string | undefined) ?? 'dobby';
   const events = req.body.events as WebhookEvent[];
-  logger.info({ botId, eventCount: events.length, events }, 'Webhook received');
-  processEvents(events, botId).catch((err) =>
+  logger.info({ eventCount: events.length, events }, 'Webhook received');
+  processEvents(events).catch((err) =>
     logger.error({ err }, 'Error processing events')
   );
 });

@@ -1,5 +1,5 @@
 import type { messagingApi } from '@line/bot-sdk';
-import { getClient } from '../../config/line.js';
+import { lineClient } from '../../config/line.js';
 import { logger } from '../../utils/logger.js';
 import { getQuoteToken } from '../../utils/request-context.js';
 
@@ -20,19 +20,17 @@ function withQuoteToken(messages: Message[]): Message[] {
 
 export async function replyMessage(
   replyToken: string,
-  messages: Message[],
-  botId: string
+  messages: Message[]
 ): Promise<void> {
-  const client = getClient(botId);
   const messagesToSend = withQuoteToken(messages);
   const messageContents = messages.map((m) =>
     m.type === 'text' ? (m as { type: string; text: string }).text : `[${m.type}]`
   );
-  logger.info({ botId, replyToken: replyToken.slice(0, 8) + '…', messageCount: messages.length, messages: messageContents }, 'LINE reply');
+  logger.info({ replyToken: replyToken.slice(0, 8) + '…', messageCount: messages.length, messages: messageContents }, 'LINE reply');
   try {
-    await client.replyMessage({ replyToken, messages: messagesToSend });
-    logger.debug({ botId, messages: messageContents }, 'LINE reply sent');
+    await lineClient.replyMessage({ replyToken, messages: messagesToSend });
+    logger.debug({ messages: messageContents }, 'LINE reply sent');
   } catch (err) {
-    logger.warn({ err, botId }, 'Reply failed, no fallback available (no groupId for push)');
+    logger.warn({ err }, 'Reply failed, no fallback available (no groupId for push)');
   }
 }
