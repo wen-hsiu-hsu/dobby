@@ -105,7 +105,11 @@ function renderExtraFieldsHtml(entry: LogEntry): string {
       const shown = escapeHtml(truncate(full, EXTRA_VALUE_MAX_LEN));
       return `<span class="tag-field" title="${escapeHtml(full)}"><span class="tag-field-key">${escapeHtml(key)}</span>${shown}</span>`;
     });
-  return tags.length > 0 ? `<div class="extra-tags">${tags.join('')}</div>` : '';
+  // No wrapping <div> — each .tag-field is already inline-block, so joining
+  // them bare lets them flow inline right after the message text (like
+  // notionTagsHtml/purposeHtml already do) and wrap only when they run out
+  // of room, instead of being forced onto a hard new line below the message.
+  return tags.join('');
 }
 
 interface RowContent {
@@ -158,12 +162,24 @@ function singleRowContent(entry: LogEntry): RowContent {
   const purposeHtml = entry.purpose ? ` <span class="tag-purpose">${escapeHtml(String(entry.purpose))}</span>` : '';
   const extraTagsHtml = renderExtraFieldsHtml(entry); // 決定 1
 
+  // .single-row reuses the same 18px .action-icon gutter that
+  // notionCallRowContent/lineSendRowContent use, so every row's content
+  // starts at the same left edge regardless of kind — but unlike
+  // .action-row, the label/badges/tags all share one flex-wrap area instead
+  // of fixed-width grid columns, because a generic msg name (e.g. "Received
+  // shutdown signal, closing server") can be far longer than "Notion API
+  // 呼叫"/"LINE 回覆" and would get truncated by a fixed-width label column.
+  const msgHtml = `<div class="single-row">` +
+    `<span class="action-icon"></span>` +
+    `<span class="single-row-content">${msg}${notionTagsHtml}${purposeHtml}${extraTagsHtml}</span>` +
+    `</div>`;
+
   return {
     levelName,
     color: LEVEL_COLORS[levelName] ?? '#94a3b8',
     time: entry.time ?? 0,
     reqId: String(entry.reqId ?? ''),
-    msgHtml: `${msg}${notionTagsHtml}${purposeHtml}${extraTagsHtml}`,
+    msgHtml,
     detailText: '', // single 行沒有獨立 detail 區塊，extra-tags 已經在行內顯示完了，不需要再點開
     searchableText: (String(entry.msg ?? '') + ' ' + JSON.stringify(extra)).toLowerCase(),
     rawJson: escapeHtml(JSON.stringify(entry)),
@@ -505,7 +521,6 @@ function renderHtml(entries: LogEntry[]): string {
     .tag-path { display: inline-block; padding: 1px 6px; border-radius: 4px; background: #1e293b; border: 1px solid #334155; color: #94a3b8; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
     .tag-field { display: inline-block; margin: 2px 4px 2px 0; padding: 1px 6px; border-radius: 4px; background: #1e293b; border: 1px solid #334155; color: #cbd5e1; font-size: 11px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
     .tag-field-key { color: #64748b; margin-right: 4px; }
-    .extra-tags { margin-top: 2px; display: flex; flex-wrap: wrap; }
 
     /* Merged action rows (Notion API calls, LINE reply/push) in the flat
        table — a shared 4-column grid so the badges/content of unrelated row
@@ -517,6 +532,17 @@ function renderHtml(entries: LogEntry[]): string {
     .action-label { color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .action-badges { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; row-gap: 2px; }
     .action-content { color: #cbd5e1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* Generic/fallback rows (singleRowContent) — reuses the same 18px icon
+       gutter as .action-row so every row's content starts at the same left
+       edge, but the label/badges/tags share one flex-wrap area instead of
+       fixed-width grid columns: a generic msg name (e.g. "Received shutdown
+       signal, closing server") can be far longer than "Notion API 呼叫"/
+       "LINE 回覆" and would get clipped by a fixed 118px label column. Tags
+       wrap only when they run out of room, instead of a hard line break. */
+    .single-row { display: flex; align-items: flex-start; column-gap: 6px; }
+    .single-row .action-icon { flex: none; width: 18px; }
+    .single-row-content { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; row-gap: 2px; column-gap: 2px; color: #e2e8f0; }
     tr.extra-row td { background: #1e293b; padding: 0; }
     tr.extra-row pre { padding: 10px 16px; font-size: 12px; color: #94a3b8; white-space: pre-wrap; word-break: break-all; }
     .hidden { display: none; }
