@@ -62,28 +62,79 @@ function reqIdCellHtml(rawReqId: string): string {
   return `<td class="reqid"><span class="reqid-link" onclick="filterByReqId(event,'${rawReqId}')">${escapeHtml(rawReqId)}</span></td>`;
 }
 
-function renderEntry(entry: LogEntry): string {
+const META_FIELDS = new Set(['level', 'time', 'msg', 'reqId', 'pid', 'hostname']);
+const EXTRA_VALUE_MAX_LEN = 60;
+
+function formatExtraValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.map((v) => (typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v))).join(' / ');
+  }
+  if (typeof value === 'object') {
+    // value !== null，因為 null 在呼叫端已經被過濾掉（見 renderExtraFieldsHtml）
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
+function truncate(str: string, maxLen: number): string {
+  return str.length > maxLen ? str.slice(0, maxLen) + '…' : str;
+}
+
+/**
+ * 通用 key-value 渲染器（決定 1）：把一筆 entry 排除後設欄位（META_FIELDS）
+ * 後剩下的每個欄位渲染成一個小標籤，格式比照既有 .tag-purpose 的視覺風格。
+ * 新增一個欄位或一種新的 log 訊息完全不需要碰這個函式——它不認識任何特定
+ * 欄位名稱，純粹枚舉 Object.keys()。
+ *
+ * null/undefined 直接跳過該欄位（沒有值可顯示，顯示 "null" 標籤只會製造
+ * 雜訊）。值一律截斷到 EXTRA_VALUE_MAX_LEN 字元，完整值放在 title 屬性
+ * 供 hover 查看（跟決定 4 的 tooltip 手法一致，兩者共用同一個互動慣例）。
+ */
+function renderExtraFieldsHtml(entry: LogEntry): string {
+  const tags = Object.entries(entry)
+    .filter(([key, value]) => !META_FIELDS.has(key) && value !== null && value !== undefined)
+    .map(([key, value]) => {
+      const full = formatExtraValue(value);
+      const shown = escapeHtml(truncate(full, EXTRA_VALUE_MAX_LEN));
+      return `<span class="tag-field" title="${escapeHtml(full)}"><span class="tag-field-key">${escapeHtml(key)}</span>${shown}</span>`;
+    });
+  return tags.length > 0 ? `<div class="extra-tags">${tags.join('')}</div>` : '';
+}
+
+interface RowContent {
+  levelName: string;
+  color: string;
+  time: number;
+  reqId: string;
+  /** 已經是完整 HTML 片段（icon + label + badges + content 或 msg + extra-tags），行內顯示用。 */
+  msgHtml: string;
+  /** 展開/detail 區塊要放進 <pre> 的純文字（已經過 escapeHtml），沒有 detail 就是空字串。 */
+  detailText: string;
+  /** applyFilters() 的 search 比對用，已轉小寫。 */
+  searchableText: string;
+  /** 複製功能（copyFiltered）用的原始 JSON，已 escapeHtml。 */
+  rawJson: string;
+}
+
+// Notion API inline tags: method badge + db name. Under normal operation a
+// Notion API log line is always absorbed into a merged notion-call row by
+// groupPairedEntries() before reaching singleRowContent() — this branch only
+// fires for the rare orphan case (a payload/response/error line whose
+// matching request row wasn't found), so the badge still shows up even then.
+const NOTION_API_MESSAGES = new Set([
+  'Notion API request',
+  'Notion API response',
+  'Notion API request payload',
+  'Notion API response payload',
+  'Notion API error',
+]);
+
+function singleRowContent(entry: LogEntry): RowContent {
   const levelNum = entry.level ?? 30;
   const levelName = LEVEL_NAMES[levelNum] ?? String(levelNum);
-  const color = LEVEL_COLORS[levelName] ?? '#94a3b8';
-  const time = formatTime(entry.time ?? 0);
   const msg = escapeHtml(String(entry.msg ?? ''));
-  const rawReqId = String(entry.reqId ?? '');
+  const { level, time: _t, msg: _m, reqId: _r, pid, hostname, ...extra } = entry;
 
-  const { level, time: _t, msg: _m, reqId: _r, pid, hostname, messages: msgList, ...extra } = entry;
-
-  // Notion API inline tags: method badge + db name. Under normal operation a
-  // Notion API log line is always absorbed into a merged notion-call row by
-  // groupPairedEntries() before reaching here — this branch only fires for
-  // the rare orphan case (a payload/response/error line whose matching
-  // request row wasn't found), so the badge still shows up even then.
-  const NOTION_API_MESSAGES = new Set([
-    'Notion API request',
-    'Notion API response',
-    'Notion API request payload',
-    'Notion API response payload',
-    'Notion API error',
-  ]);
   let notionTagsHtml = '';
   if (entry.method && NOTION_API_MESSAGES.has(String(entry.msg))) {
     const method = String(entry.method);
@@ -97,34 +148,19 @@ function renderEntry(entry: LogEntry): string {
   // on any log line emitted while that context is active — not just Notion
   // API lines — since the purpose describes the surrounding operation, not
   // the specific HTTP call.
-  const purposeHtml = entry.purpose
-    ? ` <span class="tag-purpose">${escapeHtml(String(entry.purpose))}</span>`
-    : '';
+  const purposeHtml = entry.purpose ? ` <span class="tag-purpose">${escapeHtml(String(entry.purpose))}</span>` : '';
+  const extraTagsHtml = renderExtraFieldsHtml(entry); // 決定 1
 
-  // LINE message bubbles
-  const messagesHtml = Array.isArray(msgList) && msgList.length > 0
-    ? `<div class="msg-list">${(msgList as string[]).map((m) => `<span class="msg-bubble">${escapeHtml(m)}</span>`).join('')}</div>`
-    : '';
-
-  // Extra fields for expand (exclude fields already shown inline)
-  const { method: _method, db: _db, purpose: _purpose, ...expandExtra } = extra;
-  const extraJson = Object.keys(expandExtra).length > 0
-    ? escapeHtml(JSON.stringify(expandExtra, null, 2))
-    : '';
-
-  const searchableText = (msg + ' ' + JSON.stringify(extra)).toLowerCase();
-
-  // Full raw JSON for copy
-  const rawJson = escapeHtml(JSON.stringify(entry));
-
-  return `
-  <tr class="log-row" data-level="${levelName}" data-time="${entry.time ?? 0}" data-msg="${escapeHtml(searchableText)}" data-reqid="${rawReqId}" data-raw="${rawJson}" onclick="toggleExtra(this)">
-    <td class="time">${time}</td>
-    <td><span class="badge" style="background:${color}">${levelName}</span></td>
-    ${reqIdCellHtml(rawReqId)}
-    <td class="msg">${msg}${notionTagsHtml}${purposeHtml}${messagesHtml}</td>
-  </tr>
-  ${extraJson ? `<tr class="extra-row hidden"><td colspan="4"><pre>${extraJson}</pre></td></tr>` : ''}`;
+  return {
+    levelName,
+    color: LEVEL_COLORS[levelName] ?? '#94a3b8',
+    time: entry.time ?? 0,
+    reqId: String(entry.reqId ?? ''),
+    msgHtml: `${msg}${notionTagsHtml}${purposeHtml}${extraTagsHtml}`,
+    detailText: '', // single 行沒有獨立 detail 區塊，extra-tags 已經在行內顯示完了，不需要再點開
+    searchableText: (String(entry.msg ?? '') + ' ' + JSON.stringify(extra)).toLowerCase(),
+    rawJson: escapeHtml(JSON.stringify(entry)),
+  };
 }
 
 function notionCallDetail(row: NotionCallRow): string {
@@ -154,12 +190,10 @@ function notionCallDetail(row: NotionCallRow): string {
   return parts.join('\n\n');
 }
 
-function renderNotionCallRow(row: NotionCallRow): string {
+function notionCallRowContent(row: NotionCallRow): RowContent {
   const levelNum = row.error?.level ?? row.response?.level ?? row.request.level ?? 30;
   const levelName = LEVEL_NAMES[levelNum] ?? String(levelNum);
   const color = LEVEL_COLORS[levelName] ?? '#94a3b8';
-  const time = formatTime(row.request.time ?? 0);
-  const rawReqId = String(row.request.reqId ?? '');
 
   const methodColor = METHOD_COLORS[row.method] ?? '#94a3b8';
   const methodHtml = `<span class="tag-method" style="color:${methodColor};border-color:${methodColor}">${escapeHtml(row.method)}</span>`;
@@ -181,18 +215,16 @@ function renderNotionCallRow(row: NotionCallRow): string {
     `<span class="action-content">${purposeHtml}</span>` +
     `</div>`;
 
-  const extraJson = escapeHtml(notionCallDetail(row));
-  const searchableText = JSON.stringify(row).toLowerCase();
-  const rawJson = escapeHtml(JSON.stringify(row));
-
-  return `
-  <tr class="log-row" data-level="${levelName}" data-time="${row.request.time ?? 0}" data-msg="${escapeHtml(searchableText)}" data-reqid="${rawReqId}" data-raw="${rawJson}" onclick="toggleExtra(this)">
-    <td class="time">${time}</td>
-    <td><span class="badge" style="background:${color}">${levelName}</span></td>
-    ${reqIdCellHtml(rawReqId)}
-    <td class="msg">${msgHtml}</td>
-  </tr>
-  <tr class="extra-row hidden"><td colspan="4"><pre>${extraJson}</pre></td></tr>`;
+  return {
+    levelName,
+    color,
+    time: row.request.time ?? 0,
+    reqId: String(row.request.reqId ?? ''),
+    msgHtml,
+    detailText: escapeHtml(notionCallDetail(row)),
+    searchableText: JSON.stringify(row).toLowerCase(),
+    rawJson: escapeHtml(JSON.stringify(row)),
+  };
 }
 
 function lineSendDetail(row: LineSendRow): string {
@@ -217,12 +249,10 @@ function lineSendDetail(row: LineSendRow): string {
   return parts.join('\n\n');
 }
 
-function renderLineSendRow(row: LineSendRow): string {
+function lineSendRowContent(row: LineSendRow): RowContent {
   const levelNum = row.failure?.level ?? row.sent?.level ?? row.start.level ?? 30;
   const levelName = LEVEL_NAMES[levelNum] ?? String(levelNum);
   const color = LEVEL_COLORS[levelName] ?? '#94a3b8';
-  const time = formatTime(row.start.time ?? 0);
-  const rawReqId = String(row.start.reqId ?? '');
   const label = row.kind === 'line-reply' ? 'LINE 回覆' : 'LINE 推播';
 
   const methodColor = METHOD_COLORS[row.method] ?? '#94a3b8';
@@ -243,30 +273,56 @@ function renderLineSendRow(row: LineSendRow): string {
     `<span class="action-content">${contentHtml}</span>` +
     `</div>`;
 
-  const extraJson = escapeHtml(lineSendDetail(row));
-  const searchableText = JSON.stringify(row).toLowerCase();
-  const rawJson = escapeHtml(JSON.stringify(row));
-
-  return `
-  <tr class="log-row" data-level="${levelName}" data-time="${row.start.time ?? 0}" data-msg="${escapeHtml(searchableText)}" data-reqid="${rawReqId}" data-raw="${rawJson}" onclick="toggleExtra(this)">
-    <td class="time">${time}</td>
-    <td><span class="badge" style="background:${color}">${levelName}</span></td>
-    ${reqIdCellHtml(rawReqId)}
-    <td class="msg">${msgHtml}</td>
-  </tr>
-  <tr class="extra-row hidden"><td colspan="4"><pre>${extraJson}</pre></td></tr>`;
+  return {
+    levelName,
+    color,
+    time: row.start.time ?? 0,
+    reqId: String(row.start.reqId ?? ''),
+    msgHtml,
+    detailText: escapeHtml(lineSendDetail(row)),
+    searchableText: JSON.stringify(row).toLowerCase(),
+    rawJson: escapeHtml(JSON.stringify(row)),
+  };
 }
 
-function renderDisplayRow(row: DisplayRow): string {
+function rowContent(row: DisplayRow): RowContent {
   switch (row.kind) {
     case 'single':
-      return renderEntry(row.entry);
+      return singleRowContent(row.entry);
     case 'notion-call':
-      return renderNotionCallRow(row);
+      return notionCallRowContent(row);
     case 'line-reply':
     case 'line-push':
-      return renderLineSendRow(row);
+      return lineSendRowContent(row);
   }
+}
+
+function asTableRow(c: RowContent): string {
+  const extraRow = c.detailText
+    ? `<tr class="extra-row hidden"><td colspan="4"><pre>${c.detailText}</pre></td></tr>`
+    : '';
+  return `
+  <tr class="log-row" data-level="${c.levelName}" data-time="${c.time}" data-msg="${escapeHtml(c.searchableText)}" data-reqid="${c.reqId}" data-raw="${c.rawJson}" onclick="toggleExtra(this)">
+    <td class="time">${formatTime(c.time)}</td>
+    <td><span class="badge" style="background:${c.color}">${c.levelName}</span></td>
+    ${reqIdCellHtml(c.reqId)}
+    <td class="msg">${c.msgHtml}</td>
+  </tr>
+  ${extraRow}`;
+}
+
+/** wrapperClass 是 'flow-step' | 'flow-misc'；決定 3 的等級色標用 inline style 的
+ * border-left-color 實作（顏色是每一列各自的 LEVEL_COLORS 值，不是靜態 CSS class
+ * 能表達的，所以用 inline style，class 本身只負責排版）。 */
+function asFlowItem(c: RowContent, wrapperClass: 'flow-step' | 'flow-misc'): string {
+  const detail = c.detailText ? `<div class="flow-step-detail"><pre>${c.detailText}</pre></div>` : '';
+  const clickable = c.detailText ? ` onclick="event.stopPropagation(); this.classList.toggle('expanded')"` : '';
+  return `<div class="${wrapperClass}" style="border-left-color:${c.color}" data-level="${c.levelName}" data-time="${c.time}" data-msg="${escapeHtml(c.searchableText)}" data-reqid="${c.reqId}"${clickable}>${c.msgHtml}${detail}</div>`;
+}
+
+/** 起點/終點用專屬 wrapper（見下方流程表渲染），一樣加上等級色標跟 data-* 篩選屬性。 */
+function asFlowEndpoint(c: RowContent, label: string): string {
+  return `<div class="flow-endpoint" style="border-left-color:${c.color}" data-level="${c.levelName}" data-time="${c.time}" data-msg="${escapeHtml(c.searchableText)}" data-reqid="${c.reqId}"><span class="flow-tag">${label}</span>${c.msgHtml}</div>`;
 }
 
 function renderHtml(entries: LogEntry[]): string {
@@ -281,7 +337,7 @@ function renderHtml(entries: LogEntry[]): string {
   const flatRows = [...displayRows].reverse();
 
   const rows = flatRows.length > 0
-    ? flatRows.map(renderDisplayRow).join('')
+    ? flatRows.map((row) => asTableRow(rowContent(row))).join('')
     : '<tr><td colspan="4" class="empty">No log entries found</td></tr>';
 
   // Embedded as JSON rather than re-derived from the flat table's DOM so the
@@ -340,6 +396,9 @@ function renderHtml(entries: LogEntry[]): string {
     .tag-db { display: inline-block; margin-left: 4px; padding: 1px 6px; border-radius: 4px; background: #334155; color: #cbd5e1; font-size: 11px; }
     .tag-purpose { display: inline-block; margin-left: 4px; padding: 1px 6px; border-radius: 4px; background: #312e81; color: #c7d2fe; font-size: 11px; }
     .tag-path { display: inline-block; padding: 1px 6px; border-radius: 4px; background: #1e293b; border: 1px solid #334155; color: #94a3b8; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+    .tag-field { display: inline-block; margin: 2px 4px 2px 0; padding: 1px 6px; border-radius: 4px; background: #1e293b; border: 1px solid #334155; color: #cbd5e1; font-size: 11px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+    .tag-field-key { color: #64748b; margin-right: 4px; }
+    .extra-tags { margin-top: 2px; display: flex; flex-wrap: wrap; }
 
     /* Merged action rows (Notion API calls, LINE reply/push) in the flat
        table — a shared 4-column grid so the badges/content of unrelated row
@@ -355,8 +414,6 @@ function renderHtml(entries: LogEntry[]): string {
     tr.extra-row pre { padding: 10px 16px; font-size: 12px; color: #94a3b8; white-space: pre-wrap; word-break: break-all; }
     .hidden { display: none; }
     #no-results { display: none; text-align: center; padding: 40px; color: #475569; }
-    .msg-list { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; }
-    .msg-bubble { display: inline-block; background: #1e3a5f; border: 1px solid #3b82f6; border-radius: 8px; padding: 3px 10px; font-size: 12px; color: #93c5fd; }
 
     /* Flow-table view */
     #flow-view { padding: 16px 24px; display: none; flex-direction: column; gap: 10px; }
