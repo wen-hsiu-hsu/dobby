@@ -19,6 +19,11 @@ let base: pino.Logger = pino({
   }),
 });
 
+/** 目前實際生效的 log 等級——`isDev` 為 true 時建構 `base` 傳的是寫死的 'debug'，不是 `env.LOG_LEVEL`，所以這個 getter 天生反映「實際生效」而非「設定值」。 */
+export function getLogLevel(): string {
+  return base.level;
+}
+
 export async function initLogger(logDir: string): Promise<void> {
   if (isDev) return;
 

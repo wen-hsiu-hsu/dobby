@@ -298,6 +298,40 @@ describe('createLogsRouter', () => {
     expect(html).toContain('toggleMask()');
   });
 
+  // 決定：groupId 跟 userId 一樣是 PII，套用同一套遮蔽機制（id-masked/
+  // id-plain 由全域 toggleMask() 控制），不因為設計稿 mockup 明碼顯示就
+  // 跳過遮蔽。
+  it('shows a masked/plain 群組 ID field when "Processing event detail" carries source.groupId', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'message', sourceType: 'group', reqId: 'req-group', msg: 'Processing event' },
+      {
+        level: 20,
+        time: Date.UTC(2024, 0, 1, 0, 0, 1),
+        reqId: 'req-group',
+        msg: 'Processing event detail',
+        source: { type: 'group', groupId: 'C1234567890abcdef1234567890abcdef' },
+        message: { type: 'text', text: '報名' },
+      },
+    ]);
+
+    const html = await getLogsHtml();
+
+    expect(html).toContain('群組 ID');
+    // 遮蔽規則跟 userId 一樣：開頭 5 碼 + 6 個● + 結尾 3 碼
+    expect(html).toContain('<span class="id-masked">C1234●●●●●●def</span>');
+    expect(html).toContain('<span class="id-plain">C1234567890abcdef1234567890abcdef</span>');
+  });
+
+  it('does not render a 群組 ID field at all when there is no groupId info (LOG_LEVEL=info, no detail line)', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'message', sourceType: 'group', reqId: 'req-nogroup', msg: 'Processing event' },
+    ]);
+
+    const html = await getLogsHtml();
+
+    expect(html).not.toContain('群組 ID');
+  });
+
   it('renders a footer with real "raw log" / "copy JSON" actions wired to that event\'s own raw entries', async () => {
     const html = await getLogsHtml();
 
@@ -482,6 +516,71 @@ describe('createLogsRouter', () => {
     expect(html).toContain('webhookEventId: &lt;img src=x onerror=alert(1)&gt;');
     expect(html).not.toContain('<script>alert("xss")</script>');
     expect(html).not.toContain('<img src=x onerror=alert(1)>');
+    // 起點 step 的展開內容（tl-detail）現在也帶了 group.startDetail 的完整
+    // source/message 物件，同一組 XSS payload 也要在那裡被跳脫過，不是只
+    // 有 note 欄位被顧到。JSON 內容現在是可收合的 json-tree，字串葉節點是
+    // 直接對原始值呼叫 escapeHtml()（不再先 JSON.stringify），所以跟 note
+    // 欄位的跳脫結果一致，沒有反斜線。
+    expect(html).toContain('tl-expandable');
+    expect(html).toContain('<span class="json-string">"&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;"</span>');
+  });
+
+  // 起點 step 的「收到訊息」以前完全不能展開（detailText 固定是空字串），
+  // 看不到 webhook event 的完整原始內容。這裡驗證補上的展開內容：有
+  // Processing event detail（debug 等級）時能看到完整 source/message；只有
+  // Processing event（模擬 LOG_LEVEL=info）時退回提示文字，不是顯示空白或
+  // 讓整個 step 變成不能點開。
+  it('makes the 起點 step expandable with the full source/message when "Processing event detail" (debug) is present', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      {
+        level: 30,
+        time: Date.UTC(2024, 0, 1, 0, 0, 0),
+        type: 'message',
+        sourceType: 'user',
+        reqId: 'req-detail',
+        webhookEventId: '01M31DETAILDETAILDETAILDET',
+        msg: 'Processing event',
+      },
+      {
+        level: 20,
+        time: Date.UTC(2024, 0, 1, 0, 0, 1),
+        reqId: 'req-detail',
+        msg: 'Processing event detail',
+        source: { type: 'user', userId: 'Uabc123' },
+        message: { type: 'text', text: '報名' },
+      },
+    ]);
+
+    const html = await getLogsHtml();
+
+    expect(html).toContain('tl-expandable');
+    expect(html).toContain('Processing event detail（來源與訊息內容）');
+    expect(html).toContain('<span class="json-string">"Uabc123"</span>');
+    expect(html).toContain('<span class="json-string">"報名"</span>');
+    // JSON 內容現在是可收合的 json-tree，不再是一整段 pretty-printed 純文字。
+    expect(html).toContain('class="json-node"');
+  });
+
+  it('falls back to a LOG_LEVEL=debug hint in the 起點 step detail when only "Processing event" (no detail) exists', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      {
+        level: 30,
+        time: Date.UTC(2024, 0, 1, 0, 0, 0),
+        type: 'message',
+        sourceType: 'user',
+        reqId: 'req-no-detail',
+        webhookEventId: '01M31NODETAILNODETAILNODET',
+        msg: 'Processing event',
+      },
+    ]);
+
+    const html = await getLogsHtml();
+
+    // 沒有 Processing event detail 也還是能點開（group.start 一定存在），
+    // 只是展開內容裡看到的是提示文字，不是完整 source/message。
+    expect(html).toContain('tl-expandable');
+    expect(html).toContain('開 LOG_LEVEL=debug 才能看到完整 webhook event 內容');
+    expect(html).not.toContain('Processing event detail');
   });
 
   // 舊格式的 Processing event（這次改動之前寫的）沒有這兩個欄位——確認
@@ -512,5 +611,89 @@ describe('createLogsRouter', () => {
     expect(html).toContain('SIGTERM');
     expect(html).toContain('port 3000');
     expect(html).not.toContain('class="ev-item"'); // 沒有其他真正的事件，只有分隔線
+  });
+
+  it('shows the effective LOG_LEVEL as a badge in the header', async () => {
+    const html = await getLogsHtml();
+
+    // NODE_ENV 在測試環境不是 'production'，logger.ts 的 isDev 為 true，建構
+    // pino 時傳的是寫死的 'debug'，跟 env.LOG_LEVEL 設定值無關——所以這裡斷
+    // 言的是「實際生效」的等級。
+    expect(html).toContain('LOG_LEVEL=debug');
+    expect(html).toContain('level-badge');
+  });
+
+  it('renders JSON request/response payload content as a collapsible json-tree instead of one pretty-printed block', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      {
+        level: 30,
+        time: Date.UTC(2024, 0, 1, 0, 0, 0),
+        msg: 'Notion API request',
+        method: 'PATCH',
+        path: '/pages/xyz',
+        purpose: '更新繳費狀態',
+        reqId: 'req-json',
+      },
+      {
+        level: 20,
+        time: Date.UTC(2024, 0, 1, 0, 0, 1),
+        msg: 'Notion API request payload',
+        method: 'PATCH',
+        path: '/pages/xyz',
+        body: { properties: { Paid: { checkbox: true } } },
+        reqId: 'req-json',
+      },
+      {
+        level: 30,
+        time: Date.UTC(2024, 0, 1, 0, 0, 2),
+        msg: 'Notion API response',
+        method: 'PATCH',
+        path: '/pages/xyz',
+        durationMs: 120,
+        reqId: 'req-json',
+      },
+      {
+        level: 20,
+        time: Date.UTC(2024, 0, 1, 0, 0, 3),
+        msg: 'Notion API response payload',
+        method: 'PATCH',
+        path: '/pages/xyz',
+        result: { id: 'page-xyz', archived: false },
+        reqId: 'req-json',
+      },
+    ]);
+
+    const html = await getLogsHtml();
+
+    // 收合樹的容器/節點 class 存在，取代舊的一整段 pretty JSON 純文字。
+    expect(html).toContain('class="json-tree"');
+    expect(html).toContain('class="json-node"');
+    // 個別欄位值仍然看得到，只是被拆成一堆 span。
+    expect(html).toContain('<span class="json-key">"checkbox"</span>');
+    expect(html).toContain('<span class="json-boolean">true</span>');
+    expect(html).toContain('<span class="json-string">"page-xyz"</span>');
+  });
+
+  it('keeps a hidden raw-json-copy-source <pre> with the full pretty-printed rawEntries JSON, unaffected by json-tree collapsing', async () => {
+    const rawEntry = {
+      level: 30,
+      time: Date.UTC(2024, 0, 1, 0, 0, 0),
+      msg: 'copy source check',
+      reqId: 'req-copy',
+      extra: { nested: { deep: 'value' } },
+    };
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([rawEntry]);
+
+    const html = await getLogsHtml();
+
+    // 收合節點的「… N 個欄位」提示文字只是用 CSS 藏起來，不是真的從 DOM
+    // 移除——複製功能改讀這個永遠隱藏、內容不受收合影響的 <pre>，這裡驗證
+    // 它的內容仍然是完整、跟原本行為一致的 JSON.stringify(rawEntries, null, 2)。
+    const expectedJson = JSON.stringify([rawEntry], null, 2)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+    expect(html).toContain(`<pre class="raw-json-copy-source" style="display:none">${expectedJson}</pre>`);
   });
 });

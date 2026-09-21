@@ -64,12 +64,14 @@
 
 同一次 Notion API 呼叫底層會產生好幾行 log（輕量 info 摘要 + 完整內容的 debug payload，request 跟 response 各一組），LINE 回覆/推播也是「準備送出」跟「已送出/失敗」各一行；時間軸會把這些自動合併成一步：
 
-- **Notion API 呼叫**：步驟標題優先顯示 `withPurpose()` 設的目的（沒有的話退回「Notion API 呼叫」），旁邊顯示實際打的 `method path`跟耗時。點擊該步驟可展開看完整的 request/response 內容——`LOG_LEVEL` 不是 `debug` 時只記錄了摘要，展開會看到提示文字（例如「開 LOG_LEVEL=debug 才能看到完整回應內容」），不會是空白。失敗時標題不變、下方會多一塊紅色的錯誤提示（含 HTTP 狀態碼）。
+- **Notion API 呼叫**：步驟標題優先顯示 `withPurpose()` 設的目的（沒有的話退回「Notion API 呼叫」），旁邊顯示實際打的 `method path`跟耗時。點擊該步驟可展開看完整的 request/response 內容——顯示成可以逐層收合/展開的 JSON 樹，超過兩層巢狀預設收合。`LOG_LEVEL` 不是 `debug` 時只記錄了摘要，展開會看到提示文字（例如「開 LOG_LEVEL=debug 才能看到完整回應內容」），不會是空白。失敗時標題不變、下方會多一塊紅色的錯誤提示（含 HTTP 狀態碼）。
 - **LINE 回覆/推播**：標題是「LINE 回覆已送出/失敗」或「LINE 推播已送出/失敗」，旁邊顯示 `method path`。成功且抓得到訊息內容（`LOG_LEVEL=debug`）時，下方會有一個引用框顯示 Dobby 實際送出的訊息全文；失敗時引用框標題改成「這則訊息沒有送出」，上方另有一塊紅色的失敗原因。點擊步驟一樣可以展開看完整明細。
 
 配對「準備送出」跟「已送出/失敗」兩行時，底層用的是呼叫當下產生的專屬 `sendId`（不是比對 `to`/`messages` 內容），所以兩個內容完全相同但不同次的呼叫不會被誤配對成同一次。
 
 「起點」（收到訊息）這一步現在也帶 LINE 遞送層級的兩個欄位——`webhookEventId`（這次 webhook 事件的唯一識別碼）跟 `isRedelivery`（LINE 是不是在重送同一筆事件）。這兩個都是 info 層，不用開 `LOG_LEVEL=debug` 就看得到；它們本來記在 `webhook.ts` 收到整批 webhook payload 時的一行獨立摘要（`'Webhook received'`），但因為一次 webhook 幾乎永遠只有一筆事件，那行摘要跟緊接著的「起點」幾乎是重複資訊，還沒有 `reqId` 可用，所以直接搬進「起點」這一步；只有在 LINE 真的一次遞送兩筆以上事件時（極少見），才會另外看到一行 `Webhook received multiple events`。
+
+點擊「起點」這一步可以展開看這次 webhook 事件的完整原始內容（`Processing event`/`Processing event detail`——後者是 debug 層才有的完整 `source`/`message` 物件）。沒開 `LOG_LEVEL=debug` 時，展開後只看得到 `Processing event` 的欄位跟一句「開 LOG_LEVEL=debug 才能看到完整 webhook event 內容」的提示，不是不能點開、也不是空白。
 
 ## 其他類型 log 的通用顯示
 
@@ -83,11 +85,15 @@
 
 如果一個排程事件（`kind: schedule`）的最後一筆摘要 log 帶了兩個以上的數字欄位（排除掉 `total`），詳情頁會在時間軸上方畫一條依比例分色的長條圖＋圖例，例如 `Display name update complete` 的 `{updated, skipped, failed, total}`、`Weekly push complete` 的 `{succeeded, failed, total}`。顏色是依欄位名稱關鍵字猜的（`fail`/`error` → 紅，`success`/`succeed`/`updated`/`sent`/`complete` → 綠，其餘 → 灰），不是每個排程都手刻一份——**新增一個排程只要讓它結束時的摘要 log 帶兩個以上數字欄位，批次結果圖就會自動出現**，不用改 `/logs` 頁面。只有一個數字欄位時不會畫圖（長條圖跟单一個數字沒有意義的比例可比）。
 
-## userId／顯示名稱遮蔽
+## userId／群組 ID／顯示名稱遮蔽
 
 頁面右上角有「遮蔽 ID」按鈕，預設遮蔽（例如 `U1234●●●●●●abc`），點一下切換成顯示完整 userId；每個事件詳情裡使用者欄位旁邊的「顯示/遮蔽」連結是同一個開關。這是純前端顯示層級的遮蔽，並非資料保護機制——頁面本身仍然需要 `LOGS_ACCESS_TOKEN` 才能存取，遮蔽只是避免在螢幕分享/截圖時不小心露出真實 userId。使用者顯示名稱（`targetDisplayName`/`displayName`）跟 userId 一樣，只有在對應的 log 有記錄到才會顯示；完全沒有 userId 的事件（例如排程、系統事件）整個「使用者」欄位/區塊會直接不顯示，不會看到一個空白的「（無 userId）」佔位。
 
+群組 ID（`groupId`）比照 userId 用同一套遮蔽規則、同一個全域開關——這是同一類 PII（見 `docs/adr/0005-purpose-context-layered-on-reqid.md`），只有 `LOG_LEVEL=debug` 時才會出現在事件詳情頁的「群組 ID」欄位（來源是 `Processing event detail` 的 `source.groupId`），`LOG_LEVEL=info` 時這個欄位不會出現，不是顯示空白。
+
 ## 訊息內容跟身分識別資訊只在 debug 層
+
+頁面標題列（「Dobby Logs」文字旁邊）有一個 LOG_LEVEL 徽章，顯示目前**實際生效**的等級——不是 `.env` 裡 `LOG_LEVEL` 設定值本身，本機開發環境不管設定值是什麼，實際生效的都會是 `debug`。等於 `debug` 時徽章用強調色，其他等級（`info`/`warn`/`error` 等）用警示色，提醒你這節講的這些內容現在看不看得到。
 
 LINE 回覆/推播的訊息全文，以及 userId 這類身分識別資訊，比照 Notion API 的 body 一樣搬到 `debug` 層記錄。預設 `LOG_LEVEL=info` 下，時間軸只會看到 method/path 跟「開 `LOG_LEVEL=debug` 才能看到訊息內容」的提示，看不到訊息原文——**這是刻意的設計，不是 bug**。要看訊息實際內容（除錯用），把環境變數 `LOG_LEVEL` 設成 `debug` 再重啟服務即可。
 
@@ -110,3 +116,5 @@ Notion API 回應 429（rate limit）時程式會自動重試，同一次呼叫�
 ## 看原始 log／複製 JSON
 
 每個事件詳情下方有兩個按鈕：「看這筆的原始 log」展開這個事件底下所有原始 log 行（未經合併/解析的完整 JSON），「複製 JSON」把同樣的內容複製到剪貼簿。這兩個都是這個事件自己的完整原始資料，不受遮蔽 ID 開關影響（跟頁面其他地方一樣，需要 `LOGS_ACCESS_TOKEN` 才能看到）。
+
+「看這筆的原始 log」展開的內容也是可以逐層收合/展開的 JSON 樹，跟時間軸步驟裡的請求/回應內容同一套渲染方式；「複製 JSON」複製的是完整、未省略的原始文字，不受畫面上目前收合了哪些節點影響。

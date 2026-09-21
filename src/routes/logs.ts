@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import { readRecentLogs, type LogEntry } from '../utils/log-reader.js';
+import { getLogLevel } from '../utils/logger.js';
 import { logsAuthMiddleware } from '../middleware/logs-auth.js';
 import {
   groupPairedEntries,
@@ -100,6 +101,65 @@ function escapeHtml(str: string): string {
     .replace(/"/g, '&quot;');
 }
 
+/** LOG_LEVEL 徽章——`debug` 用跟 `#mask-btn` 相同的強調色，其餘等級用 `.tl-note-warn` 那組暖色，提醒管理者「有些細節區塊需要 LOG_LEVEL=debug 才看得到」。 */
+function logLevelBadgeHtml(level: string): string {
+  const isDebug = level === 'debug';
+  const css = isDebug
+    ? 'color:#d2cefd;background:#201c33;border:1px solid #5d5294'
+    : 'color:#d3a35c;background:#2c2519;border:1px solid #5c4c2c';
+  const dotColor = isDebug ? '#d2cefd' : '#d3a35c';
+  return `<span class="level-badge" style="${css}"><span class="level-badge-dot" style="background:${dotColor}"></span>LOG_LEVEL=${escapeHtml(level)}</span>`;
+}
+
+/**
+ * 遞迴把任意 JSON 值畫成可收合的 `<details>` 樹——depth < 2 預設展開，
+ * depth >= 2 收合，避免深層巢狀物件一次全部攤開占滿畫面。用瀏覽器原生
+ * `<details>`/`<summary>`，不用自己寫 toggle JS 或管理展開狀態。
+ */
+function jsonNodeHtml(value: unknown, keyLabel: string | null, depth: number): string {
+  const keyHtml =
+    keyLabel !== null
+      ? `<span class="json-key">"${escapeHtml(keyLabel)}"</span><span class="json-colon">: </span>`
+      : '';
+  if (value !== null && typeof value === 'object') {
+    const isArr = Array.isArray(value);
+    const entries: [string, unknown][] = isArr
+      ? (value as unknown[]).map((v, i): [string, unknown] => [String(i), v])
+      : Object.entries(value as Record<string, unknown>);
+    const bracketOpen = isArr ? '[' : '{';
+    const bracketClose = isArr ? ']' : '}';
+    const countLabel = isArr ? `${entries.length} 項` : `${entries.length} 個欄位`;
+    const openAttr = depth < 2 ? ' open' : '';
+    const childrenHtml = entries.map(([k, v]) => jsonNodeHtml(v, isArr ? null : k, depth + 1)).join('');
+    return `<details class="json-node"${openAttr} style="--json-depth:${depth}">
+      <summary>${keyHtml}<span class="json-bracket">${bracketOpen}</span><span class="json-collapsed-hint"> … ${countLabel}</span></summary>
+      <div class="json-children">${childrenHtml}</div>
+      <div class="json-close" style="--json-depth:${depth}">${bracketClose}</div>
+    </details>`;
+  }
+  let valueHtml: string;
+  if (value === null || value === undefined) valueHtml = '<span class="json-null">null</span>';
+  else if (typeof value === 'string') valueHtml = `<span class="json-string">"${escapeHtml(value)}"</span>`;
+  else if (typeof value === 'number') valueHtml = `<span class="json-number">${value}</span>`;
+  else if (typeof value === 'boolean') valueHtml = `<span class="json-boolean">${value}</span>`;
+  else valueHtml = `<span class="json-string">${escapeHtml(String(value))}</span>`;
+  return `<div class="json-leaf" style="--json-depth:${depth}">${keyHtml}${valueHtml}</div>`;
+}
+
+function jsonTreeHtml(value: unknown): string {
+  return `<div class="json-tree">${jsonNodeHtml(value, null, 0)}</div>`;
+}
+
+/** detail 區塊裡的一行純文字說明（例如 fallback 提示、`${method} ${path}`）。 */
+function detailTextLine(text: string): string {
+  return `<div class="tl-detail-text">${escapeHtml(text)}</div>`;
+}
+
+/** detail 區塊裡一段有標籤的可收合 JSON（例如「請求內容」「錯誤」）。 */
+function detailJsonSection(label: string, value: unknown): string {
+  return `<div class="tl-detail-section"><div class="tl-detail-label">${escapeHtml(label)}</div>${jsonTreeHtml(value)}</div>`;
+}
+
 function formatTime(epochMs: number): string {
   return taipeiFormatter.format(new Date(epochMs));
 }
@@ -152,52 +212,52 @@ function messageLabel(message: unknown): string {
 }
 
 function notionCallDetail(row: NotionCallRow): string {
-  const parts: string[] = [`${row.method} ${row.path}`];
+  const parts: string[] = [detailTextLine(`${row.method} ${row.path}`)];
   const durationMs = row.response?.['durationMs'] ?? row.error?.['durationMs'];
   if (typeof durationMs === 'number') {
-    parts.push(`耗時: ${durationMs}ms`);
+    parts.push(detailTextLine(`耗時: ${durationMs}ms`));
   }
   const requestBody = row.requestPayload?.['body'];
   if (row.requestPayload && requestBody !== undefined) {
-    parts.push(`請求內容:\n${JSON.stringify(requestBody, null, 2)}`);
+    parts.push(detailJsonSection('請求內容', requestBody));
   } else {
-    parts.push('開 LOG_LEVEL=debug 才能看到完整請求內容');
+    parts.push(detailTextLine('開 LOG_LEVEL=debug 才能看到完整請求內容'));
   }
   if (row.error) {
-    parts.push(`錯誤:\n${JSON.stringify(row.error, null, 2)}`);
+    parts.push(detailJsonSection('錯誤', row.error));
   } else {
     const responseResult = row.responsePayload?.['result'];
     if (row.responsePayload && responseResult !== undefined) {
-      parts.push(`回應內容:\n${JSON.stringify(responseResult, null, 2)}`);
+      parts.push(detailJsonSection('回應內容', responseResult));
     } else if (row.response) {
-      parts.push('開 LOG_LEVEL=debug 才能看到完整回應內容');
+      parts.push(detailTextLine('開 LOG_LEVEL=debug 才能看到完整回應內容'));
     } else {
-      parts.push('尚無回應記錄');
+      parts.push(detailTextLine('尚無回應記錄'));
     }
   }
-  return parts.join('\n\n');
+  return parts.join('');
 }
 
 function lineSendDetail(row: LineSendRow): string {
-  const parts: string[] = [`${row.method} ${row.path}`];
+  const parts: string[] = [detailTextLine(`${row.method} ${row.path}`)];
   const payloadMessages = row.payload?.['messages'];
   if (row.payload && payloadMessages !== undefined) {
-    parts.push(`訊息內容:\n${JSON.stringify(payloadMessages, null, 2)}`);
+    parts.push(detailJsonSection('訊息內容', payloadMessages));
   } else {
-    parts.push('開 LOG_LEVEL=debug 才能看到完整訊息內容');
+    parts.push(detailTextLine('開 LOG_LEVEL=debug 才能看到完整訊息內容'));
   }
   if (row.failure) {
-    parts.push(`失敗原因:\n${JSON.stringify(row.failure, null, 2)}`);
+    parts.push(detailJsonSection('失敗原因', row.failure));
     const failureMessages = row.failurePayload?.['messages'];
     if (row.failurePayload && failureMessages !== undefined) {
-      parts.push(`失敗時的訊息內容:\n${JSON.stringify(failureMessages, null, 2)}`);
+      parts.push(detailJsonSection('失敗時的訊息內容', failureMessages));
     } else {
-      parts.push('開 LOG_LEVEL=debug 才能看到失敗時的完整訊息內容');
+      parts.push(detailTextLine('開 LOG_LEVEL=debug 才能看到失敗時的完整訊息內容'));
     }
   } else if (!row.sent) {
-    parts.push('尚無送出結果記錄');
+    parts.push(detailTextLine('尚無送出結果記錄'));
   }
-  return parts.join('\n\n');
+  return parts.join('');
 }
 
 function errorMessageOf(entry: LogEntry | undefined): string | undefined {
@@ -340,6 +400,25 @@ function groupDisplayName(group: FlowGroup): string | null {
     if (typeof name === 'string' && name) return name;
   }
   return null;
+}
+
+/**
+ * 群組 ID——只有 `LOG_LEVEL=debug` 才看得到，來源有兩種：
+ * `profile-service.ts` 的除錯訊息直接帶 top-level `groupId`欄位，或是
+ * `Processing event detail` 裡完整的 `source` 物件（LINE 的
+ * `source.type === 'group'` 時會帶 `groupId`）。`LOG_LEVEL=info` 時兩者都
+ * 不存在，回傳空字串是預期行為，不是 bug。
+ */
+function groupGroupId(group: FlowGroup): string {
+  for (const e of flattenEntries(group)) {
+    if (typeof e['groupId'] === 'string' && e['groupId']) return e['groupId'] as string;
+    const source = e['source'];
+    if (source && typeof source === 'object') {
+      const gid = (source as Record<string, unknown>)['groupId'];
+      if (typeof gid === 'string' && gid) return gid;
+    }
+  }
+  return '';
 }
 
 const SCHEDULE_ORIGIN_MARKERS: Array<[string, string]> = [
@@ -508,6 +587,28 @@ interface TimelineStep {
   bodyLabel: string;
 }
 
+/**
+ * 起點 step（「收到訊息」）的展開內容——跟 note 欄位只挑幾個欄位摘要不同，
+ * 這裡把 group.start（Processing event）/group.startDetail（Processing event
+ * detail，debug 等級才有）的完整原始內容都印出來，尤其是 note 沒有顯示的
+ * source/message 完整物件。level/time/msg/reqId/pid/hostname 這些欄位在其他
+ * 地方（timestamp、log level 顏色等）已經看得到，這裡剔除掉避免重複雜訊。
+ */
+function startEventDetail(group: FlowGroup): string {
+  const parts: string[] = [];
+  if (group.start) {
+    const { level: _level, time: _time, msg: _msg, reqId: _reqId, pid: _pid, hostname: _hostname, ...extra } = group.start;
+    parts.push(detailJsonSection('Processing event', extra));
+  }
+  if (group.startDetail) {
+    const { level: _level, time: _time, msg: _msg, reqId: _reqId, pid: _pid, hostname: _hostname, ...extra } = group.startDetail;
+    parts.push(detailJsonSection('Processing event detail（來源與訊息內容）', extra));
+  } else {
+    parts.push(detailTextLine('開 LOG_LEVEL=debug 才能看到完整 webhook event 內容（來源與訊息內容）'));
+  }
+  return parts.join('');
+}
+
 function startStepTimeline(group: FlowGroup): TimelineStep {
   const entry = group.start!;
   const levelName = levelNameOf(entry);
@@ -545,7 +646,7 @@ function startStepTimeline(group: FlowGroup): TimelineStep {
     note: escapeHtml(parts.join(' · ')),
     noteTitle: '',
     noteTone: isRedelivery ? 'warn' : undefined,
-    detailText: '',
+    detailText: startEventDetail(group),
     body: '',
     bodyLabel: '',
   };
@@ -575,7 +676,7 @@ function notionStepTimeline(row: NotionCallRow): TimelineStep {
     note,
     noteTitle: '',
     noteTone,
-    detailText: escapeHtml(notionCallDetail(row)),
+    detailText: notionCallDetail(row),
     body: '',
     bodyLabel: '',
   };
@@ -623,7 +724,7 @@ function lineStepTimeline(row: LineSendRow, isEndpoint: boolean): TimelineStep {
     note: escapeHtml(note),
     noteTitle: '',
     noteTone,
-    detailText: escapeHtml(lineSendDetail(row)),
+    detailText: lineSendDetail(row),
     body: escapeHtml(body),
     bodyLabel,
   };
@@ -676,7 +777,7 @@ function buildTimeline(group: FlowGroup): TimelineStep[] {
   return steps;
 }
 
-function maskUserId(id: string): string {
+function maskId(id: string): string {
   if (!id) return '';
   if (id.length <= 9) return '●'.repeat(id.length);
   return `${id.slice(0, 5)}●●●●●●${id.slice(-3)}`;
@@ -695,6 +796,7 @@ interface EventView {
   hasWho: boolean;
   name: string | null;
   userIdRaw: string;
+  groupIdRaw: string;
   source: string;
   origin: string;
   status: EventStatus;
@@ -724,6 +826,7 @@ function buildEventView(group: FlowGroup, rawEntries: LogEntry[]): EventView {
   const preview = groupPreview(group);
   const name = groupDisplayName(group);
   const userIdRaw = groupUserId(group);
+  const groupIdRaw = groupGroupId(group);
   const origin = groupOrigin(group, kind);
   const source = groupSource(group, kind);
 
@@ -740,6 +843,7 @@ function buildEventView(group: FlowGroup, rawEntries: LogEntry[]): EventView {
     hasWho: !!userIdRaw,
     name,
     userIdRaw,
+    groupIdRaw,
     source,
     origin,
     status,
@@ -806,6 +910,7 @@ function buildSystemEventView(entry: LogEntry, index: number): EventView {
     hasWho: false,
     name: null,
     userIdRaw: '',
+    groupIdRaw: '',
     source: 'HTTP · POST /webhook',
     origin,
     status,
@@ -858,7 +963,7 @@ function eventListItemHtml(ev: EventView, boundary: BoundaryMarker | undefined):
     ? `<div class="ev-boundary"><span class="ev-boundary-icon">⏻</span><span class="ev-boundary-label">${escapeHtml(boundary.label)}</span><span class="ev-boundary-meta">${escapeHtml(boundary.meta)}</span><span class="ev-boundary-time">${escapeHtml(boundary.time)}</span></div>`
     : '';
   const whoHtml = ev.hasWho
-    ? `<div class="ev-item-meta">${ev.name ? `<span class="ev-name">${escapeHtml(ev.name)}</span>` : ''}<span class="ev-userid"><span class="id-masked">${escapeHtml(maskUserId(ev.userIdRaw))}</span><span class="id-plain">${escapeHtml(ev.userIdRaw)}</span></span></div>`
+    ? `<div class="ev-item-meta">${ev.name ? `<span class="ev-name">${escapeHtml(ev.name)}</span>` : ''}<span class="ev-userid"><span class="id-masked">${escapeHtml(maskId(ev.userIdRaw))}</span><span class="id-plain">${escapeHtml(ev.userIdRaw)}</span></span></div>`
     : '';
   const flagHtml = ev.flag
     ? `<span class="ev-flag ev-flag-${ev.status}">${escapeHtml(ev.flag)}</span>`
@@ -897,7 +1002,9 @@ function timelineStepHtml(step: TimelineStep, isLast: boolean): string {
   const bodyHtml = step.body
     ? `<div class="tl-body-wrap"><span class="tl-body-label">${escapeHtml(step.bodyLabel)}</span><div class="tl-body">${step.body}</div></div>`
     : '';
-  const detailHtml = step.detailText ? `<pre class="tl-detail">${step.detailText}</pre>` : '';
+  const detailHtml = step.detailText
+    ? `<div class="tl-detail" onclick="event.stopPropagation()">${step.detailText}</div>`
+    : '';
   const clickable = step.detailText ? ` onclick="this.classList.toggle('expanded')"` : '';
   const titleStyleAttr =
     step.levelName === 'error' || step.levelName === 'fatal' ? ` style="color:${LEVEL_COLORS[step.levelName]}"` : '';
@@ -923,8 +1030,11 @@ function eventDetailHtml(ev: EventView, active: boolean): string {
   const whoHtml = ev.hasWho
     ? `<div class="detail-field">
           <span class="detail-field-label">使用者</span>
-          <span class="detail-field-value">${ev.name ? `<span class="sel-name">${escapeHtml(ev.name)}</span>` : ''}<span class="detail-userid"><span class="id-masked">${escapeHtml(maskUserId(ev.userIdRaw))}</span><span class="id-plain">${escapeHtml(ev.userIdRaw)}</span></span> <span class="reveal-link" onclick="toggleMask()"><span class="id-masked">顯示</span><span class="id-plain">遮蔽</span></span></span>
+          <span class="detail-field-value">${ev.name ? `<span class="sel-name">${escapeHtml(ev.name)}</span>` : ''}<span class="detail-userid"><span class="id-masked">${escapeHtml(maskId(ev.userIdRaw))}</span><span class="id-plain">${escapeHtml(ev.userIdRaw)}</span></span> <span class="reveal-link" onclick="toggleMask()"><span class="id-masked">顯示</span><span class="id-plain">遮蔽</span></span></span>
         </div>`
+    : '';
+  const groupHtml = ev.groupIdRaw
+    ? `<div class="detail-field"><span class="detail-field-label">群組 ID</span><span class="detail-field-value"><span class="detail-userid"><span class="id-masked">${escapeHtml(maskId(ev.groupIdRaw))}</span><span class="id-plain">${escapeHtml(ev.groupIdRaw)}</span></span></span></div>`
     : '';
   const degradedHtml = ev.degradedText
     ? `<div class="degraded-banner"><span class="degraded-banner-label">仍有回覆，但過程降級</span><span class="degraded-banner-text">${escapeHtml(ev.degradedText)}</span></div>`
@@ -945,7 +1055,7 @@ function eventDetailHtml(ev: EventView, active: boolean): string {
   const stepsHtml = ev.steps.length > 0
     ? ev.steps.map((s, i) => timelineStepHtml(s, i === ev.steps.length - 1)).join('')
     : '<div class="tl-empty">沒有可顯示的處理步驟</div>';
-  const rawJson = escapeHtml(JSON.stringify(ev.rawEntries, null, 2));
+  const rawJsonText = escapeHtml(JSON.stringify(ev.rawEntries, null, 2));
 
   return `
   <div class="ev-detail${active ? ' active' : ''}" id="detail-${escapeHtml(ev.key)}">
@@ -957,12 +1067,17 @@ function eventDetailHtml(ev: EventView, active: boolean): string {
         <span class="detail-reqid">${escapeHtml(ev.reqId || '（無 reqId）')}</span>
       </div>
       ${degradedHtml}
-      <div class="detail-fields">
-        <div class="detail-field"><span class="detail-field-label">時間</span><span class="detail-field-value">${escapeHtml(ev.stamp)}</span></div>
-        <div class="detail-field"><span class="detail-field-label">總耗時</span><span class="detail-field-value">${escapeHtml(ev.durationText)}</span></div>
-        <div class="detail-field"><span class="detail-field-label">來源</span><span class="detail-field-value">${escapeHtml(ev.source)}</span></div>
-        ${whoHtml}
-        <div class="detail-field"><span class="detail-field-label">來自</span><span class="detail-field-value">${escapeHtml(ev.origin)}</span></div>
+      <div class="detail-fields-rows">
+        <div class="detail-fields">
+          <div class="detail-field"><span class="detail-field-label">時間</span><span class="detail-field-value">${escapeHtml(ev.stamp)}</span></div>
+          <div class="detail-field"><span class="detail-field-label">總耗時</span><span class="detail-field-value">${escapeHtml(ev.durationText)}</span></div>
+          <div class="detail-field"><span class="detail-field-label">來自</span><span class="detail-field-value">${escapeHtml(ev.origin)}</span></div>
+        </div>
+        <div class="detail-fields">
+          <div class="detail-field"><span class="detail-field-label">來源</span><span class="detail-field-value">${escapeHtml(ev.source)}</span></div>
+          ${groupHtml}
+          ${whoHtml}
+        </div>
       </div>
     </div>
     ${batchHtml}
@@ -974,7 +1089,13 @@ function eventDetailHtml(ev: EventView, active: boolean): string {
       <button onclick="document.getElementById('raw-${escapeHtml(ev.key)}').classList.toggle('hidden')">看這筆的原始 log</button>
       <button onclick="copyRawJson('${escapeHtml(ev.key)}', this)">複製 JSON</button>
     </div>
-    <pre class="raw-json hidden" id="raw-${escapeHtml(ev.key)}">${rawJson}</pre>
+    <div class="raw-json hidden" id="raw-${escapeHtml(ev.key)}">
+      <!-- json-tree 收合節點的「… N 個欄位」提示文字只是 CSS display:none 藏起來，不是真的
+           從 DOM 移除，複製功能需要一份不受收合影響、乾淨的原始文字來源，所以另外保留這個
+           永遠隱藏的 pre。 -->
+      <pre class="raw-json-copy-source" style="display:none">${rawJsonText}</pre>
+      ${jsonTreeHtml(ev.rawEntries)}
+    </div>
   </div>`;
 }
 
@@ -994,6 +1115,7 @@ function bucketRawEntries(entries: LogEntry[]): Map<string, LogEntry[]> {
 }
 
 function renderHtml(entries: LogEntry[]): string {
+  const levelBadgeHtml = logLevelBadgeHtml(getLogLevel());
   // 排程（weekly-push/display-name-update）現在也各自用 runWithContext 包住整
   // 次執行，所以真的完全沒有 reqId 的只剩伺服器生命週期訊息跟少數 HTTP 層級
   // 的錯誤（例如 LINE 簽章驗證失敗，在 webhook 事件處理、也就是 reqId 產生
@@ -1064,6 +1186,8 @@ function renderHtml(entries: LogEntry[]): string {
     button { cursor: pointer; font-family: inherit; }
     #mask-btn { font-size: 12px; font-weight: 500; border-radius: 8px; padding: 7px 12px; color: #d2cefd; border: 1px solid #5d5294; background: #201c33; }
     #refresh-btn { font-size: 12px; color: #8b8fa3; background: transparent; border: 1px solid #262835; border-radius: 8px; padding: 7px 12px; }
+    .level-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 500; font-family: ui-monospace, monospace; border-radius: 4px; padding: 5px 9px; flex: none; }
+    .level-badge-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
 
     main { display: grid; grid-template-columns: 400px 1fr; flex: 1 1 auto; min-height: 0; }
 
@@ -1115,6 +1239,7 @@ function renderHtml(entries: LogEntry[]): string {
     .degraded-banner { margin-bottom: 13px; display: flex; align-items: flex-start; gap: 9px; background: #2c2519; border: 1px solid #5c4c2c; border-radius: 8px; padding: 10px 13px; }
     .degraded-banner-label { font-size: 11px; font-weight: 500; color: #d3a35c; flex: none; }
     .degraded-banner-text { font-size: 12px; color: #c6c9d6; line-height: 1.5; }
+    .detail-fields-rows { display: flex; flex-direction: column; gap: 12px; }
     .detail-fields { display: flex; flex-wrap: wrap; gap: 12px 28px; }
     .detail-field { display: flex; flex-direction: column; gap: 4px; }
     .detail-field-label { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: #8b8fa3; }
@@ -1152,14 +1277,35 @@ function renderHtml(entries: LogEntry[]): string {
     .tl-body-wrap { margin-top: 11px; display: flex; flex-direction: column; gap: 6px; max-width: 560px; }
     .tl-body-label { font-size: 10.5px; font-weight: 500; letter-spacing: .08em; color: #d2cefd; }
     .tl-body { background: #201c33; border: 1px solid #5d5294; border-radius: 4px 14px 14px 14px; padding: 13px 16px; font-size: 13px; line-height: 1.8; color: #e4e4ea; white-space: pre-line; }
-    .tl-detail { display: none; margin-top: 8px; padding: 10px 14px; background: #0e0f18; border-radius: 8px; font-size: 12px; color: #8b8fa3; white-space: pre-wrap; word-break: break-all; }
+    .tl-detail { display: none; margin-top: 8px; padding: 10px 14px; background: #0e0f18; border-radius: 8px; font-size: 12px; }
     .tl-content.expanded .tl-detail { display: block; }
+    .tl-detail-text, .tl-detail-section { margin-top: 8px; }
+    .tl-detail-text:first-child, .tl-detail-section:first-child { margin-top: 0; }
+    .tl-detail-text { color: #8b8fa3; white-space: pre-wrap; word-break: break-all; }
+    .tl-detail-label { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: #8b8fa3; margin-bottom: 6px; }
     .tl-empty { font-size: 12.5px; color: #595d6c; }
 
     .detail-footer { border-top: 1px solid #1c1d29; padding: 10px 22px; display: flex; gap: 8px; flex: none; }
     .detail-footer button { font-size: 12px; color: #8b8fa3; background: transparent; border: 1px solid #262835; border-radius: 8px; padding: 8px 13px; }
-    .raw-json { margin: 0 22px 16px; padding: 12px 14px; background: #0e0f18; border-radius: 8px; font-size: 11.5px; color: #8b8fa3; white-space: pre-wrap; word-break: break-all; max-height: 320px; overflow-y: auto; }
+    .raw-json { margin: 0 22px 16px; padding: 12px 14px; background: #0e0f18; border-radius: 8px; max-height: 320px; overflow-y: auto; }
     .raw-json.hidden { display: none; }
+
+    .json-tree { font: 12.5px/1.7 ui-monospace, monospace; }
+    .json-node > summary { list-style: none; cursor: pointer; user-select: none; padding-left: calc(var(--json-depth) * 14px); }
+    .json-node > summary::-webkit-details-marker { display: none; }
+    .json-node > summary::before { content: '▶'; display: inline-block; width: 12px; color: #595d6c; }
+    .json-node[open] > summary::before { content: '▼'; }
+    .json-node[open] > summary .json-collapsed-hint { display: none; }
+    .json-node:not([open]) .json-close { display: none; }
+    .json-close { padding-left: calc(var(--json-depth) * 14px); color: #b2b6ca; }
+    .json-leaf { padding-left: calc(var(--json-depth) * 14px + 14px); }
+    .json-key { color: #d2cefd; }
+    .json-colon { color: #8b8fa3; }
+    .json-string { color: #c6c9d6; }
+    .json-number { color: #e7e5fe; }
+    .json-boolean { color: #d2cefd; }
+    .json-null { color: #595d6c; font-style: italic; }
+    .json-collapsed-hint { color: #8b8fa3; }
 
     #no-events { display: none; padding: 60px 20px; text-align: center; color: #595d6c; }
   </style>
@@ -1169,6 +1315,7 @@ function renderHtml(entries: LogEntry[]): string {
     <header>
       <h1>🐶 Dobby Logs</h1>
       <span class="divider"></span>
+      ${levelBadgeHtml}
       <span class="count" id="count-label">共 ${totalCount} 筆</span>
       <span class="count-err" id="count-err-label">${errorCount} 筆需要注意</span>
       <input type="text" id="search" placeholder="搜尋指令、回覆、reqId、使用者…" oninput="applyFilters()">
@@ -1225,7 +1372,9 @@ function renderHtml(entries: LogEntry[]): string {
     function copyRawJson(key, btn) {
       const el = document.getElementById('raw-' + key);
       if (!el) return;
-      navigator.clipboard.writeText(el.textContent).then(() => {
+      const source = el.querySelector('.raw-json-copy-source');
+      const text = source ? source.textContent : el.textContent;
+      navigator.clipboard.writeText(text).then(() => {
         const original = btn.textContent;
         btn.textContent = '✓ 已複製';
         setTimeout(() => { btn.textContent = original; }, 2000);
