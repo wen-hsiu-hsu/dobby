@@ -47,12 +47,21 @@ export const logger = new Proxy({} as pino.Logger, {
   get(_target, prop) {
     const method = base[prop as keyof typeof base];
     if (prop === 'child' || typeof method !== 'function') return method;
-    return (obj: object, msg?: string) => {
+    return (arg1: object | string, arg2?: string) => {
       const reqId = getReqId();
       const purpose = getPurpose();
       const context = { ...(reqId && { reqId }), ...(purpose && { purpose }) };
-      const merged = Object.keys(context).length > 0 ? { ...context, ...obj } : obj;
-      return (method as Function).call(base, merged, msg);
+      // pino accepts either (msg) or (mergingObject, msg) — a plain string
+      // first arg (e.g. logger.info('Server closed')) must stay a message,
+      // not get spread as if it were the merging object (which would turn
+      // its characters into numeric keys).
+      if (typeof arg1 === 'string') {
+        return Object.keys(context).length > 0
+          ? (method as Function).call(base, context, arg1)
+          : (method as Function).call(base, arg1);
+      }
+      const merged = Object.keys(context).length > 0 ? { ...context, ...arg1 } : arg1;
+      return (method as Function).call(base, merged, arg2);
     };
   },
 });
