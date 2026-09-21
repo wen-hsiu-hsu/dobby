@@ -83,7 +83,7 @@ Webhook 收到 LINE 事件後，立即回傳 200，再非同步處理事件。
 
 這兩者都靠同一個 context 統一處理，**新增/修改 command handler 不需要逐一手動傳遞 `reqId`/`quoteToken`**——只要最終呼叫的是 `reply-service.ts` 的 `replyMessage`，就會自動帶上；不要繞過它直接呼叫 LINE SDK 送訊息，否則會漏掉這個機制。
 
-同一個 `request-context.ts` 還提供 `withPurpose(purpose, fn)`，疊加（不是取代）在這個 context 之上，讓 `*-repository.ts` 的函式能幫自己的 Notion API 呼叫標上「打的目的」，`/logs` 頁面的流程表模式會用這個欄位把一組 `reqId` 的呼叫鏈顯示成「目的 → method/db」的敘事。設計理由（為什麼疊加、為什麼在 repository 函式內部包而不改簽名、為什麼 Notion API log 要分 info/debug 兩行記）見 [`docs/adr/0005-purpose-context-layered-on-reqid.md`](adr/0005-purpose-context-layered-on-reqid.md)。
+同一個 `request-context.ts` 還提供 `withPurpose(purpose, fn)`，疊加（不是取代）在這個 context 之上，讓 `*-repository.ts` 的函式能幫自己的 Notion API 呼叫標上「打的目的」，`/logs` 頁面的處理過程時間軸會用這個欄位把一組 `reqId` 的呼叫鏈顯示成「目的 → method/db」的敘事。設計理由（為什麼疊加、為什麼在 repository 函式內部包而不改簽名、為什麼 Notion API log 要分 info/debug 兩行記）見 [`docs/adr/0005-purpose-context-layered-on-reqid.md`](adr/0005-purpose-context-layered-on-reqid.md)。兩個排程（`weekly-push.ts`/`display-name-update.ts`）也各自用 `runWithContext` 包住整次執行，讓每次排程執行有自己專屬的 reqId，見 [`docs/logging.md`](logging.md)。
 
 **原因：** Webhook 處理是非同步的，沒有 correlation ID 很難追蹤單一事件的完整日誌；quoteToken 若不使用，使用者在群組裡容易搞不清楚機器人是在回應哪一則訊息。
 

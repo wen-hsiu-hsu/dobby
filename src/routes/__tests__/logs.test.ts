@@ -80,138 +80,62 @@ vi.mock('../../utils/log-reader.js', () => ({
 import { readRecentLogs } from '../../utils/log-reader.js';
 import { createLogsRouter } from '../logs.js';
 
+async function getLogsHtml(): Promise<string> {
+  const app = express();
+  app.use('/logs', createLogsRouter('/unused/because/reader/is/mocked'));
+  const res = await request(app).get('/logs').query({ token: process.env['LOGS_ACCESS_TOKEN'] });
+  expect(res.status).toBe(200);
+  return res.text;
+}
+
 describe('createLogsRouter', () => {
-  it('renders log timestamps in Asia/Taipei time with a labeled column', async () => {
-    const app = express();
-    app.use('/logs', createLogsRouter('/unused/because/reader/is/mocked'));
+  it('renders each reqId as its own event card, in Asia/Taipei time', async () => {
+    const html = await getLogsHtml();
 
-    const res = await request(app)
-      .get('/logs')
-      .query({ token: process.env['LOGS_ACCESS_TOKEN'] });
+    // 4 個不同的 reqId（req-1/req-2/req-5/req-6）應該各自變成獨立的事件卡片。
+    const itemCount = (html.match(/class="ev-item"/g) ?? []).length;
+    expect(itemCount).toBe(4);
 
-    expect(res.status).toBe(200);
-    expect(res.text).toContain('Time (台北時間)');
-    expect(res.text).not.toContain('Time (UTC)');
     // 2024-01-01T00:00:00Z + 8h = 2024-01-01 08:00:00 Taipei time
-    expect(res.text).toContain('2024-01-01 08:00:00');
+    expect(html).toContain('2024-01-01 08:00:00');
   });
 
-  it('shows method/db badges for both info-level and debug-payload Notion API log lines', async () => {
-    const app = express();
-    app.use('/logs', createLogsRouter('/unused/because/reader/is/mocked'));
+  it('uses the Notion call purpose as the timeline step title and shows the endpoint path', async () => {
+    const html = await getLogsHtml();
 
-    const res = await request(app)
-      .get('/logs')
-      .query({ token: process.env['LOGS_ACCESS_TOKEN'] });
-
-    // both the light 'Notion API request' and the 'Notion API request payload'
-    // lines should render a method badge + db tag, not just one of them
-    expect(res.text.match(/tag-method/g)?.length).toBeGreaterThanOrEqual(2);
-    expect(res.text.match(/tag-db/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(html).toContain('查詢成員姓名與繳費狀態');
+    // GET /pages/{id} calls carry no database ID in their path, so path is
+    // the only thing that identifies the actual endpoint hit.
+    expect(html).toContain('<span class="tl-path">GET /pages/abc</span>');
   });
 
-  it('shows the API endpoint path for a Notion API call, not just its method/db', async () => {
-    const app = express();
-    app.use('/logs', createLogsRouter('/unused/because/reader/is/mocked'));
-
-    const res = await request(app)
-      .get('/logs')
-      .query({ token: process.env['LOGS_ACCESS_TOKEN'] });
-
-    // GET /pages/{id} calls carry no database ID in their path, so db can be
-    // absent — path is the only thing that identifies the actual endpoint.
-    expect(res.text).toContain('tag-path');
-    expect(res.text).toContain('/pages/abc');
+  it('shows a "尚無回應記錄" note for a Notion call with no captured response', async () => {
+    const html = await getLogsHtml();
+    expect(html).toContain('尚無回應記錄');
   });
 
-  it('shows a purpose tag when the entry carries one', async () => {
-    const app = express();
-    app.use('/logs', createLogsRouter('/unused/because/reader/is/mocked'));
+  it('shows the LINE reply message content for a fully paired reply', async () => {
+    const html = await getLogsHtml();
 
-    const res = await request(app)
-      .get('/logs')
-      .query({ token: process.env['LOGS_ACCESS_TOKEN'] });
-
-    expect(res.text).toContain('tag-purpose');
-    expect(res.text).toContain('查詢成員姓名與繳費狀態');
-  });
-
-  it('renders a view-mode toggle backed by fully server-rendered flow-table content', async () => {
-    const app = express();
-    app.use('/logs', createLogsRouter('/unused/because/reader/is/mocked'));
-
-    const res = await request(app)
-      .get('/logs')
-      .query({ token: process.env['LOGS_ACCESS_TOKEN'] });
-
-    expect(res.text).toContain('平面模式');
-    expect(res.text).toContain('流程表模式');
-    expect(res.text).toContain('id="flow-view"');
-
-    // 決定 2：流程表模式現在是伺服器端一次算好的完整 HTML，不再是等瀏覽器執行
-    // JS 才會有內容的空殼，也不再需要內嵌的 JSON script 標籤讓用戶端重新分組。
-    expect(res.text).not.toContain('id="display-rows-data"');
-    expect(res.text).toContain('class="flow-group"');
-    expect(res.text).toContain('class="flow-step"'); // req-2 的 Notion call
-    expect(res.text).toContain('class="flow-endpoint"'); // req-5/req-6 的 LINE reply 終點
-
-    // req-2（Notion call）跟 req-5/req-6（LINE reply）應該各自落在獨立的
-    // flow-group，不是全部混在一起——這個 fixture 有 4 個不同的 reqId
-    // （req-1/req-2/req-5/req-6），應該產生 4 個獨立的 flow-group。
-    const flowGroupCount = (res.text.match(/class="flow-group"/g) ?? []).length;
-    expect(flowGroupCount).toBe(4);
-  });
-
-  it('shows method/path badges and the message content for a fully paired LINE reply', async () => {
-    const app = express();
-    app.use('/logs', createLogsRouter('/unused/because/reader/is/mocked'));
-
-    const res = await request(app)
-      .get('/logs')
-      .query({ token: process.env['LOGS_ACCESS_TOKEN'] });
-
-    expect(res.text).toContain('tag-method');
-    expect(res.text).toContain('tag-path');
-    expect(res.text).toContain('/v2/bot/message/reply');
-    expect(res.text).toContain('測試訊息內容A');
-  });
-
-  it('lets the flow-table "終點" (LINE reply) be expanded to see the same detail flat mode shows', async () => {
-    const app = express();
-    app.use('/logs', createLogsRouter('/unused/because/reader/is/mocked'));
-
-    const res = await request(app)
-      .get('/logs')
-      .query({ token: process.env['LOGS_ACCESS_TOKEN'] });
-
-    // asFlowEndpoint() previously dropped RowContent.detailText entirely, so
-    // the flow-table's 終點 for req-5 showed the method/path badge but none
-    // of the expandable "訊息內容:" detail that flat mode's asTableRow()
-    // shows for the exact same row. Flow-groups render newest-first (req-6
-    // before req-5), so scan every 終點 block rather than assuming the first
-    // one in the HTML is req-5's.
-    const endpointBlocks = [...res.text.matchAll(/<div class="flow-endpoint"[^>]*>[\s\S]*?<\/div>\s*<\/div>/g)].map(
-      (m) => m[0]
-    );
-    expect(endpointBlocks.length).toBeGreaterThan(0);
-    const reqFiveEndpoint = endpointBlocks.find((html) => html.includes('測試訊息內容A'));
-    expect(reqFiveEndpoint).toBeDefined();
-    expect(reqFiveEndpoint).toContain('flow-step-detail');
+    expect(html).toContain('POST /v2/bot/message/reply');
+    expect(html).toContain('測試訊息內容A');
+    expect(html).toContain('Dobby 送給使用者的訊息');
   });
 
   it('shows the LOG_LEVEL=debug hint instead of message content for a LINE reply with no captured payload', async () => {
-    const app = express();
-    app.use('/logs', createLogsRouter('/unused/because/reader/is/mocked'));
-
-    const res = await request(app)
-      .get('/logs')
-      .query({ token: process.env['LOGS_ACCESS_TOKEN'] });
-
-    expect(res.text).toContain('開 LOG_LEVEL=debug 才能看到訊息內容');
+    const html = await getLogsHtml();
+    expect(html).toContain('開 LOG_LEVEL=debug 才能看到訊息內容');
   });
 
-  // 決定 1：通用渲染器——「其他所有類型」的 log 行不再只顯示 msg 名稱，
-  // 額外欄位不點開就看得到。
+  it('lets a timeline step with detail be expanded via a click handler', async () => {
+    const html = await getLogsHtml();
+    expect(html).toContain('tl-expandable');
+    expect(html).toContain("this.classList.toggle('expanded')");
+    expect(html).toContain('class="tl-detail"');
+  });
+
+  // 決定 1（沿用）：通用渲染器——不認識的 log 訊息不需要程式碼另外處理，
+  // 額外欄位還是會顯示出來，不用點開任何東西。
   it('shows non-meta fields on an unrecognized log line without needing to expand it (generic renderer)', async () => {
     vi.mocked(readRecentLogs).mockResolvedValueOnce([
       {
@@ -226,18 +150,13 @@ describe('createLogsRouter', () => {
       },
     ]);
 
-    const app = express();
-    app.use('/logs', createLogsRouter('/unused/because/reader/is/mocked'));
-    const res = await request(app)
-      .get('/logs')
-      .query({ token: process.env['LOGS_ACCESS_TOKEN'] });
+    const html = await getLogsHtml();
 
-    expect(res.text).toContain('tag-field');
-    expect(res.text).toContain('text'); // key 名稱
-    expect(res.text).toContain('@Dobby +1'); // value，不用點開任何東西就看得到
+    expect(html).toContain('handleMessage');
+    expect(html).toContain('text: @Dobby +1');
   });
 
-  it('does not render meta fields (level/time/msg/reqId/pid/hostname) as a tag-field', async () => {
+  it('does not render meta fields (level/time/msg/reqId/pid/hostname) in the generic note', async () => {
     vi.mocked(readRecentLogs).mockResolvedValueOnce([
       {
         level: 30,
@@ -249,16 +168,11 @@ describe('createLogsRouter', () => {
       },
     ]);
 
-    const app = express();
-    app.use('/logs', createLogsRouter('/unused/because/reader/is/mocked'));
-    const res = await request(app)
-      .get('/logs')
-      .query({ token: process.env['LOGS_ACCESS_TOKEN'] });
+    const html = await getLogsHtml();
 
-    // 注意：CSS 裡的 `.tag-field { ... }` 規則本身一定會出現在 <style>，所以
-    // 這裡要驗證的是「沒有任何一個 tag-field *元素*」，而不是裸字串 'tag-field'
-    // 完全不出現。
-    expect(res.text).not.toContain('class="tag-field"');
+    expect(html).toContain('plain event with no extra fields');
+    expect(html).not.toContain('pid:');
+    expect(html).not.toContain('hostname:');
   });
 
   it('formats an array extra-field value as "a / b" and an object value as its JSON string', async () => {
@@ -273,17 +187,13 @@ describe('createLogsRouter', () => {
       },
     ]);
 
-    const app = express();
-    app.use('/logs', createLogsRouter('/unused/because/reader/is/mocked'));
-    const res = await request(app)
-      .get('/logs')
-      .query({ token: process.env['LOGS_ACCESS_TOKEN'] });
+    const html = await getLogsHtml();
 
-    expect(res.text).toContain('a / b');
-    expect(res.text).toContain(JSON.stringify({ x: 1 }).replace(/"/g, '&quot;'));
+    expect(html).toContain('tags: a / b');
+    expect(html).toContain(JSON.stringify({ x: 1 }).replace(/"/g, '&quot;'));
   });
 
-  it('skips null/undefined extra-field values entirely instead of rendering a "null" tag', async () => {
+  it('skips null/undefined extra-field values entirely instead of rendering a "null" note', async () => {
     vi.mocked(readRecentLogs).mockResolvedValueOnce([
       {
         level: 30,
@@ -296,91 +206,311 @@ describe('createLogsRouter', () => {
       },
     ]);
 
-    const app = express();
-    app.use('/logs', createLogsRouter('/unused/because/reader/is/mocked'));
-    const res = await request(app)
-      .get('/logs')
-      .query({ token: process.env['LOGS_ACCESS_TOKEN'] });
+    const html = await getLogsHtml();
 
-    // present 欄位仍然要顯示成 tag-field；maybeNull/maybeUndefined 完全不會有
-    // 自己的 tag-field（雖然 raw JSON 的 copy 用途仍然會保留完整原始資料，
-    // 所以這裡驗證的是「沒有以它們為 key 的 tag-field」而不是裸字串完全不出現）。
-    expect(res.text).toContain('tag-field-key">present<');
-    expect(res.text).not.toContain('tag-field-key">maybeNull<');
-    expect(res.text).not.toContain('tag-field-key">maybeUndefined<');
+    expect(html).toContain('present: yes');
+    // maybeNull/maybeUndefined 完全不會出現在通用渲染器的 note 裡（格式是
+    // "key: value"）——雖然「看原始 log」的完整 JSON 傾印仍然會保留
+    // maybeNull（值是 null），所以驗證的是沒有以它為 key 的 note，而不是
+    // 裸字串完全不出現。
+    expect(html).not.toContain('maybeNull:');
+    expect(html).not.toContain('maybeUndefined:');
   });
 
-  // 決定 3：流程表模式的等級色標，來源同一份 LEVEL_COLORS。
-  it('gives flow-table items different border-left-color values based on level', async () => {
+  // 決定 3（沿用）：時間軸每一步的等級色標，來源同一份 LEVEL_COLORS。
+  it('gives timeline dots different colors based on level', async () => {
     vi.mocked(readRecentLogs).mockResolvedValueOnce([
       { level: 50, time: Date.UTC(2024, 0, 1, 0, 0, 0), msg: 'boom', reqId: 'req-err' },
       { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 1), msg: 'ok', reqId: 'req-info' },
     ]);
 
-    const app = express();
-    app.use('/logs', createLogsRouter('/unused/because/reader/is/mocked'));
-    const res = await request(app)
-      .get('/logs')
-      .query({ token: process.env['LOGS_ACCESS_TOKEN'] });
+    const html = await getLogsHtml();
 
     // error 跟 info 兩種等級的色碼不一樣，避免退化成「加了 style 屬性但值都一樣」的假通過
-    expect(res.text).toContain('border-left-color:#f87171'); // error
-    expect(res.text).toContain('border-left-color:#34d399'); // info
+    expect(html).toContain('background:#e0807f'); // error
+    expect(html).toContain('background:#34d399'); // info
+
+    // 兩個獨立 reqId 應該各自的狀態圓點顏色也對應到同一組 STATUS_COLORS
+    expect(html).toContain('data-status="error"');
+    expect(html).toContain('data-status="ok"');
   });
 
-  // 決定 4：長內容至少能透過 hover tooltip 看到完整內容。
-  it('adds a title attribute with the full content text to action-content for both Notion calls and LINE sends', async () => {
+  it('treats a failed LINE reply as an "error" status event even though the underlying log level is warn', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'message', sourceType: 'group', reqId: 'req-fail', msg: 'Processing event' },
+      {
+        level: 30,
+        time: Date.UTC(2024, 0, 1, 0, 0, 1),
+        msg: 'LINE reply',
+        method: 'POST',
+        path: '/v2/bot/message/reply',
+        sendId: 's-fail',
+        reqId: 'req-fail',
+      },
+      {
+        level: 40, // logged at warn, not error
+        time: Date.UTC(2024, 0, 1, 0, 0, 2),
+        msg: 'Reply failed, no fallback available (no groupId for push)',
+        err: { message: 'no fallback available (no groupId for push)' },
+        sendId: 's-fail',
+        reqId: 'req-fail',
+      },
+    ]);
+
+    const html = await getLogsHtml();
+
+    expect(html).toContain('data-status="error"');
+    expect(html).toContain('LINE 回覆失敗');
+    expect(html).toContain('no fallback available (no groupId for push)');
+  });
+
+  it('marks an event with no "Processing event" start as scheduled (排程), and keeps distinct reqIds as separate events', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 30, time: Date.UTC(2024, 0, 1, 4, 0, 0), msg: 'Starting display name batch update', reqId: 'sched-1' },
+      { level: 30, time: Date.UTC(2024, 0, 1, 4, 0, 5), msg: 'Display name update complete', updated: 2, reqId: 'sched-1' },
+      { level: 30, time: Date.UTC(2024, 1, 1, 4, 0, 0), msg: 'Starting display name batch update', reqId: 'sched-2' },
+    ]);
+
+    const html = await getLogsHtml();
+
+    expect((html.match(/data-bucket="cron"/g) ?? []).length).toBe(2);
+    expect(html).toContain('Display name update complete');
+    expect(html).toContain('updated: 2');
+  });
+
+  it('renders a mask toggle that swaps the raw userId for a masked version (both rendered, CSS-toggled)', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'message', sourceType: 'user', reqId: 'req-u', msg: 'Processing event' },
+      {
+        level: 30,
+        time: Date.UTC(2024, 0, 1, 0, 0, 1),
+        msg: 'handleMessage',
+        userId: 'U1234567890abcdef1234567890abcdef',
+        reqId: 'req-u',
+      },
+    ]);
+
+    const html = await getLogsHtml();
+
+    expect(html).toContain('class="masked"'); // body starts masked
+    expect(html).toContain('U1234●●●●●●def'); // masked span
+    expect(html).toContain('U1234567890abcdef1234567890abcdef'); // plain span (still present, CSS-hidden)
+    expect(html).toContain('toggleMask()');
+  });
+
+  it('renders a footer with real "raw log" / "copy JSON" actions wired to that event\'s own raw entries', async () => {
+    const html = await getLogsHtml();
+
+    expect(html).toContain('看這筆的原始 log');
+    expect(html).toContain('複製 JSON');
+    expect(html).toContain('copyRawJson(');
+    expect(html).toContain('class="raw-json hidden" id="raw-req-5"');
+    expect(html).toContain('測試訊息內容A'); // raw JSON for req-5 includes its own payload
+  });
+
+  it('renders search input and the five tabs (全部/需要注意/訊息/排程/系統)', async () => {
+    const html = await getLogsHtml();
+
+    expect(html).toContain('id="search"');
+    expect(html).toContain('全部');
+    expect(html).toContain('需要注意');
+    expect(html).toContain('訊息');
+    expect(html).toContain('排程');
+    expect(html).toContain('系統');
+  });
+
+  it('classifies a command-shaped message (Routing command) as kind=command, and a non-command message as kind=chat', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'message', sourceType: 'group', reqId: 'req-cmd', msg: 'Processing event' },
+      { level: 20, time: Date.UTC(2024, 0, 1, 0, 0, 1), reqId: 'req-cmd', msg: 'Routing command', command: { type: 'registration' }, isAdmin: false },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 2), type: 'message', sourceType: 'group', reqId: 'req-chat', msg: 'Processing event' },
+      { level: 20, time: Date.UTC(2024, 0, 1, 0, 0, 3), reqId: 'req-chat', msg: 'Auto-reply lookup', text: 'hi', matched: false, reply: null },
+    ]);
+
+    const html = await getLogsHtml();
+
+    expect(html).toContain('data-key="req-cmd"');
+    expect(html).toMatch(/data-key="req-cmd"[^>]*>[\s\S]*?指令/);
+    expect(html).toContain('data-key="req-chat"');
+    expect(html).toMatch(/data-key="req-chat"[^>]*>[\s\S]*?對話/);
+  });
+
+  it('treats a command-shaped message that never sent a reply as "warn" (沒看懂)', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'message', sourceType: 'group', reqId: 'req-parsefail', msg: 'Processing event' },
+      { level: 20, time: Date.UTC(2024, 0, 1, 0, 0, 1), reqId: 'req-parsefail', msg: 'Message looks like command but failed to parse', text: '@Dobby 報名下禮拜三' },
+    ]);
+
+    const html = await getLogsHtml();
+
+    expect(html).toContain('data-key="req-parsefail" data-status="warn"');
+  });
+
+  it('downgrades a known non-fatal fallback (profile lookup failure) to "degraded" instead of "error", with an explanation banner', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'memberJoined', sourceType: 'group', reqId: 'req-degraded', msg: 'Processing event' },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 1), reqId: 'req-degraded', msg: 'Could not get user profile', method: 'GET', path: '/v2/bot/group/{groupId}/member/{userId}' },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 2), reqId: 'req-degraded', msg: 'LINE reply', method: 'POST', path: '/v2/bot/message/reply', sendId: 's-d' },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 3), reqId: 'req-degraded', msg: 'LINE reply sent', sendId: 's-d' },
+    ]);
+
+    const html = await getLogsHtml();
+
+    expect(html).toContain('data-key="req-degraded" data-status="degraded"');
+    expect(html).toContain('完成（有降級）');
+    expect(html).toContain('degraded-banner');
+    expect(html).toContain('Could not get user profile —');
+  });
+
+  it('renders a proportional batch-result chart for a scheduled job summary with 2+ numeric fields, excluding "total"', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 30, time: Date.UTC(2024, 0, 1, 4, 0, 0), reqId: 'sched-batch', msg: 'Starting display name batch update' },
+      { level: 30, time: Date.UTC(2024, 0, 1, 4, 0, 5), reqId: 'sched-batch', msg: 'Display name update complete', updated: 24, skipped: 3, failed: 2, total: 29 },
+    ]);
+
+    const html = await getLogsHtml();
+
+    expect(html).toContain('class="batch-section"');
+    expect(html).toContain('batch-stat-label">updated<');
+    expect(html).toContain('24 / 29');
+    // total 本身不是一根獨立的比例條
+    expect(html).not.toContain('batch-stat-label">total<');
+  });
+
+  it('does not render a batch chart when the summary log only has one numeric field', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 30, time: Date.UTC(2024, 0, 1, 4, 0, 0), reqId: 'sched-single', msg: 'Weekly push aborted: DOBBY_GROUP_IDS is not set' },
+    ]);
+
+    const html = await getLogsHtml();
+
+    expect(html).not.toContain('class="batch-section"');
+  });
+
+  it('classifies a reqId-less HTTP-layer failure (e.g. webhook signature validation) as its own "system" event, separate from server lifecycle logs', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), msg: 'Server started', port: 3000 },
+      { level: 40, time: Date.UTC(2024, 0, 1, 1, 0, 0), msg: 'LINE signature validation failed', err: { message: 'bad signature' }, path: '/webhook', method: 'POST' },
+      { level: 40, time: Date.UTC(2024, 0, 1, 2, 0, 0), msg: 'LINE signature validation failed', err: { message: 'bad signature' }, path: '/webhook', method: 'POST' },
+    ]);
+
+    const html = await getLogsHtml();
+
+    // 兩筆各自獨立成一個系統事件，不會因為都沒有 reqId 而被合併成一筆
+    expect((html.match(/data-bucket="sys"/g) ?? []).length).toBe(2);
+    // 伺服器啟動訊息不會被當成獨立事件列出（會變成分隔線，不是 ev-item）
+    expect(html).not.toContain('Server started<');
+  });
+
+  it('gives each known "system" message its own accurate 來自/stepsHeading instead of a shared "index.ts 錯誤處理" label for everything', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 40, time: Date.UTC(2024, 0, 1, 1, 0, 0), msg: 'LINE signature validation failed', err: { message: 'bad signature' }, path: '/webhook', method: 'POST' },
+      { level: 30, time: Date.UTC(2024, 0, 1, 2, 0, 0), msg: 'Webhook received multiple events', eventCount: 2 },
+      { level: 30, time: Date.UTC(2024, 0, 1, 3, 0, 0), msg: 'Some future system-level message nobody wrote a rule for yet' },
+    ]);
+
+    const html = await getLogsHtml();
+
+    // 簽章驗證失敗維持原本的「index.ts 錯誤處理」文案
+    expect(html).toContain('index.ts 錯誤處理');
+    // 一次收到多筆事件是正常情況，不該被貼上「錯誤處理」標籤
+    expect(html).toContain('webhook.ts');
+    expect(html).not.toMatch(/webhook\.ts[^<]*錯誤處理/);
+    // 完全沒對到規則的訊息，退回通用 fallback，不是憑空掉進某個已知文案
+    expect(html).toContain('（未知系統來源）');
+  });
+
+  // 之前只驗證過 event-router.ts 有沒有把 webhookEventId/isRedelivery 記
+  // 進 log（見 event-router.test.ts），沒有驗證 /logs 頁面實際渲染出來的
+  // HTML 裡看不看得到——這裡才是這兩個欄位真正「顯示給人看」的地方。
+  it('shows webhookEventId on the 起點 step, and only shows the isRedelivery marker when it is actually true', async () => {
     vi.mocked(readRecentLogs).mockResolvedValueOnce([
       {
         level: 30,
         time: Date.UTC(2024, 0, 1, 0, 0, 0),
-        msg: 'Notion API request',
-        method: 'GET',
-        path: '/pages/abc',
-        purpose: '查詢成員姓名與繳費狀態',
-        reqId: 'req-1',
+        type: 'message',
+        sourceType: 'group',
+        reqId: 'req-redelivered',
+        webhookEventId: '01M31BEND6EPJ7FSWMDHC7BGRQ',
+        isRedelivery: true,
+        msg: 'Processing event',
       },
       {
         level: 30,
-        time: Date.UTC(2024, 0, 1, 0, 0, 1),
-        msg: 'Notion API response',
-        method: 'GET',
-        path: '/pages/abc',
-        reqId: 'req-1',
-      },
-      {
-        level: 30,
-        time: Date.UTC(2024, 0, 1, 0, 0, 2),
-        msg: 'LINE reply',
-        method: 'POST',
-        path: '/v2/bot/message/reply',
-        sendId: 's-a',
-        reqId: 'req-2',
-      },
-      {
-        level: 20,
-        time: Date.UTC(2024, 0, 1, 0, 0, 3),
-        msg: 'LINE reply payload',
-        sendId: 's-a',
-        messages: ['測試內容'],
-        reqId: 'req-2',
-      },
-      {
-        level: 30,
-        time: Date.UTC(2024, 0, 1, 0, 0, 4),
-        msg: 'LINE reply sent',
-        sendId: 's-a',
-        reqId: 'req-2',
+        time: Date.UTC(2024, 0, 1, 1, 0, 0),
+        type: 'message',
+        sourceType: 'group',
+        reqId: 'req-normal',
+        webhookEventId: '01M31XXXXXXXXXXXXXXXXXXXXX',
+        isRedelivery: false,
+        msg: 'Processing event',
       },
     ]);
 
-    const app = express();
-    app.use('/logs', createLogsRouter('/unused/because/reader/is/mocked'));
-    const res = await request(app)
-      .get('/logs')
-      .query({ token: process.env['LOGS_ACCESS_TOKEN'] });
+    const html = await getLogsHtml();
 
-    expect(res.text).toContain('action-content" title="查詢成員姓名與繳費狀態"');
-    expect(res.text).toContain('action-content" title="測試內容"');
+    expect(html).toContain('webhookEventId: 01M31BEND6EPJ7FSWMDHC7BGRQ');
+    expect(html).toContain('webhookEventId: 01M31XXXXXXXXXXXXXXXXXXXXX');
+    // 只有真的被重送的那一筆才看得到重送標記，且用跟其他「值得注意」欄位
+    // 一致的 warn 色塊，不是每一筆都印一次「isRedelivery: false」的雜訊
+    expect(html).toContain('LINE 重送這筆事件');
+    expect((html.match(/LINE 重送這筆事件/g) ?? []).length).toBe(1);
+    expect(html).not.toContain('isRedelivery: false');
+    expect(html).toContain('tl-note-warn');
+  });
+
+  // 回歸測試：startStepTimeline() 組的 note 曾經漏了 escapeHtml()，讓使用
+  // 者傳的訊息內容跟 webhookEventId 原封不動塞進 HTML（XSS）。這裡故意用
+  // 含有 <script>/雙引號 的字串驗證輸出裡看到的是跳脫過的實體，不是原始
+  // 字元，以後這裡再退步會被這個測試抓到。
+  it('escapes HTML-special characters in the 起點 step\'s note (message content and webhookEventId), not just other steps', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'message', sourceType: 'group', reqId: 'req-xss', webhookEventId: '<img src=x onerror=alert(1)>', msg: 'Processing event' },
+      {
+        level: 20,
+        time: Date.UTC(2024, 0, 1, 0, 0, 1),
+        reqId: 'req-xss',
+        msg: 'Processing event detail',
+        source: { type: 'group' },
+        message: { type: 'text', text: '<script>alert("xss")</script>' },
+      },
+    ]);
+
+    const html = await getLogsHtml();
+
+    expect(html).toContain('&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;');
+    expect(html).toContain('webhookEventId: &lt;img src=x onerror=alert(1)&gt;');
+    expect(html).not.toContain('<script>alert("xss")</script>');
+    expect(html).not.toContain('<img src=x onerror=alert(1)>');
+  });
+
+  // 舊格式的 Processing event（這次改動之前寫的）沒有這兩個欄位——確認
+  // 不會因為缺欄位而顯示空白或壞掉，單純不顯示這兩項。
+  it('renders the 起點 step normally for an old-format "Processing event" line missing webhookEventId/isRedelivery', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'message', sourceType: 'group', reqId: 'req-old', msg: 'Processing event' },
+    ]);
+
+    const html = await getLogsHtml();
+
+    expect(html).toContain('收到訊息');
+    expect(html).not.toContain('webhookEventId:');
+    expect(html).not.toContain('LINE 重送這筆事件');
+  });
+
+  it('renders a service-restart boundary marker from shutdown+startup lifecycle logs, positioned by time, not as a selectable event', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), msg: 'Received shutdown signal, closing server', signal: 'SIGTERM' },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 1), msg: 'Server closed, exiting' },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 5), msg: 'Server started', port: 3000 },
+    ]);
+
+    const html = await getLogsHtml();
+
+    expect(html).toContain('class="ev-boundary"');
+    expect(html).toContain('服務重新啟動');
+    expect(html).toContain('SIGTERM');
+    expect(html).toContain('port 3000');
+    expect(html).not.toContain('class="ev-item"'); // 沒有其他真正的事件，只有分隔線
   });
 });

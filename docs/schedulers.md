@@ -42,6 +42,8 @@
 - 下一個週六是否有對應的行事曆頁面
 - 伺服器時區是否正確（應為 Asia/Taipei）
 
+`sendWeeklyPush()` 整次執行包在 `runWithContext()` 裡，每次觸發都有自己的 `reqId`，在 `/logs` 頁面會是一個獨立的「排程」事件（不會跟其他次執行混在一起），見 `docs/logging.md`。
+
 **歷史備註**：這個群組 ID 原本是執行時查 USERS 資料庫裡 `is_admin = true` 管理員的 `groups[0]`（該欄位由 `user-management.ts` 的 `trackUser()` 在使用者發言時自動累加寫入）。改成環境變數是因為那個來源容易被意外改動（`groups` 欄位不是為了這個用途設計的，管理員在別的群組發言就可能讓 `groups[0]` 變成別的群組），而且讓這支排程沒辦法在不打 Notion API 的情況下測試。
 
 **可同時推播給多個群組**：`DOBBY_GROUP_IDS` 用逗號分隔多個群組 ID（例如 `C123,C456`），`weekly-push.ts` 會逐一推播給每一個，單一群組推播失敗不影響其他群組（個別 try/catch、不重試）。push 呼叫之間刻意不加 delay，因為 LINE 官方 push 端點 rate limit 是 2,000 req/s/channel，遠大於實際會設定的群組數量。
@@ -66,5 +68,5 @@
 ### 注意事項
 
 - 使用者必須在 `groups` 欄位裡至少有一個目前仍有效（bot 還在其中）的群組 ID 才查得到；若曾經在的所有群組都已離開，API 全部回 404，該使用者會被跳過且不影響其他人
-- 這支排程目前沒有分頁處理（USERS 資料庫查詢一次最多抓 100 筆）、單一使用者更新失敗會中斷整批（無逐筆 try/catch），這兩項是已知但尚未修的問題，見 `TODO.md` 的 `[5.3]`、`[5.4]`
+- 查詢 USERS 資料庫時會用 cursor 分頁抓完所有使用者（不受單次查詢 100 筆上限影響）；單一使用者更新失敗只會被個別 try/catch 隔離、記 log 後跳過，不會中斷整批
 - `getGroupMemberProfile()` 呼叫的 `profile-service.ts`/`getProfile()` 有摘要 log，跑這支批次作業時 `/logs` 會出現對應數量的 `'LINE get profile'` log 行（每個使用者一行）——這是預期行為，不是 bug，見 `docs/logging.md`。

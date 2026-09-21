@@ -11,7 +11,7 @@
 | [schedulers.md](schedulers.md) | 定時推播與顯示名稱更新排程說明 | 改排程任務、推播訊息格式 |
 | [development.md](development.md) | 本地開發設定、環境變數、測試方式 | 建置、部署、加新指令的步驟、環境變數 |
 | [notion/databases.md](notion/databases.md) | Notion 資料庫業務邏輯與欄位說明 | 改動任何讀寫 Notion 的邏輯 |
-| [logging.md](logging.md) | `/logs` 頁面的檢視模式、合併顯示、endpoint 顯示說明 | 要用 `/logs` 除錯、不確定這個頁面有什麼功能 |
+| [logging.md](logging.md) | `/logs` 頁面的事件列表/時間軸版面、合併顯示、遮蔽 ID 說明 | 要用 `/logs` 除錯、不確定這個頁面有什麼功能 |
 
 只針對特定功能開發時，不需要全部讀完——依上表挑對應文件即可。
 

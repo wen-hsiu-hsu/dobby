@@ -188,15 +188,17 @@ export function representativeTime(row: DisplayRow): number {
  * Merges log lines that describe one logical action but were emitted as
  * multiple entries (a Notion API call's request/payload/response/payload/
  * error, or a LINE reply/push's "about to send" + "sent"/"failed" pair) into
- * single DisplayRows, so both the flat table and the flow-table view can
- * render one item per action instead of several disjoint lines.
+ * single DisplayRows, so the /logs event timeline can render one item per
+ * action instead of several disjoint lines.
  *
  * Entries are bucketed by reqId before pairing (falling back to a shared ''
- * bucket for entries with no reqId, e.g. scheduler-triggered Notion calls)
- * so two unrelated concurrent calls to the same Notion path never cross-pair.
- * Returned rows are always sorted ascending by representative time; callers
- * that want newest-first (the flat table's existing convention) should
- * reverse the result themselves.
+ * bucket for entries with no reqId — schedulers now get their own reqId via
+ * runWithContext(), so this fallback bucket is really only webhook-layer
+ * failures like a signature-validation error, which happen before any reqId
+ * exists) so two unrelated concurrent calls to the same Notion path never
+ * cross-pair. Returned rows are always sorted ascending by representative
+ * time; callers that want newest-first (routes/logs.ts's event-list
+ * convention) should reverse the result themselves.
  */
 export function groupPairedEntries(entries: LogEntry[]): DisplayRow[] {
   const buckets = new Map<string, LogEntry[]>();
@@ -247,10 +249,11 @@ function flowRowReqId(row: DisplayRow): string {
 }
 
 /**
- * 把 groupPairedEntries() 的扁平結果依 reqId 分組，並在組內分類成流程表
- * 敘事需要的四個角色（起點/終點/步驟/雜項）。這是原本活在 buildFlowView()/
- * renderFlowGroup() 用戶端 JS 裡的邏輯，搬到伺服器端讓 renderHtml() 可以直接
- * 算出完整流程表 HTML，不再需要瀏覽器重新分組。
+ * 把 groupPairedEntries() 的扁平結果依 reqId 分組，並在組內分類成事件時間軸
+ * 敘事需要的四個角色（起點/終點/步驟/雜項，見 `routes/logs.ts` 的
+ * `buildTimeline()`）。這是原本活在 buildFlowView()/renderFlowGroup() 用戶端
+ * JS 裡的邏輯，搬到伺服器端讓 renderHtml() 可以直接算出完整 HTML，不再需要
+ * 瀏覽器重新分組。
  *
  * 輸入必須是 groupPairedEntries() 的輸出（已依 time 升冪排序）——因為組內
  * 順序仰賴這個前提來決定 firstTime 跟敘事順序，不會在這裡重新排序組內項目。

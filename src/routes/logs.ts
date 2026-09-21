@@ -4,10 +4,11 @@ import { logsAuthMiddleware } from '../middleware/logs-auth.js';
 import {
   groupPairedEntries,
   buildFlowGroups,
-  type DisplayRow,
+  representativeTime,
   type NotionCallRow,
   type LineSendRow,
   type FlowGroup,
+  type DisplayRow,
 } from './log-grouping.js';
 
 const taipeiFormatter = new Intl.DateTimeFormat('sv-SE', {
@@ -15,6 +16,14 @@ const taipeiFormatter = new Intl.DateTimeFormat('sv-SE', {
   year: 'numeric',
   month: '2-digit',
   day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+});
+
+const taipeiTimeOnlyFormatter = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Asia/Taipei',
   hour: '2-digit',
   minute: '2-digit',
   second: '2-digit',
@@ -34,17 +43,54 @@ const LEVEL_COLORS: Record<string, string> = {
   trace: '#94a3b8',
   debug: '#60a5fa',
   info: '#34d399',
-  warn: '#fbbf24',
-  error: '#f87171',
+  warn: '#d3a35c',
+  error: '#e0807f',
   fatal: '#c084fc',
 };
 
-const METHOD_COLORS: Record<string, string> = {
-  GET: '#34d399',
-  POST: '#60a5fa',
-  PATCH: '#fbbf24',
-  DELETE: '#f87171',
+type EventStatus = 'ok' | 'degraded' | 'warn' | 'error';
+
+const STATUS_COLORS: Record<EventStatus, string> = {
+  ok: '#7fb894',
+  degraded: '#d3a35c',
+  warn: '#d3a35c',
+  error: '#e0807f',
 };
+
+const STATUS_LABELS: Record<EventStatus, string> = { ok: '完成', degraded: '完成（有降級）', warn: '警告', error: '失敗' };
+
+type EventKind = 'command' | 'chat' | 'join' | 'schedule' | 'system';
+type EventBucket = 'msg' | 'cron' | 'sys';
+
+const KIND_META: Record<EventKind, { label: string; bucket: EventBucket; css: string }> = {
+  command: { label: '指令', bucket: 'msg', css: 'color:#d2cefd;background:#201c33;border:1px solid #5d5294' },
+  chat: { label: '對話', bucket: 'msg', css: 'color:#d2cefd;background:transparent;border:1px solid #5d5294' },
+  join: { label: '加入', bucket: 'msg', css: 'color:#c6c9d6;background:transparent;border:1px solid #262835' },
+  schedule: { label: '排程', bucket: 'cron', css: 'color:#b2b6ca;background:#1c1d29;border:1px solid #262835' },
+  system: { label: '系統', bucket: 'sys', css: 'color:#8b8fa3;background:#1c1d29;border:1px dashed #262835' },
+};
+
+/**
+ * 已知、預期會發生、且不影響最終結果的降級訊息——處理過程中出現這些訊息但
+ * 流程仍然正常結束（有送出回覆、沒有真正的網域錯誤）時，狀態顯示「完成
+ * （有降級）」而不是「失敗」，並在詳情頁上方顯示降級原因。跟一般的
+ * error/warn 等級掃描分開處理，因為這些訊息的 log level 不代表使用者實際
+ * 感受到的嚴重程度（例如 buildMemberJoinedWelcome 那筆是 logger.error，但
+ * 歡迎訊息其實正常送出了，只是用了內建文案）。
+ */
+const DEGRADATION_EXPLANATIONS: Record<string, string> = {
+  'Could not get user profile': 'LINE profile API 呼叫失敗，這筆只能用 userId 顯示，看不到顯示名稱。',
+  'buildMemberJoinedWelcome error, using fallback': '從 Notion 讀取歡迎詞失敗，送出的是內建的備用文案，不是社團自訂內容。',
+  'User tracking failed (non-blocking)': '使用者訊息計數/群組清單更新失敗，不影響這次回覆，但這位使用者的統計資料可能少算一筆。',
+};
+
+/** 伺服器生命週期訊息——沒有 reqId，且不代表任何一次事件處理，用來拼服務重啟的分隔線，不會被當成獨立事件列出。 */
+const LIFECYCLE_MESSAGES = new Set([
+  'Server started',
+  'Received shutdown signal, closing server',
+  'Graceful shutdown timed out, forcing exit',
+  'Server closed, exiting',
+]);
 
 function escapeHtml(str: string): string {
   return str
@@ -58,15 +104,13 @@ function formatTime(epochMs: number): string {
   return taipeiFormatter.format(new Date(epochMs));
 }
 
-function statusIcon(hasSuccess: boolean, hasFailure: boolean): string {
-  if (hasFailure) return '✕';
-  if (hasSuccess) return '✓';
-  return '⏳';
+function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '—';
+  return ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${Math.round(ms)}ms`;
 }
 
-function reqIdCellHtml(rawReqId: string): string {
-  if (!rawReqId) return `<td class="reqid">—</td>`;
-  return `<td class="reqid"><span class="reqid-link" onclick="filterByReqId(event,'${rawReqId}')">${escapeHtml(rawReqId)}</span></td>`;
+function levelNameOf(entry: LogEntry): string {
+  return LEVEL_NAMES[entry.level ?? 30] ?? String(entry.level ?? 30);
 }
 
 const META_FIELDS = new Set(['level', 'time', 'msg', 'reqId', 'pid', 'hostname']);
@@ -77,7 +121,7 @@ function formatExtraValue(value: unknown): string {
     return value.map((v) => (typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v))).join(' / ');
   }
   if (typeof value === 'object') {
-    // value !== null，因為 null 在呼叫端已經被過濾掉（見 renderExtraFieldsHtml）
+    // value !== null，因為 null 在呼叫端已經被過濾掉
     return JSON.stringify(value);
   }
   return String(value);
@@ -87,108 +131,29 @@ function truncate(str: string, maxLen: number): string {
   return str.length > maxLen ? str.slice(0, maxLen) + '…' : str;
 }
 
-/**
- * 通用 key-value 渲染器（決定 1）：把一筆 entry 排除後設欄位（META_FIELDS）
- * 後剩下的每個欄位渲染成一個小標籤，格式比照既有 .tag-purpose 的視覺風格。
- * 新增一個欄位或一種新的 log 訊息完全不需要碰這個函式——它不認識任何特定
- * 欄位名稱，純粹枚舉 Object.keys()。
- *
- * null/undefined 直接跳過該欄位（沒有值可顯示，顯示 "null" 標籤只會製造
- * 雜訊）。值一律截斷到 EXTRA_VALUE_MAX_LEN 字元，完整值放在 title 屬性
- * 供 hover 查看（跟決定 4 的 tooltip 手法一致，兩者共用同一個互動慣例）。
- */
-function renderExtraFieldsHtml(entry: LogEntry): string {
-  const tags = Object.entries(entry)
-    .filter(([key, value]) => !META_FIELDS.has(key) && value !== null && value !== undefined)
-    .map(([key, value]) => {
-      const full = formatExtraValue(value);
-      const shown = escapeHtml(truncate(full, EXTRA_VALUE_MAX_LEN));
-      return `<span class="tag-field" title="${escapeHtml(full)}"><span class="tag-field-key">${escapeHtml(key)}</span>${shown}</span>`;
-    });
-  // No wrapping <div> — each .tag-field is already inline-block, so joining
-  // them bare lets them flow inline right after the message text (like
-  // notionTagsHtml/purposeHtml already do) and wrap only when they run out
-  // of room, instead of being forced onto a hard new line below the message.
-  return tags.join('');
-}
+const MESSAGE_TYPE_LABELS: Record<string, string> = {
+  image: '圖片',
+  video: '影片',
+  audio: '語音',
+  location: '位置資訊',
+  file: '檔案',
+  sticker: '貼圖',
+};
 
-interface RowContent {
-  levelName: string;
-  color: string;
-  time: number;
-  reqId: string;
-  /** 已經是完整 HTML 片段（icon + label + badges + content 或 msg + extra-tags），行內顯示用。 */
-  msgHtml: string;
-  /** 展開/detail 區塊要放進 <pre> 的純文字（已經過 escapeHtml），沒有 detail 就是空字串。 */
-  detailText: string;
-  /** applyFilters() 的 search 比對用，已轉小寫。 */
-  searchableText: string;
-  /** 複製功能（copyFiltered）用的原始 JSON，已 escapeHtml。 */
-  rawJson: string;
-}
-
-// Notion API inline tags: method badge + db name. Under normal operation a
-// Notion API log line is always absorbed into a merged notion-call row by
-// groupPairedEntries() before reaching singleRowContent() — this branch only
-// fires for the rare orphan case (a payload/response/error line whose
-// matching request row wasn't found), so the badge still shows up even then.
-const NOTION_API_MESSAGES = new Set([
-  'Notion API request',
-  'Notion API response',
-  'Notion API request payload',
-  'Notion API response payload',
-  'Notion API error',
-]);
-
-function singleRowContent(entry: LogEntry): RowContent {
-  const levelNum = entry.level ?? 30;
-  const levelName = LEVEL_NAMES[levelNum] ?? String(levelNum);
-  const msg = escapeHtml(String(entry.msg ?? ''));
-  const { level, time: _t, msg: _m, reqId: _r, pid, hostname, ...extra } = entry;
-
-  let notionTagsHtml = '';
-  if (entry.method && NOTION_API_MESSAGES.has(String(entry.msg))) {
-    const method = String(entry.method);
-    const db = entry.db ? String(entry.db) : null;
-    const methodColor = METHOD_COLORS[method] ?? '#94a3b8';
-    notionTagsHtml = ` <span class="tag-method" style="color:${methodColor};border-color:${methodColor}">${escapeHtml(method)}</span>`;
-    if (db) notionTagsHtml += ` <span class="tag-db">${escapeHtml(db)}</span>`;
-  }
-
-  // Purpose tag: set by withPurpose() on repository entry points, shows up
-  // on any log line emitted while that context is active — not just Notion
-  // API lines — since the purpose describes the surrounding operation, not
-  // the specific HTTP call.
-  const purposeHtml = entry.purpose ? ` <span class="tag-purpose">${escapeHtml(String(entry.purpose))}</span>` : '';
-  const extraTagsHtml = renderExtraFieldsHtml(entry); // 決定 1
-
-  // .single-row reuses the same 18px .action-icon gutter that
-  // notionCallRowContent/lineSendRowContent use, so every row's content
-  // starts at the same left edge regardless of kind — but unlike
-  // .action-row, the label/badges/tags all share one flex-wrap area instead
-  // of fixed-width grid columns, because a generic msg name (e.g. "Received
-  // shutdown signal, closing server") can be far longer than "Notion API
-  // 呼叫"/"LINE 回覆" and would get truncated by a fixed-width label column.
-  const msgHtml = `<div class="single-row">` +
-    `<span class="action-icon"></span>` +
-    `<span class="single-row-content">${msg}${notionTagsHtml}${purposeHtml}${extraTagsHtml}</span>` +
-    `</div>`;
-
-  return {
-    levelName,
-    color: LEVEL_COLORS[levelName] ?? '#94a3b8',
-    time: entry.time ?? 0,
-    reqId: String(entry.reqId ?? ''),
-    msgHtml,
-    detailText: '', // single 行沒有獨立 detail 區塊，extra-tags 已經在行內顯示完了，不需要再點開
-    searchableText: (String(entry.msg ?? '') + ' ' + JSON.stringify(extra)).toLowerCase(),
-    rawJson: escapeHtml(JSON.stringify(entry)),
-  };
+/** 'Processing event detail' 的 message 欄位摘要成一行文字。 */
+function messageLabel(message: unknown): string {
+  if (!message || typeof message !== 'object') return '';
+  const m = message as Record<string, unknown>;
+  if (m['type'] === 'text') return typeof m['text'] === 'string' ? m['text'] : '';
+  if (m['type'] === 'location' && m['title']) return `${MESSAGE_TYPE_LABELS['location']}(${String(m['title'])})`;
+  if (m['type'] === 'file' && m['fileName']) return `${MESSAGE_TYPE_LABELS['file']}(${String(m['fileName'])})`;
+  const type = m['type'];
+  return (typeof type === 'string' && MESSAGE_TYPE_LABELS[type]) || (typeof type === 'string' ? type : '');
 }
 
 function notionCallDetail(row: NotionCallRow): string {
   const parts: string[] = [`${row.method} ${row.path}`];
-  const durationMs = row.response?.['durationMs'];
+  const durationMs = row.response?.['durationMs'] ?? row.error?.['durationMs'];
   if (typeof durationMs === 'number') {
     parts.push(`耗時: ${durationMs}ms`);
   }
@@ -213,45 +178,6 @@ function notionCallDetail(row: NotionCallRow): string {
   return parts.join('\n\n');
 }
 
-function notionCallRowContent(row: NotionCallRow): RowContent {
-  const levelNum = row.error?.level ?? row.response?.level ?? row.request.level ?? 30;
-  const levelName = LEVEL_NAMES[levelNum] ?? String(levelNum);
-  const color = LEVEL_COLORS[levelName] ?? '#94a3b8';
-
-  const methodColor = METHOD_COLORS[row.method] ?? '#94a3b8';
-  const methodHtml = `<span class="tag-method" style="color:${methodColor};border-color:${methodColor}">${escapeHtml(row.method)}</span>`;
-  const dbHtml = row.db ? `<span class="tag-db">${escapeHtml(row.db)}</span>` : '';
-  // Not every call has a db tag — GET /pages/{id} calls carry no database ID
-  // in their path at all (page IDs and database IDs are different things),
-  // so getDbName() can't guess one. The path itself is the only way to tell
-  // which endpoint was actually hit in that case.
-  const pathHtml = `<span class="tag-path" title="${escapeHtml(row.path)}">${escapeHtml(row.path)}</span>`;
-  const purposeHtml = row.purpose ? `<span class="tag-purpose">${escapeHtml(row.purpose)}</span>` : '';
-  const retryHtml = row.attempts > 1
-    ? `<span class="tag-method" style="color:#94a3b8;border-color:#94a3b8">重試 ${row.attempts - 1} 次</span>`
-    : '';
-  const icon = statusIcon(!!row.response, !!row.error);
-  // fullContentText 是 purpose 全文，本來就不長，加 title 主要是保險（決定 4）。
-  const fullContentText = row.purpose ?? '';
-  const msgHtml = `<div class="action-row">` +
-    `<span class="action-icon">${icon}</span>` +
-    `<span class="action-label">Notion API 呼叫</span>` +
-    `<span class="action-badges">${methodHtml}${dbHtml}${pathHtml}${retryHtml}</span>` +
-    `<span class="action-content" title="${escapeHtml(fullContentText)}">${purposeHtml}</span>` +
-    `</div>`;
-
-  return {
-    levelName,
-    color,
-    time: row.request.time ?? 0,
-    reqId: String(row.request.reqId ?? ''),
-    msgHtml,
-    detailText: escapeHtml(notionCallDetail(row)),
-    searchableText: JSON.stringify(row).toLowerCase(),
-    rawJson: escapeHtml(JSON.stringify(row)),
-  };
-}
-
 function lineSendDetail(row: LineSendRow): string {
   const parts: string[] = [`${row.method} ${row.path}`];
   const payloadMessages = row.payload?.['messages'];
@@ -274,490 +200,1040 @@ function lineSendDetail(row: LineSendRow): string {
   return parts.join('\n\n');
 }
 
-// LINE 內容預覽長度（決定 4：80 → 160 字元，同時無論長度多少都加上完整內容
-// 的 title，見下方 fullContentText）。
-const LINE_CONTENT_PREVIEW_LEN = 160;
+function errorMessageOf(entry: LogEntry | undefined): string | undefined {
+  const err = entry?.['err'];
+  if (err && typeof err === 'object' && typeof (err as Record<string, unknown>)['message'] === 'string') {
+    return (err as Record<string, unknown>)['message'] as string;
+  }
+  return undefined;
+}
 
-function lineSendRowContent(row: LineSendRow): RowContent {
-  const levelNum = row.failure?.level ?? row.sent?.level ?? row.start.level ?? 30;
-  const levelName = LEVEL_NAMES[levelNum] ?? String(levelNum);
-  const color = LEVEL_COLORS[levelName] ?? '#94a3b8';
-  const label = row.kind === 'line-reply' ? 'LINE 回覆' : 'LINE 推播';
+/**
+ * 把一個 FlowGroup 底下所有原始 LogEntry 攤平回一個陣列——包含尚未配對成功
+ * 的 request/response/payload 等每個片段。用來通用地掃描 userId/displayName/
+ * command 這類「不是所有 log 都有、也不值得為每個訊息類型寫專屬解析」的欄
+ * 位，以及計算整個流程實際耗時的時間範圍。新增一種 log 訊息、多帶一個欄位
+ * 都不需要碰這裡。
+ */
+function flattenEntries(group: FlowGroup): LogEntry[] {
+  const out: LogEntry[] = [];
+  if (group.start) out.push(group.start);
+  if (group.startDetail) out.push(group.startDetail);
+  for (const s of group.steps) {
+    out.push(s.request);
+    if (s.requestPayload) out.push(s.requestPayload);
+    if (s.response) out.push(s.response);
+    if (s.responsePayload) out.push(s.responsePayload);
+    if (s.error) out.push(s.error);
+  }
+  for (const m of group.misc) {
+    if (m.kind === 'single') {
+      out.push(m.entry);
+    } else if (m.kind === 'notion-call') {
+      out.push(m.request);
+      if (m.requestPayload) out.push(m.requestPayload);
+      if (m.response) out.push(m.response);
+      if (m.responsePayload) out.push(m.responsePayload);
+      if (m.error) out.push(m.error);
+    } else {
+      out.push(m.start);
+      if (m.payload) out.push(m.payload);
+      if (m.sent) out.push(m.sent);
+      if (m.failure) out.push(m.failure);
+      if (m.failurePayload) out.push(m.failurePayload);
+    }
+  }
+  if (group.end) {
+    out.push(group.end.start);
+    if (group.end.payload) out.push(group.end.payload);
+    if (group.end.sent) out.push(group.end.sent);
+    if (group.end.failure) out.push(group.end.failure);
+    if (group.end.failurePayload) out.push(group.end.failurePayload);
+  }
+  return out;
+}
 
-  const methodColor = METHOD_COLORS[row.method] ?? '#94a3b8';
-  const methodHtml = `<span class="tag-method" style="color:${methodColor};border-color:${methodColor}">${escapeHtml(row.method)}</span>`;
-  const pathHtml = `<span class="tag-path" title="${escapeHtml(row.path)}">${escapeHtml(row.path)}</span>`;
+const SOURCE_LABELS: Record<string, string> = { group: '群組', room: '多人聊天室', user: '1 對 1' };
+const EVENT_TYPE_LABELS: Record<string, string> = {
+  join: '加入群組事件',
+  memberJoined: '成員加入事件',
+  leave: '離開群組事件',
+  follow: '加好友事件',
+  unfollow: '封鎖事件',
+  postback: 'Postback 事件',
+};
 
-  const payloadMessages = row.payload?.['messages'];
-  const messages = Array.isArray(payloadMessages) ? payloadMessages.map(String) : null;
-  const fullContentText = messages ? messages.join(' / ') : '';
-  const contentHtml = messages
-    ? escapeHtml(fullContentText.slice(0, LINE_CONTENT_PREVIEW_LEN))
-    : '<span class="hint">開 LOG_LEVEL=debug 才能看到訊息內容</span>';
+function groupSourceType(group: FlowGroup): string {
+  if (!group.start) return '';
+  const detailSource =
+    group.startDetail && typeof group.startDetail['source'] === 'object' && group.startDetail['source'] !== null
+      ? (group.startDetail['source'] as Record<string, unknown>)['type']
+      : undefined;
+  return (typeof group.start['sourceType'] === 'string' && group.start['sourceType']) ||
+    (typeof detailSource === 'string' && detailSource) ||
+    '';
+}
 
-  const icon = statusIcon(!!row.sent, !!row.failure);
-  const msgHtml = `<div class="action-row">` +
-    `<span class="action-icon">${icon}</span>` +
-    `<span class="action-label">${escapeHtml(label)}</span>` +
-    `<span class="action-badges">${methodHtml}${pathHtml}</span>` +
-    `<span class="action-content" title="${escapeHtml(fullContentText)}">${contentHtml}</span>` +
-    `</div>`;
+function groupSource(group: FlowGroup, kind: EventKind): string {
+  if (group.start) {
+    const srcType = groupSourceType(group);
+    return SOURCE_LABELS[srcType] ?? (srcType || '未知來源');
+  }
+  if (kind === 'schedule') return '排程 · cron';
+  return 'HTTP · POST /webhook';
+}
+
+/**
+ * 訊息事件是不是指令（`@Dobby +1` 這類）還是普通對話（走自動回覆），
+ * 只有 `Routing command`/`Auto-reply lookup`（都是 debug 層）能明確分辨；
+ * `LOG_LEVEL=info` 下這兩行都不存在，退而用「這個流程有沒有 Notion 呼叫」
+ * 當猜測依據（指令通常會查/寫 Notion，單純聊天不會）。
+ */
+function groupKind(group: FlowGroup): EventKind {
+  if (!group.start) return 'schedule';
+  const msgType = String(group.start['type'] ?? '');
+  if (msgType === 'join' || msgType === 'memberJoined') return 'join';
+  if (msgType === 'message') {
+    const flat = flattenEntries(group);
+    // 'Routing command'／'Message looks like command but failed to parse'
+    // 都只會從 message-handler.ts 的 isCommand(text) 分支裡發出，即使後者
+    // 代表解析失敗，也一樣是「這被判定為指令」的證據。
+    if (flat.some((e) => e.msg === 'Routing command' || e.msg === 'Message looks like command but failed to parse')) {
+      return 'command';
+    }
+    if (flat.some((e) => e.msg === 'Auto-reply lookup' || e.msg === 'Skipping auto-reply for admin')) return 'chat';
+    return group.steps.length > 0 ? 'command' : 'chat';
+  }
+  return 'chat';
+}
+
+function groupTitle(group: FlowGroup, kind: EventKind): string {
+  if (group.start) {
+    const msgType = String(group.start['type'] ?? '');
+    if (msgType === 'message') {
+      const content = group.startDetail ? messageLabel(group.startDetail['message']) : '';
+      return content ? `「${content}」` : '訊息事件（開 LOG_LEVEL=debug 才能看到指令內容）';
+    }
+    return EVENT_TYPE_LABELS[msgType] ?? (msgType ? `${msgType} 事件` : '未知事件');
+  }
+  if (group.end) {
+    const label = group.end.kind === 'line-reply' ? 'LINE 回覆' : 'LINE 推播';
+    return group.end.failure ? `${label}失敗` : `${label}記錄`;
+  }
+  const firstSingle = group.misc.find((r): r is { kind: 'single'; entry: LogEntry } => r.kind === 'single');
+  if (firstSingle) return String(firstSingle.entry.msg ?? '背景作業');
+  if (group.steps.length > 0) return 'Notion API 批次作業';
+  if (group.misc.some((r) => r.kind === 'line-push')) return 'LINE 推播作業';
+  return kind === 'system' ? '系統事件' : group.reqId ? '背景作業' : '背景/未關聯事件';
+}
+
+function groupUserId(group: FlowGroup): string {
+  for (const e of flattenEntries(group)) {
+    if (typeof e['userId'] === 'string' && e['userId']) return e['userId'] as string;
+  }
+  return '';
+}
+
+function groupDisplayName(group: FlowGroup): string | null {
+  for (const e of flattenEntries(group)) {
+    const name = e['targetDisplayName'] ?? e['displayName'];
+    if (typeof name === 'string' && name) return name;
+  }
+  return null;
+}
+
+const SCHEDULE_ORIGIN_MARKERS: Array<[string, string]> = [
+  ['Starting display name batch update', 'display-name-update'],
+  ['Display name update complete', 'display-name-update'],
+  ['Display name update failed', 'display-name-update'],
+  ['Weekly push complete', 'weekly-push'],
+  ['Weekly push aborted', 'weekly-push'],
+  ['Weekly push failed', 'weekly-push'],
+];
+
+/** 「來自」欄位——訊息事件是指令類型，排程事件是排程檔案名稱，其餘退回一個通用標籤。 */
+function groupOrigin(group: FlowGroup, kind: EventKind): string {
+  if (kind === 'command') {
+    for (const e of flattenEntries(group)) {
+      if (e.msg === 'Routing command' && e['command'] && typeof e['command'] === 'object') {
+        const type = (e['command'] as Record<string, unknown>)['type'];
+        if (typeof type === 'string') return type;
+      }
+    }
+    return '（未知，需要 LOG_LEVEL=debug）';
+  }
+  if (kind === 'chat') return '自動回覆（非指令）';
+  if (kind === 'join') return String(group.start?.['type'] ?? 'memberJoined');
+  if (kind === 'system') return 'index.ts 錯誤處理';
+  // schedule
+  const msgs = new Set(flattenEntries(group).map((e) => String(e.msg ?? '')));
+  for (const [marker, slug] of SCHEDULE_ORIGIN_MARKERS) {
+    if (msgs.has(marker)) return slug;
+  }
+  return '排程作業';
+}
+
+function groupStatus(group: FlowGroup, kind: EventKind): EventStatus {
+  const hasDomainError =
+    group.steps.some((s) => !!s.error) ||
+    !!group.end?.failure ||
+    group.misc.some((m) => m.kind === 'line-push' && !!m.failure);
+  if (hasDomainError) return 'error';
+  // 看起來像指令、但整個流程從頭到尾沒有送出任何 LINE 回覆——通常代表指令
+  // 解析失敗（例如日期格式不符），使用者完全沒收到反應。這種「安靜的
+  // 失敗」值得跟真正的錯誤分開標示，方便定期檢查是不是指令說明不夠清楚。
+  if (kind === 'command' && !group.end) return 'warn';
+  const flat = flattenEntries(group);
+  const degradedMsgs = flat.map((e) => String(e.msg ?? '')).filter((m) => m in DEGRADATION_EXPLANATIONS);
+  if (degradedMsgs.length > 0) return 'degraded';
+  const levels = flat.map(levelNameOf);
+  if (levels.some((l) => l === 'error' || l === 'fatal')) return 'error';
+  if (levels.some((l) => l === 'warn')) return 'warn';
+  return 'ok';
+}
+
+/** groupStatus() 判定為 degraded 時，組出詳情頁上方的降級原因說明。 */
+function groupDegradedText(group: FlowGroup): string {
+  const seen = new Set<string>();
+  const parts: string[] = [];
+  for (const e of flattenEntries(group)) {
+    const msg = String(e.msg ?? '');
+    const explanation = DEGRADATION_EXPLANATIONS[msg];
+    if (explanation && !seen.has(msg)) {
+      seen.add(msg);
+      parts.push(`${msg} — ${explanation}`);
+    }
+  }
+  return parts.join('；');
+}
+
+function groupFlag(group: FlowGroup): string | null {
+  if (group.end?.failure) return 'LINE 回覆失敗';
+  if (group.misc.some((m) => m.kind === 'line-push' && m.failure)) return 'LINE 推播失敗';
+  if (group.steps.some((s) => !!s.error)) return 'Notion API 失敗';
+  const totalRetries = group.steps.reduce((sum, s) => sum + (s.attempts > 1 ? s.attempts - 1 : 0), 0);
+  return totalRetries > 0 ? `重試 ${totalRetries} 次` : null;
+}
+
+function lineMessagesOf(entry: LogEntry | undefined): string[] | null {
+  const messages = entry?.['messages'];
+  return Array.isArray(messages) ? messages.map(String) : null;
+}
+
+function groupPreview(group: FlowGroup): string {
+  if (group.end) {
+    if (group.end.failure) {
+      return `回覆失敗\n${errorMessageOf(group.end.failure) ?? String(group.end.failure.msg ?? '傳送失敗')}`;
+    }
+    const messages = lineMessagesOf(group.end.payload);
+    if (messages) return messages.join('\n');
+    if (group.end.sent) return '回覆已送出（開 LOG_LEVEL=debug 才能看到訊息內容）';
+    return '尚無回覆結果記錄';
+  }
+  const push = group.misc.find((m) => m.kind === 'line-push');
+  if (push && push.kind === 'line-push') {
+    if (push.failure) {
+      return `推播失敗\n${errorMessageOf(push.failure) ?? String(push.failure.msg ?? '傳送失敗')}`;
+    }
+    const messages = lineMessagesOf(push.payload);
+    if (messages) return messages.join('\n');
+    if (push.sent) return '推播已送出（開 LOG_LEVEL=debug 才能看到訊息內容）';
+  }
+  // 沒有 LINE 回覆/推播可用時，用這個流程裡最後一筆通用單行 log（例如排程
+  // 作業結束時的摘要 log）當預覽，比固定公式更能反映實際發生了什麼——不用
+  // 為新的摘要 log 訊息另外寫規則，通用渲染器的欄位一樣會自動出現。
+  const singles = group.misc.filter((r): r is { kind: 'single'; entry: LogEntry } => r.kind === 'single');
+  const lastSingle = singles.at(-1)?.entry;
+  if (lastSingle) {
+    const { level: _level, time: _time, msg, reqId: _reqId, pid: _pid, hostname: _hostname, ...extra } = lastSingle;
+    const extraText = Object.entries(extra)
+      .filter(([, v]) => v !== null && v !== undefined)
+      .map(([k, v]) => `${k}: ${formatExtraValue(v)}`)
+      .join(' · ');
+    return extraText ? `${String(msg ?? '')}\n${extraText}` : String(msg ?? '');
+  }
+  return (
+    (group.start ? '事件觸發' : group.reqId ? '(無 Processing event 記錄)' : '背景/未關聯事件') +
+    ' → ' +
+    group.steps.length +
+    ' 次 API 呼叫 → ' +
+    (group.end ? 'LINE 回覆' : '(無回覆記錄)')
+  );
+}
+
+interface BatchStat {
+  label: string;
+  value: number;
+  color: string;
+}
+
+/**
+ * 排程事件結束時的摘要 log（例如 `Display name update complete` 的
+ * `{updated, skipped, failed, total}`、`Weekly push complete` 的
+ * `{succeeded, failed, total}`）通用地抓出數字欄位畫成比例條——不特別認識
+ * 任何排程的欄位名稱，只要是數字就收，`total` 排除掉（它是其他欄位加總，
+ * 畫進去會讓比例條變成一半是重複的），依欄位名稱的關鍵字猜顏色。新增一種
+ * 排程摘要 log 不需要改這裡。
+ */
+function computeBatch(group: FlowGroup, kind: EventKind): BatchStat[] | null {
+  if (kind !== 'schedule') return null;
+  const singles = group.misc.filter((r): r is { kind: 'single'; entry: LogEntry } => r.kind === 'single');
+  const lastSingle = singles.at(-1)?.entry;
+  if (!lastSingle) return null;
+  const { level: _level, time: _time, msg: _msg, reqId: _reqId, pid: _pid, hostname: _hostname, ...extra } =
+    lastSingle;
+  const stats: BatchStat[] = [];
+  for (const [key, value] of Object.entries(extra)) {
+    if (typeof value !== 'number' || !Number.isFinite(value) || key.toLowerCase() === 'total') continue;
+    const color = /fail|error/i.test(key) ? '#e0807f' : /success|succeed|updated|sent|complete/i.test(key) ? '#7fb894' : '#595d6c';
+    stats.push({ label: key, value, color });
+  }
+  return stats.length >= 2 ? stats : null;
+}
+
+interface TimelineStep {
+  levelName: string;
+  color: string;
+  endpointLabel: string;
+  title: string;
+  path: string;
+  duration: string;
+  note: string;
+  noteTitle: string;
+  noteTone?: 'warn' | 'error';
+  detailText: string;
+  body: string;
+  bodyLabel: string;
+}
+
+function startStepTimeline(group: FlowGroup): TimelineStep {
+  const entry = group.start!;
+  const levelName = levelNameOf(entry);
+  const msgType = String(entry['type'] ?? '');
+  const srcType = groupSourceType(group);
+  const content = msgType === 'message' && group.startDetail ? messageLabel(group.startDetail['message']) : '';
+  const parts: string[] = [];
+  if (msgType === 'message') {
+    parts.push(content ? `「${content}」` : '開 LOG_LEVEL=debug 才能看到指令內容');
+  }
+  if (msgType) parts.push(msgType);
+  if (srcType) parts.push(SOURCE_LABELS[srcType] ?? srcType);
+  // webhookEventId 只是拿去跟 LINE 後台/客服對照用的識別碼，沒有語意，跟
+  // 其他描述性資訊放在同一行、不特別強調；舊格式的 log（這次改動之前寫的）
+  // 沒有這個欄位，就單純不顯示，不是解析失敗。
+  const webhookEventId = entry['webhookEventId'];
+  if (typeof webhookEventId === 'string' && webhookEventId) {
+    parts.push(`webhookEventId: ${webhookEventId}`);
+  }
+  // isRedelivery 平常幾乎都是 false，沒有資訊價值；只有 true（LINE 重送了
+  // 同一筆事件）才值得跳出來讓人注意，所以只在這個情況才加進 note，並且
+  // 把整行提升成跟「尚無回應記錄」同一種 warn 色塊，跟這個頁面其他「只在
+  // 異常時才顯示」的慣例（flag／degraded 那些欄位）一致。
+  const isRedelivery = entry['isRedelivery'] === true;
+  if (isRedelivery) {
+    parts.push('LINE 重送這筆事件（isRedelivery）');
+  }
+  return {
+    levelName,
+    color: LEVEL_COLORS[levelName] ?? '#94a3b8',
+    endpointLabel: '起點',
+    title: '收到訊息',
+    path: '',
+    duration: '',
+    note: escapeHtml(parts.join(' · ')),
+    noteTitle: '',
+    noteTone: isRedelivery ? 'warn' : undefined,
+    detailText: '',
+    body: '',
+    bodyLabel: '',
+  };
+}
+
+function notionStepTimeline(row: NotionCallRow): TimelineStep {
+  const levelName = LEVEL_NAMES[row.error?.level ?? row.response?.level ?? row.request.level ?? 30] ?? 'info';
+  const retrySuffix = row.attempts > 1 ? ` · 重試 ${row.attempts - 1} 次` : '';
+  const durationMs = row.response?.['durationMs'] ?? row.error?.['durationMs'];
+  let note = '';
+  let noteTone: 'warn' | 'error' | undefined;
+  if (row.error) {
+    const status = row.error['status'];
+    note = 'Notion API 呼叫失敗' + (typeof status === 'number' ? ` · HTTP ${status}` : '');
+    noteTone = 'error';
+  } else if (!row.response) {
+    note = '尚無回應記錄';
+    noteTone = 'warn';
+  }
+  return {
+    levelName,
+    color: LEVEL_COLORS[levelName] ?? '#94a3b8',
+    endpointLabel: '',
+    title: (row.purpose ? escapeHtml(row.purpose) : 'Notion API 呼叫') + retrySuffix,
+    path: escapeHtml(`${row.method} ${row.path}`),
+    duration: typeof durationMs === 'number' ? formatDuration(durationMs) : '',
+    note,
+    noteTitle: '',
+    noteTone,
+    detailText: escapeHtml(notionCallDetail(row)),
+    body: '',
+    bodyLabel: '',
+  };
+}
+
+function lineStepTimeline(row: LineSendRow, isEndpoint: boolean): TimelineStep {
+  const levelName = LEVEL_NAMES[row.failure?.level ?? row.sent?.level ?? row.start.level ?? 30] ?? 'info';
+  const kindLabel = row.kind === 'line-reply' ? 'LINE 回覆' : 'LINE 推播';
+  const messages = lineMessagesOf(row.payload);
+  const endTime = row.failure?.time ?? row.sent?.time;
+  const duration =
+    typeof endTime === 'number' && typeof row.start.time === 'number' ? formatDuration(endTime - row.start.time) : '';
+
+  let title: string;
+  let note = '';
+  let noteTone: 'error' | undefined;
+  let body = '';
+  let bodyLabel = '';
+  if (row.failure) {
+    title = `${kindLabel}失敗`;
+    note = errorMessageOf(row.failure) ?? String(row.failure['msg'] ?? '傳送失敗');
+    noteTone = 'error';
+    bodyLabel = '這則訊息沒有送出';
+    if (messages) body = messages.join('\n');
+  } else if (row.sent) {
+    title = `${kindLabel}已送出`;
+    if (messages) {
+      bodyLabel = row.kind === 'line-reply' ? 'Dobby 送給使用者的訊息' : 'Dobby 推播的訊息';
+      body = messages.join('\n');
+    } else {
+      note = '開 LOG_LEVEL=debug 才能看到訊息內容';
+    }
+  } else {
+    title = `${kindLabel}處理中`;
+    note = '尚無送出結果記錄';
+  }
 
   return {
     levelName,
-    color,
-    time: row.start.time ?? 0,
-    reqId: String(row.start.reqId ?? ''),
-    msgHtml,
+    color: LEVEL_COLORS[levelName] ?? '#94a3b8',
+    endpointLabel: isEndpoint ? '終點' : '',
+    title,
+    path: escapeHtml(`${row.method} ${row.path}`),
+    duration,
+    note: escapeHtml(note),
+    noteTitle: '',
+    noteTone,
     detailText: escapeHtml(lineSendDetail(row)),
-    searchableText: JSON.stringify(row).toLowerCase(),
-    rawJson: escapeHtml(JSON.stringify(row)),
+    body: escapeHtml(body),
+    bodyLabel,
   };
 }
 
-function rowContent(row: DisplayRow): RowContent {
-  switch (row.kind) {
-    case 'single':
-      return singleRowContent(row.entry);
-    case 'notion-call':
-      return notionCallRowContent(row);
-    case 'line-reply':
-    case 'line-push':
-      return lineSendRowContent(row);
-  }
-}
-
-function asTableRow(c: RowContent): string {
-  const extraRow = c.detailText
-    ? `<tr class="extra-row hidden"><td colspan="4"><pre>${c.detailText}</pre></td></tr>`
-    : '';
-  return `
-  <tr class="log-row" data-level="${c.levelName}" data-time="${c.time}" data-msg="${escapeHtml(c.searchableText)}" data-reqid="${c.reqId}" data-raw="${c.rawJson}" onclick="toggleExtra(this)">
-    <td class="time">${formatTime(c.time)}</td>
-    <td><span class="badge" style="background:${c.color}">${c.levelName}</span></td>
-    ${reqIdCellHtml(c.reqId)}
-    <td class="msg">${c.msgHtml}</td>
-  </tr>
-  ${extraRow}`;
-}
-
-/** wrapperClass 是 'flow-step' | 'flow-misc'；決定 3 的等級色標用 inline style 的
- * border-left-color 實作（顏色是每一列各自的 LEVEL_COLORS 值，不是靜態 CSS class
- * 能表達的，所以用 inline style，class 本身只負責排版）。 */
-function asFlowItem(c: RowContent, wrapperClass: 'flow-step' | 'flow-misc'): string {
-  const detail = c.detailText ? `<div class="flow-step-detail"><pre>${c.detailText}</pre></div>` : '';
-  const clickable = c.detailText ? ` onclick="event.stopPropagation(); this.classList.toggle('expanded')"` : '';
-  return `<div class="${wrapperClass}" style="border-left-color:${c.color}" data-level="${c.levelName}" data-time="${c.time}" data-msg="${escapeHtml(c.searchableText)}" data-reqid="${c.reqId}"${clickable}>${c.msgHtml}${detail}</div>`;
-}
-
-/** 起點/終點用專屬 wrapper（見下方流程表渲染），一樣加上等級色標跟 data-* 篩選屬性。
- * 「起點」的 detailText 永遠是空字串（見 renderFlowStartEndpointHtml），但「終點」
- * 帶的是 lineSendRowContent() 算出的 LINE 回覆失敗原因/完整內容——跟 asFlowItem
- * 一樣要能展開看到，否則平面模式點得開的東西，流程表的終點卻整段看不到。 */
-function asFlowEndpoint(c: RowContent, label: string): string {
-  const detail = c.detailText ? `<div class="flow-step-detail"><pre>${c.detailText}</pre></div>` : '';
-  const clickable = c.detailText ? ` onclick="event.stopPropagation(); this.classList.toggle('expanded')"` : '';
-  return `<div class="flow-endpoint" style="border-left-color:${c.color}" data-level="${c.levelName}" data-time="${c.time}" data-msg="${escapeHtml(c.searchableText)}" data-reqid="${c.reqId}"${clickable}><span class="flow-tag">${label}</span>${c.msgHtml}${detail}</div>`;
-}
-
-const MESSAGE_TYPE_LABELS: Record<string, string> = {
-  image: '圖片',
-  video: '影片',
-  audio: '語音',
-  location: '位置資訊',
-  file: '檔案',
-  sticker: '貼圖',
-};
-
-/** 'Processing event detail' 的 message 欄位摘要成一行文字。與舊版用戶端
- * messageLabel() 邏輯相同，只是搬到伺服器端、輸入型別改成 unknown。 */
-function messageLabel(message: unknown): string {
-  if (!message || typeof message !== 'object') return '';
-  const m = message as Record<string, unknown>;
-  if (m['type'] === 'text') return typeof m['text'] === 'string' ? m['text'] : '';
-  if (m['type'] === 'location' && m['title']) return `${MESSAGE_TYPE_LABELS['location']}(${String(m['title'])})`;
-  if (m['type'] === 'file' && m['fileName']) return `${MESSAGE_TYPE_LABELS['file']}(${String(m['fileName'])})`;
-  const type = m['type'];
-  return (typeof type === 'string' && MESSAGE_TYPE_LABELS[type]) || (typeof type === 'string' ? type : '');
-}
-
-function renderFlowStartEndpointHtml(entry: LogEntry, detail: LogEntry | undefined): string {
-  // 'Processing event' (info) carries only type/sourceType — no PII. The
-  // actual message content lives on the paired 'Processing event detail'
-  // (debug) line, if LOG_LEVEL=debug captured one.
-  const detailSource = detail && typeof detail['source'] === 'object' && detail['source'] !== null
-    ? (detail['source'] as Record<string, unknown>)['type']
-    : undefined;
-  const src = (typeof entry.sourceType === 'string' && entry.sourceType) || (typeof detailSource === 'string' && detailSource) || '';
-  const msgType = String(entry['type'] ?? '');
-  let contentHtml = '';
-  if (msgType === 'message') {
-    const content = detail ? messageLabel(detail['message']) : '';
-    contentHtml = content
-      ? ` · ${escapeHtml(content)}`
-      : ' · <span class="hint">開 LOG_LEVEL=debug 才能看到指令內容</span>';
-  }
-
-  const levelNum = entry.level ?? 30;
-  const levelName = LEVEL_NAMES[levelNum] ?? String(levelNum);
-  const color = LEVEL_COLORS[levelName] ?? '#94a3b8';
-  const c: RowContent = {
+function singleStepTimeline(entry: LogEntry): TimelineStep {
+  const levelName = levelNameOf(entry);
+  const { level: _level, time: _time, msg, reqId: _reqId, pid: _pid, hostname: _hostname, ...extra } = entry;
+  const pairs = Object.entries(extra).filter(([, v]) => v !== null && v !== undefined);
+  const fullNote = pairs.map(([k, v]) => `${k}: ${formatExtraValue(v)}`).join(' · ');
+  const shownNote = pairs.map(([k, v]) => `${k}: ${truncate(formatExtraValue(v), EXTRA_VALUE_MAX_LEN)}`).join(' · ');
+  return {
     levelName,
-    color,
-    time: entry.time ?? 0,
-    reqId: String(entry.reqId ?? ''),
-    msgHtml: `事件進來 · ${escapeHtml(msgType)}${src ? ` · ${escapeHtml(src)}` : ''}${contentHtml}`,
+    color: LEVEL_COLORS[levelName] ?? '#94a3b8',
+    endpointLabel: '',
+    title: escapeHtml(String(msg ?? '')),
+    path: '',
+    duration: '',
+    note: escapeHtml(shownNote),
+    noteTitle: escapeHtml(fullNote),
     detailText: '',
-    searchableText: String(entry.msg ?? '').toLowerCase(),
-    rawJson: '',
+    body: '',
+    bodyLabel: '',
   };
-  return asFlowEndpoint(c, '起點');
 }
 
-function renderFlowEndEndpointHtml(row: LineSendRow): string {
-  // row 一定是 kind === 'line-reply'（FlowGroup.end 的型別已經是 LineSendRow，
-  // 但實務上只會塞 line-reply，line-push 一律進 misc）。
-  return asFlowEndpoint(lineSendRowContent(row), '終點');
+function buildTimeline(group: FlowGroup): TimelineStep[] {
+  const middleRows: DisplayRow[] = [...group.steps, ...group.misc]
+    .map((row) => ({ row, t: representativeTime(row) }))
+    .sort((a, b) => a.t - b.t)
+    .map((x) => x.row);
+
+  const steps: TimelineStep[] = [];
+  if (group.start) steps.push(startStepTimeline(group));
+  for (const row of middleRows) {
+    switch (row.kind) {
+      case 'notion-call':
+        steps.push(notionStepTimeline(row));
+        break;
+      case 'line-reply':
+      case 'line-push':
+        steps.push(lineStepTimeline(row, false));
+        break;
+      case 'single':
+        steps.push(singleStepTimeline(row.entry));
+        break;
+    }
+  }
+  if (group.end) steps.push(lineStepTimeline(group.end, true));
+  return steps;
 }
 
-function renderFlowGroupHtml(group: FlowGroup): string {
-  const summary = (group.start ? '事件觸發' : (group.reqId ? '(無 Processing event 記錄)' : '背景/排程作業')) +
-    ' → ' + group.steps.length + ' 次 API 呼叫 → ' + (group.end ? 'LINE reply' : '(無回覆記錄)');
-  const reqIdHtml = group.reqId
-    ? `<span class="reqid-link" onclick="event.stopPropagation(); filterByReqId(event,'${group.reqId}'); setViewMode('flat')">${escapeHtml(group.reqId)}</span>`
-    : `<span class="reqid-link" style="cursor:default;opacity:.6">(無 reqId)</span>`;
-
-  const stepsHtml = [
-    group.start ? renderFlowStartEndpointHtml(group.start, group.startDetail) : '',
-    ...group.steps.map((row) => asFlowItem(notionCallRowContent(row), 'flow-step')),
-    ...group.misc.map((row) => asFlowItem(rowContent(row), 'flow-misc')),
-    group.end ? renderFlowEndEndpointHtml(group.end) : '',
-  ].join('');
-
-  return `<div class="flow-group">` +
-    `<div class="flow-header" onclick="this.parentElement.classList.toggle('expanded')">` +
-    `<span class="flow-caret">▸</span>` +
-    `<span class="time">${formatTime(group.firstTime)}</span>` +
-    reqIdHtml +
-    `<span class="flow-summary">${escapeHtml(summary)}</span>` +
-    `</div>` +
-    `<div class="flow-steps">${stepsHtml}</div>` +
-    `</div>`;
+function maskUserId(id: string): string {
+  if (!id) return '';
+  if (id.length <= 9) return '●'.repeat(id.length);
+  return `${id.slice(0, 5)}●●●●●●${id.slice(-3)}`;
 }
 
-function renderFlowView(displayRows: DisplayRow[]): string {
-  const groups = buildFlowGroups(displayRows);
-  if (groups.length === 0) return '<div class="flow-empty">No log entries found</div>';
-  return groups.map(renderFlowGroupHtml).join('');
+interface EventView {
+  key: string;
+  reqId: string;
+  timeMs: number;
+  time: string;
+  stamp: string;
+  kind: EventKind;
+  kindLabel: string;
+  kindCss: string;
+  title: string;
+  hasWho: boolean;
+  name: string | null;
+  userIdRaw: string;
+  source: string;
+  origin: string;
+  status: EventStatus;
+  statusLabel: string;
+  flag: string | null;
+  preview: string;
+  degradedText: string;
+  batch: BatchStat[] | null;
+  stepsHeading: string;
+  durationText: string;
+  searchText: string;
+  rawEntries: LogEntry[];
+  steps: TimelineStep[];
+}
+
+const STEPS_HEADING_BY_KIND: Partial<Record<EventKind, string>> = { schedule: '執行過程', system: '發生了什麼' };
+
+function buildEventView(group: FlowGroup, rawEntries: LogEntry[]): EventView {
+  const times = flattenEntries(group)
+    .map((e) => e.time ?? 0)
+    .filter((t) => t > 0);
+  const first = times.length > 0 ? Math.min(...times) : group.firstTime;
+  const last = times.length > 0 ? Math.max(...times) : group.firstTime;
+  const kind = groupKind(group);
+  const status = groupStatus(group, kind);
+  const title = groupTitle(group, kind);
+  const preview = groupPreview(group);
+  const name = groupDisplayName(group);
+  const userIdRaw = groupUserId(group);
+  const origin = groupOrigin(group, kind);
+  const source = groupSource(group, kind);
+
+  return {
+    key: group.reqId || 'noreq',
+    reqId: group.reqId,
+    timeMs: first,
+    time: taipeiTimeOnlyFormatter.format(new Date(first)),
+    stamp: formatTime(first),
+    kind,
+    kindLabel: KIND_META[kind].label,
+    kindCss: KIND_META[kind].css,
+    title,
+    hasWho: !!userIdRaw,
+    name,
+    userIdRaw,
+    source,
+    origin,
+    status,
+    statusLabel: STATUS_LABELS[status],
+    flag: groupFlag(group),
+    preview,
+    degradedText: status === 'degraded' ? groupDegradedText(group) : '',
+    batch: computeBatch(group, kind),
+    stepsHeading: STEPS_HEADING_BY_KIND[kind] ?? '處理過程',
+    durationText: formatDuration(last - first),
+    searchText: [title, preview, group.reqId, name ?? '', userIdRaw, origin]
+      .join(' ')
+      .toLowerCase(),
+    rawEntries,
+    steps: buildTimeline(group),
+  };
+}
+
+/**
+ * 已知、會落進「系統」分類（沒有 reqId、非伺服器生命週期訊息）的具體訊息
+ * 對照表——跟 `SCHEDULE_ORIGIN_MARKERS` 同一套「已知訊息對照表＋通用
+ * fallback」模式。不要假設掉進這個分類的訊息一定是錯誤：webhook 一次收到
+ * 多筆事件是正常、預期內的情況，只是少見；簽章驗證失敗才是真正的異常。
+ */
+const SYSTEM_EVENT_INFO: Record<string, { origin: string; stepsHeading: string }> = {
+  'LINE signature validation failed': { origin: 'index.ts 錯誤處理', stepsHeading: '發生了什麼' },
+  'Webhook received multiple events': { origin: 'webhook.ts（事件批次提示，非錯誤）', stepsHeading: '說明' },
+};
+const SYSTEM_EVENT_FALLBACK: { origin: string; stepsHeading: string } = { origin: '（未知系統來源）', stepsHeading: '發生了什麼' };
+
+/** 沒有配對到任何 reqId、也不是伺服器生命週期訊息的單行 log（例如 LINE 簽章驗證失敗、webhook 一次收到多筆事件）——每一筆各自變成一個獨立的「系統」事件，不跟別的無 reqId 訊息合併。 */
+function buildSystemEventView(entry: LogEntry, index: number): EventView {
+  const levelName = levelNameOf(entry);
+  const msg = String(entry.msg ?? '系統事件');
+  const { origin, stepsHeading } = SYSTEM_EVENT_INFO[msg] ?? SYSTEM_EVENT_FALLBACK;
+  const { level: _level, time: _time, msg: _msg, reqId: _reqId, pid: _pid, hostname: _hostname, ...extra } = entry;
+  const pairs = Object.entries(extra).filter(([, v]) => v !== null && v !== undefined);
+  const noteText = pairs.map(([k, v]) => `${k}: ${formatExtraValue(v)}`).join(' · ');
+  const status: EventStatus = levelName === 'error' || levelName === 'fatal' ? 'error' : levelName === 'warn' ? 'warn' : 'ok';
+  const step: TimelineStep = {
+    levelName,
+    color: LEVEL_COLORS[levelName] ?? '#94a3b8',
+    endpointLabel: '',
+    title: escapeHtml(msg),
+    path: '',
+    duration: '',
+    note: escapeHtml(noteText),
+    noteTitle: '',
+    noteTone: status === 'error' ? 'error' : status === 'warn' ? 'warn' : undefined,
+    detailText: '',
+    body: '',
+    bodyLabel: '',
+  };
+  return {
+    key: `sys-${index}`,
+    reqId: '',
+    timeMs: entry.time ?? 0,
+    time: taipeiTimeOnlyFormatter.format(new Date(entry.time ?? 0)),
+    stamp: formatTime(entry.time ?? 0),
+    kind: 'system',
+    kindLabel: KIND_META.system.label,
+    kindCss: KIND_META.system.css,
+    title: msg,
+    hasWho: false,
+    name: null,
+    userIdRaw: '',
+    source: 'HTTP · POST /webhook',
+    origin,
+    status,
+    statusLabel: STATUS_LABELS[status],
+    flag: null,
+    preview: noteText || msg,
+    degradedText: '',
+    batch: null,
+    stepsHeading,
+    durationText: '—',
+    searchText: `${msg} ${noteText}`.toLowerCase(),
+    rawEntries: [entry],
+    steps: [step],
+  };
+}
+
+interface BoundaryMarker {
+  timeMs: number;
+  label: string;
+  meta: string;
+  time: string;
+}
+
+/**
+ * 伺服器重啟的分隔線——用「Server started」往回找最近一次的關閉訊號
+ * （signal），拼成「SIGTERM · port 3000」這種摘要。找不到對應的關閉訊號
+ * 就只顯示 port（例如這是這批日誌裡第一次看到的啟動，關閉訊號在保留期
+ * 外）。這些訊息完全沒有 reqId，純粹是時間軸上的參考點，不是可以點開的
+ * 事件，所以不會變成 EventView。
+ */
+function buildBoundaryMarkers(lifecycleEntries: LogEntry[]): BoundaryMarker[] {
+  const sorted = [...lifecycleEntries].sort((a, b) => (a.time ?? 0) - (b.time ?? 0));
+  const markers: BoundaryMarker[] = [];
+  let lastSignal = '';
+  for (const e of sorted) {
+    if (e.msg === 'Received shutdown signal, closing server' && typeof e['signal'] === 'string') {
+      lastSignal = e['signal'];
+    } else if (e.msg === 'Server started') {
+      const port = e['port'];
+      const meta = [lastSignal, typeof port !== 'undefined' ? `port ${String(port)}` : ''].filter(Boolean).join(' · ');
+      markers.push({ timeMs: e.time ?? 0, label: '服務重新啟動', meta, time: taipeiTimeOnlyFormatter.format(new Date(e.time ?? 0)) });
+      lastSignal = '';
+    }
+  }
+  return markers;
+}
+
+function eventListItemHtml(ev: EventView, boundary: BoundaryMarker | undefined): string {
+  const boundaryHtml = boundary
+    ? `<div class="ev-boundary"><span class="ev-boundary-icon">⏻</span><span class="ev-boundary-label">${escapeHtml(boundary.label)}</span><span class="ev-boundary-meta">${escapeHtml(boundary.meta)}</span><span class="ev-boundary-time">${escapeHtml(boundary.time)}</span></div>`
+    : '';
+  const whoHtml = ev.hasWho
+    ? `<div class="ev-item-meta">${ev.name ? `<span class="ev-name">${escapeHtml(ev.name)}</span>` : ''}<span class="ev-userid"><span class="id-masked">${escapeHtml(maskUserId(ev.userIdRaw))}</span><span class="id-plain">${escapeHtml(ev.userIdRaw)}</span></span></div>`
+    : '';
+  const flagHtml = ev.flag
+    ? `<span class="ev-flag ev-flag-${ev.status}">${escapeHtml(ev.flag)}</span>`
+    : '';
+  const previewLine = escapeHtml(ev.preview.split('\n').filter(Boolean).join(' · '));
+
+  return `${boundaryHtml}
+  <div class="ev-item" data-key="${escapeHtml(ev.key)}" data-status="${ev.status}" data-bucket="${KIND_META[ev.kind].bucket}" data-search="${escapeHtml(ev.searchText)}" onclick="selectEvent('${escapeHtml(ev.key)}')">
+    <div class="ev-item-top">
+      <span class="ev-dot" style="background:${STATUS_COLORS[ev.status]}"></span>
+      <span class="ev-kind" style="${ev.kindCss}">${escapeHtml(ev.kindLabel)}</span>
+      <span class="ev-title">${escapeHtml(ev.title)}</span>
+      <span class="ev-time">${escapeHtml(ev.time)}</span>
+    </div>
+    <div class="ev-item-body">
+      ${whoHtml}
+      <div class="ev-preview ev-preview-${ev.status}">${previewLine}</div>
+      <div class="ev-item-tags">
+        <span class="ev-source">${escapeHtml(ev.source)}</span>
+        <span class="ev-duration">${escapeHtml(ev.durationText)}</span>
+        ${flagHtml}
+      </div>
+    </div>
+  </div>`;
+}
+
+function timelineStepHtml(step: TimelineStep, isLast: boolean): string {
+  const endpointTag = step.endpointLabel
+    ? `<span class="tl-endpoint-tag">${escapeHtml(step.endpointLabel)}</span>`
+    : '';
+  const pathHtml = step.path ? `<span class="tl-path">${step.path}</span>` : '';
+  const durationHtml = step.duration ? `<span class="tl-duration">${escapeHtml(step.duration)}</span>` : '';
+  const noteClass = step.noteTone ? ` tl-note-${step.noteTone}` : '';
+  const noteTitleAttr = step.noteTitle ? ` title="${step.noteTitle}"` : '';
+  const noteHtml = step.note ? `<div class="tl-note${noteClass}"${noteTitleAttr}>${step.note}</div>` : '';
+  const bodyHtml = step.body
+    ? `<div class="tl-body-wrap"><span class="tl-body-label">${escapeHtml(step.bodyLabel)}</span><div class="tl-body">${step.body}</div></div>`
+    : '';
+  const detailHtml = step.detailText ? `<pre class="tl-detail">${step.detailText}</pre>` : '';
+  const clickable = step.detailText ? ` onclick="this.classList.toggle('expanded')"` : '';
+  const titleStyleAttr =
+    step.levelName === 'error' || step.levelName === 'fatal' ? ` style="color:${LEVEL_COLORS[step.levelName]}"` : '';
+
+  return `
+    <div class="tl-row">
+      <div class="tl-rail"><span class="tl-dot" style="background:${step.color}"></span>${isLast ? '' : '<span class="tl-line"></span>'}</div>
+      <div class="tl-content${step.detailText ? ' tl-expandable' : ''}"${clickable}>
+        <div class="tl-headline">
+          ${endpointTag}
+          <span class="tl-title"${titleStyleAttr}>${step.title}</span>
+          ${pathHtml}
+          ${durationHtml}
+        </div>
+        ${noteHtml}
+        ${bodyHtml}
+        ${detailHtml}
+      </div>
+    </div>`;
+}
+
+function eventDetailHtml(ev: EventView, active: boolean): string {
+  const whoHtml = ev.hasWho
+    ? `<div class="detail-field">
+          <span class="detail-field-label">使用者</span>
+          <span class="detail-field-value">${ev.name ? `<span class="sel-name">${escapeHtml(ev.name)}</span>` : ''}<span class="detail-userid"><span class="id-masked">${escapeHtml(maskUserId(ev.userIdRaw))}</span><span class="id-plain">${escapeHtml(ev.userIdRaw)}</span></span> <span class="reveal-link" onclick="toggleMask()"><span class="id-masked">顯示</span><span class="id-plain">遮蔽</span></span></span>
+        </div>`
+    : '';
+  const degradedHtml = ev.degradedText
+    ? `<div class="degraded-banner"><span class="degraded-banner-label">仍有回覆，但過程降級</span><span class="degraded-banner-text">${escapeHtml(ev.degradedText)}</span></div>`
+    : '';
+  const batchHtml = ev.batch
+    ? (() => {
+        const total = ev.batch!.reduce((a, b) => a + b.value, 0);
+        const bars = ev.batch!.map((b) => `<span style="height:7px;border-radius:2px;flex:${Math.max(b.value, 0)} 1 0;background:${b.color}"></span>`).join('');
+        const stats = ev.batch!
+          .map(
+            (b) =>
+              `<span class="batch-stat"><span class="batch-swatch" style="background:${b.color}"></span><span class="batch-stat-label">${escapeHtml(b.label)}</span><span class="batch-stat-value">${b.value} / ${total}</span></span>`
+          )
+          .join('');
+        return `<div class="batch-section"><div class="detail-section-label">批次結果</div><div class="batch-bars">${bars}</div><div class="batch-stats">${stats}</div></div>`;
+      })()
+    : '';
+  const stepsHtml = ev.steps.length > 0
+    ? ev.steps.map((s, i) => timelineStepHtml(s, i === ev.steps.length - 1)).join('')
+    : '<div class="tl-empty">沒有可顯示的處理步驟</div>';
+  const rawJson = escapeHtml(JSON.stringify(ev.rawEntries, null, 2));
+
+  return `
+  <div class="ev-detail${active ? ' active' : ''}" id="detail-${escapeHtml(ev.key)}">
+    <div class="detail-header">
+      <div class="detail-title-row">
+        <span class="ev-kind" style="${ev.kindCss}">${escapeHtml(ev.kindLabel)}</span>
+        <span class="detail-title">${escapeHtml(ev.title)}</span>
+        <span class="detail-status" style="color:${STATUS_COLORS[ev.status]};border-color:${STATUS_COLORS[ev.status]}">${escapeHtml(ev.statusLabel)}</span>
+        <span class="detail-reqid">${escapeHtml(ev.reqId || '（無 reqId）')}</span>
+      </div>
+      ${degradedHtml}
+      <div class="detail-fields">
+        <div class="detail-field"><span class="detail-field-label">時間</span><span class="detail-field-value">${escapeHtml(ev.stamp)}</span></div>
+        <div class="detail-field"><span class="detail-field-label">總耗時</span><span class="detail-field-value">${escapeHtml(ev.durationText)}</span></div>
+        <div class="detail-field"><span class="detail-field-label">來源</span><span class="detail-field-value">${escapeHtml(ev.source)}</span></div>
+        ${whoHtml}
+        <div class="detail-field"><span class="detail-field-label">來自</span><span class="detail-field-value">${escapeHtml(ev.origin)}</span></div>
+      </div>
+    </div>
+    ${batchHtml}
+    <div class="detail-body">
+      <div class="detail-section-label">${escapeHtml(ev.stepsHeading)}</div>
+      <div class="timeline">${stepsHtml}</div>
+    </div>
+    <div class="detail-footer">
+      <button onclick="document.getElementById('raw-${escapeHtml(ev.key)}').classList.toggle('hidden')">看這筆的原始 log</button>
+      <button onclick="copyRawJson('${escapeHtml(ev.key)}', this)">複製 JSON</button>
+    </div>
+    <pre class="raw-json hidden" id="raw-${escapeHtml(ev.key)}">${rawJson}</pre>
+  </div>`;
+}
+
+function bucketRawEntries(entries: LogEntry[]): Map<string, LogEntry[]> {
+  const map = new Map<string, LogEntry[]>();
+  for (const e of entries) {
+    const key = typeof e.reqId === 'string' ? e.reqId : '';
+    let bucket = map.get(key);
+    if (!bucket) {
+      bucket = [];
+      map.set(key, bucket);
+    }
+    bucket.push(e);
+  }
+  for (const bucket of map.values()) bucket.sort((a, b) => (a.time ?? 0) - (b.time ?? 0));
+  return map;
 }
 
 function renderHtml(entries: LogEntry[]): string {
-  // groupPairedEntries() merges request/payload/response/payload(/error) and
-  // reply|push "about to send"/"sent" pairs into single rows so both the
-  // flat table and the flow-table view show one item per logical action
-  // instead of several disjoint log lines. It always returns rows sorted
-  // ascending by representative time; the flat table reverses that to keep
-  // its existing newest-first convention. buildFlowGroups() derives the
-  // flow-table view's per-reqId grouping from the same paired data, so both
-  // views are rendered server-side from one shared data structure.
-  const displayRows = groupPairedEntries(entries);
-  const flatRows = [...displayRows].reverse();
+  // 排程（weekly-push/display-name-update）現在也各自用 runWithContext 包住整
+  // 次執行，所以真的完全沒有 reqId 的只剩伺服器生命週期訊息跟少數 HTTP 層級
+  // 的錯誤（例如 LINE 簽章驗證失敗，在 webhook 事件處理、也就是 reqId 產生
+  // 之前就發生）。這兩種不能沿用 groupPairedEntries 的「沒有 reqId 就併成同
+  // 一組」規則——生命週期訊息要配對成分隔線，其餘的每一筆各自是獨立事件。
+  const reqIdEntries = entries.filter((e) => typeof e.reqId === 'string' && e.reqId);
+  const noReqIdEntries = entries.filter((e) => !(typeof e.reqId === 'string' && e.reqId));
+  const lifecycleEntries = noReqIdEntries.filter((e) => LIFECYCLE_MESSAGES.has(String(e.msg ?? '')));
+  const systemEntries = noReqIdEntries.filter((e) => !LIFECYCLE_MESSAGES.has(String(e.msg ?? '')));
 
-  const rows = flatRows.length > 0
-    ? flatRows.map((row) => asTableRow(rowContent(row))).join('')
-    : '<tr><td colspan="4" class="empty">No log entries found</td></tr>';
+  const displayRows = groupPairedEntries(reqIdEntries);
+  const groups = buildFlowGroups(displayRows);
+  const rawByReqId = bucketRawEntries(reqIdEntries);
 
-  const flowHtml = renderFlowView(displayRows);
+  const events = [
+    ...groups.map((g) => buildEventView(g, rawByReqId.get(g.reqId) ?? [])),
+    ...systemEntries.map((e, i) => buildSystemEventView(e, i)),
+  ].sort((a, b) => b.timeMs - a.timeMs);
+  // 由新到舊排序，跟 events 的排序方向一致，才能一起往下掃描配對。
+  const boundaries = buildBoundaryMarkers(lifecycleEntries).sort((a, b) => b.timeMs - a.timeMs);
+
+  const totalCount = events.length;
+  const errorCount = events.filter((e) => e.status !== 'ok').length;
+
+  // 分隔線依時間插在正確位置——比它晚的事件顯示在它上面，第一個比它舊的
+  // 事件顯示在它下面。同一個空隙裡有兩個以上分隔線只顯示最新的一個（連續
+  // 重啟很少見，不值得為這個邊角案例加複雜度）；比目前列出的所有事件都舊
+  // 的分隔線，顯示在列表最後面。
+  let boundaryIdx = 0;
+  const listHtml = events
+    .map((ev) => {
+      let boundary: BoundaryMarker | undefined;
+      while (boundaryIdx < boundaries.length && boundaries[boundaryIdx]!.timeMs >= ev.timeMs) {
+        boundary ??= boundaries[boundaryIdx];
+        boundaryIdx++;
+      }
+      return eventListItemHtml(ev, boundary);
+    })
+    .join('');
+  const trailingBoundary = boundaries[boundaryIdx];
+  const trailingBoundaryHtml = trailingBoundary
+    ? `<div class="ev-boundary"><span class="ev-boundary-icon">⏻</span><span class="ev-boundary-label">${escapeHtml(trailingBoundary.label)}</span><span class="ev-boundary-meta">${escapeHtml(trailingBoundary.meta)}</span><span class="ev-boundary-time">${escapeHtml(trailingBoundary.time)}</span></div>`
+    : '';
+  const detailHtml = events.map((ev, i) => eventDetailHtml(ev, i === 0)).join('');
 
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="zh-Hant">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Dobby — Logs</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
-    header { padding: 16px 24px; background: #1e293b; border-bottom: 1px solid #334155; display: flex; align-items: center; gap: 12px; }
-    header h1 { font-size: 18px; font-weight: 600; color: #f1f5f9; }
-    header .count { font-size: 13px; color: #94a3b8; margin-left: auto; }
-    .toolbar { padding: 12px 24px; background: #1e293b; border-bottom: 1px solid #334155; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-    .filter-group { display: flex; gap: 6px; align-items: center; }
-    .filter-label { font-size: 12px; color: #64748b; }
-    button { cursor: pointer; padding: 5px 12px; border-radius: 6px; border: 1px solid #475569; background: #1e293b; color: #cbd5e1; font-size: 13px; transition: all .15s; }
-    button:hover { background: #334155; }
-    button.active { border-color: #60a5fa; color: #60a5fa; background: #1e3a5f; }
-    button[data-level="error"].active { border-color: #f87171; color: #f87171; background: #450a0a; }
-    button[data-level="warn"].active  { border-color: #fbbf24; color: #fbbf24; background: #451a03; }
-    button[data-level="info"].active  { border-color: #34d399; color: #34d399; background: #022c22; }
-    button[data-level="debug"].active { border-color: #60a5fa; color: #60a5fa; background: #1e3a5f; }
-    button.copy-btn { background: #1e3a5f; border-color: #3b82f6; color: #93c5fd; }
-    button.copy-btn:hover { background: #1d4ed8; color: #fff; }
-    button.copy-btn.copied { background: #022c22; border-color: #34d399; color: #34d399; }
-    input[type="text"] { background: #0f172a; border: 1px solid #475569; color: #e2e8f0; border-radius: 6px; padding: 5px 10px; font-size: 13px; width: 200px; outline: none; }
-    input[type="text"]:focus { border-color: #60a5fa; }
-    #reqid-filter-bar { display: none; padding: 8px 24px; background: #1a2744; border-bottom: 1px solid #3b82f6; font-size: 13px; align-items: center; gap: 10px; }
-    #reqid-filter-bar.active { display: flex; }
-    #reqid-filter-bar span { color: #93c5fd; font-family: monospace; }
-    #reqid-filter-bar button { padding: 3px 10px; font-size: 12px; }
-    .divider { width: 1px; height: 24px; background: #334155; }
-    .table-wrap { padding: 16px 24px; overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th { text-align: left; padding: 8px 10px; color: #64748b; font-weight: 500; border-bottom: 1px solid #334155; white-space: nowrap; }
-    tr.log-row { cursor: pointer; }
-    tr.log-row:hover td { background: #1e293b; }
-    tr.log-row.reqid-highlight td { background: #1a2744; }
-    td { padding: 7px 10px; border-bottom: 1px solid #1e293b; vertical-align: top; }
-    td.time { color: #64748b; white-space: nowrap; font-variant-numeric: tabular-nums; }
-    td.reqid { font-family: monospace; color: #94a3b8; white-space: nowrap; }
-    td.msg { word-break: break-word; max-width: 600px; }
-    td.empty { text-align: center; padding: 40px; color: #475569; }
-    .badge { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #0f172a; }
-    .reqid-link { cursor: pointer; border-bottom: 1px dashed #475569; }
-    .reqid-link:hover { color: #60a5fa; border-color: #60a5fa; }
-    .tag-method { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 4px; border: 1px solid; font-size: 11px; font-weight: 700; }
-    .tag-db { display: inline-block; margin-left: 4px; padding: 1px 6px; border-radius: 4px; background: #334155; color: #cbd5e1; font-size: 11px; }
-    .tag-purpose { display: inline-block; margin-left: 4px; padding: 1px 6px; border-radius: 4px; background: #312e81; color: #c7d2fe; font-size: 11px; }
-    .tag-path { display: inline-block; padding: 1px 6px; border-radius: 4px; background: #1e293b; border: 1px solid #334155; color: #94a3b8; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
-    .tag-field { display: inline-block; margin: 2px 4px 2px 0; padding: 1px 6px; border-radius: 4px; background: #1e293b; border: 1px solid #334155; color: #cbd5e1; font-size: 11px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
-    .tag-field-key { color: #64748b; margin-right: 4px; }
+    html, body { height: 100%; }
+    body { font-family: -apple-system, 'Segoe UI', system-ui, sans-serif; background: #14151f; color: #e7e7ee; }
+    body.masked .id-plain { display: none; }
+    body:not(.masked) .id-masked { display: none; }
 
-    /* Merged action rows (Notion API calls, LINE reply/push) in the flat
-       table — a shared 4-column grid so the badges/content of unrelated row
-       kinds (e.g. a long "LINE 回覆: 報名成功..." row next to a short
-       "Notion API 呼叫" row) line up in the same vertical position instead
-       of drifting based on each row's own label length. */
-    .action-row { display: grid; grid-template-columns: 18px 118px 300px 1fr; column-gap: 6px; align-items: center; }
-    .action-icon { text-align: center; }
-    .action-label { color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .action-badges { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; row-gap: 2px; }
-    .action-content { color: #cbd5e1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #app { display: flex; flex-direction: column; height: 100vh; min-height: 620px; }
 
-    /* Generic/fallback rows (singleRowContent) — reuses the same 18px icon
-       gutter as .action-row so every row's content starts at the same left
-       edge, but the label/badges/tags share one flex-wrap area instead of
-       fixed-width grid columns: a generic msg name (e.g. "Received shutdown
-       signal, closing server") can be far longer than "Notion API 呼叫"/
-       "LINE 回覆" and would get clipped by a fixed 118px label column. Tags
-       wrap only when they run out of room, instead of a hard line break. */
-    .single-row { display: flex; align-items: flex-start; column-gap: 6px; }
-    .single-row .action-icon { flex: none; width: 18px; }
-    .single-row-content { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; row-gap: 2px; column-gap: 2px; color: #e2e8f0; }
-    tr.extra-row td { background: #1e293b; padding: 0; }
-    tr.extra-row pre { padding: 10px 16px; font-size: 12px; color: #94a3b8; white-space: pre-wrap; word-break: break-all; }
-    .hidden { display: none; }
-    #no-results { display: none; text-align: center; padding: 40px; color: #475569; }
-    #flow-no-results { display: none; text-align: center; padding: 40px; color: #475569; }
+    header { display: flex; align-items: center; gap: 14px; padding: 12px 24px; border-bottom: 1px solid #262835; flex: none; }
+    header h1 { font-size: 14px; font-weight: 500; }
+    .divider { width: 1px; height: 16px; background: #262835; }
+    .count { font-size: 12px; color: #8b8fa3; }
+    .count-err { font-size: 12px; font-weight: 500; color: #e0807f; }
+    #search { margin-left: auto; background: #0e0f18; border: 1px solid #262835; border-radius: 8px; color: #e7e7ee; font-size: 12px; padding: 7px 11px; width: 250px; outline: none; }
+    #search:focus { border-color: #7c72c4; }
+    button { cursor: pointer; font-family: inherit; }
+    #mask-btn { font-size: 12px; font-weight: 500; border-radius: 8px; padding: 7px 12px; color: #d2cefd; border: 1px solid #5d5294; background: #201c33; }
+    #refresh-btn { font-size: 12px; color: #8b8fa3; background: transparent; border: 1px solid #262835; border-radius: 8px; padding: 7px 12px; }
 
-    /* Flow-table view */
-    #flow-view { padding: 16px 24px; display: none; flex-direction: column; gap: 10px; }
-    #flow-view.active { display: flex; }
-    .table-wrap.flow-hidden { display: none; }
-    .flow-group { border: 1px solid #334155; border-radius: 8px; overflow: hidden; background: #16213a; }
-    .flow-header { padding: 10px 14px; cursor: pointer; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-    .flow-header:hover { background: #1e293b; }
-    .flow-header .reqid-link { font-family: monospace; color: #93c5fd; }
-    .flow-summary { color: #cbd5e1; font-size: 13px; }
-    .flow-caret { color: #64748b; font-size: 11px; transition: transform .15s; }
-    .flow-group.expanded .flow-caret { transform: rotate(90deg); }
-    .flow-steps { display: none; flex-direction: column; gap: 0; border-top: 1px solid #334155; }
-    .flow-group.expanded .flow-steps { display: flex; }
-    /* 決定 3：等級色標，左側色條。預設灰色，實際顏色由 inline style 的
-       border-left-color 覆蓋（每列各自的 LEVEL_COLORS 值，見 asFlowItem/asFlowEndpoint）。 */
-    .flow-step, .flow-misc, .flow-endpoint { border-left: 3px solid #64748b; }
-    .flow-endpoint { padding: 8px 14px 8px 32px; font-size: 13px; color: #e2e8f0; border-bottom: 1px solid #1e293b; background: #0f172a; }
-    .flow-endpoint[onclick] { cursor: pointer; }
-    .flow-endpoint .flow-tag { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: #64748b; margin-right: 8px; }
-    .flow-step { padding: 8px 14px 8px 32px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #1e293b; }
-    .flow-step:hover { background: #1e293b; }
-    .flow-step-detail { display: none; padding: 8px 14px 8px 48px; background: #0f172a; font-size: 12px; color: #94a3b8; }
-    .flow-step.expanded .flow-step-detail, .flow-misc.expanded .flow-step-detail, .flow-endpoint.expanded .flow-step-detail { display: block; }
-    .flow-step-detail pre { white-space: pre-wrap; word-break: break-all; margin-top: 4px; }
-    .hint { color: #64748b; font-style: italic; }
-    /* flow-misc 項目不一定可展開（single 行的通用渲染器沒有獨立 detail，
-       line-push 有——見 asFlowItem 的 clickable 判斷），只有帶 onclick 的
-       才顯示手型游標，避免暗示不可互動的項目可以點開。 */
-    .flow-misc { padding: 6px 14px 6px 32px; font-size: 12px; color: #64748b; border-bottom: 1px solid #1e293b; }
-    .flow-misc[onclick] { cursor: pointer; }
-    .flow-empty { text-align: center; padding: 40px; color: #475569; }
+    main { display: grid; grid-template-columns: 400px 1fr; flex: 1 1 auto; min-height: 0; }
+
+    #ev-list-pane { border-right: 1px solid #262835; display: flex; flex-direction: column; min-height: 0; }
+    .tabs { display: flex; gap: 6px; padding: 8px 24px; border-bottom: 1px solid #1c1d29; flex: none; }
+    .tab-btn { font-size: 11.5px; background: transparent; border: 1px solid #262835; border-radius: 4px; padding: 6px 11px; color: #8b8fa3; }
+    .tab-btn.active { background: #b5abfc; border-color: #b5abfc; color: #14151f; font-weight: 500; }
+
+    #ev-list { overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+    .ev-item { cursor: pointer; padding: 13px 16px; border-bottom: 1px solid #1c1d29; border-left: 3px solid transparent; }
+    .ev-item.active { border-left-color: #b5abfc; background: #1c1c2c; }
+    .ev-item.hidden { display: none; }
+    .ev-item-top { display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px; }
+    .ev-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+    .ev-kind { flex: none; font-size: 10px; font-weight: 500; letter-spacing: .06em; border-radius: 4px; padding: 4px 6px; }
+    .ev-title { font-size: 13px; font-weight: 500; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ev-time { flex: none; font: 11px ui-monospace, monospace; color: #8b8fa3; font-variant-numeric: tabular-nums; }
+    .ev-item-body { padding-left: 14px; display: flex; flex-direction: column; gap: 5px; }
+    .ev-item-meta { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; }
+    .ev-name { font-size: 11.5px; font-weight: 500; color: #c6c9d6; }
+    .ev-userid { font: 11px ui-monospace, monospace; color: #8b8fa3; word-break: break-all; }
+    .ev-preview { font-size: 12px; color: #8b8fa3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ev-preview-degraded { color: #d3a35c; }
+    .ev-preview-warn { color: #d3a35c; }
+    .ev-preview-error { color: #e0807f; }
+    .ev-item-tags { display: flex; gap: 9px; flex-wrap: wrap; align-items: center; }
+    .ev-source { font-size: 11px; color: #8b8fa3; }
+    .ev-duration { font: 11px ui-monospace, monospace; color: #8b8fa3; }
+    .ev-flag { font-size: 11px; font-weight: 500; }
+    .ev-flag-warn { color: #d3a35c; }
+    .ev-flag-error { color: #e0807f; }
+    #ev-list-empty { display: none; padding: 40px 20px; text-align: center; font-size: 12.5px; color: #595d6c; }
+
+    .ev-boundary { display: flex; align-items: center; gap: 9px; padding: 12px 16px; background: #12131d; border-top: 1px solid #262835; border-bottom: 1px solid #262835; }
+    .ev-boundary-icon { font-size: 12px; color: #d2cefd; }
+    .ev-boundary-label { flex: none; font-size: 11.5px; font-weight: 500; color: #d2cefd; letter-spacing: .04em; white-space: nowrap; }
+    .ev-boundary-meta { flex: 1 1 auto; min-width: 0; font: 11px ui-monospace, monospace; color: #8b8fa3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ev-boundary-time { font: 11px ui-monospace, monospace; color: #8b8fa3; font-variant-numeric: tabular-nums; }
+
+    #detail-pane { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
+    .ev-detail { display: none; flex-direction: column; min-height: 0; }
+    .ev-detail.active { display: flex; }
+
+    .detail-header { padding: 22px 22px 14px; border-bottom: 1px solid #1c1d29; flex: none; }
+    .detail-title-row { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+    .detail-title { font-size: 17px; font-weight: 500; }
+    .detail-status { font-size: 11px; font-weight: 500; border-radius: 4px; padding: 5px 9px; border: 1px solid; }
+    .detail-reqid { margin-left: auto; font: 11.5px ui-monospace, monospace; color: #8b8fa3; }
+    .degraded-banner { margin-bottom: 13px; display: flex; align-items: flex-start; gap: 9px; background: #2c2519; border: 1px solid #5c4c2c; border-radius: 8px; padding: 10px 13px; }
+    .degraded-banner-label { font-size: 11px; font-weight: 500; color: #d3a35c; flex: none; }
+    .degraded-banner-text { font-size: 12px; color: #c6c9d6; line-height: 1.5; }
+    .detail-fields { display: flex; flex-wrap: wrap; gap: 12px 28px; }
+    .detail-field { display: flex; flex-direction: column; gap: 4px; }
+    .detail-field-label { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: #8b8fa3; }
+    .detail-field-value { font-size: 12.5px; color: #c6c9d6; }
+    .detail-userid { font: 12.5px ui-monospace, monospace; color: #b2b6ca; margin-left: 7px; }
+    .sel-name { font-weight: 500; }
+    .reveal-link { margin-left: 7px; font-size: 11.5px; color: #d2cefd; cursor: pointer; }
+
+    .detail-body { padding: 22px; flex: 1 1 auto; }
+    .detail-section-label { font-size: 10px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; color: #8b8fa3; margin-bottom: 16px; }
+
+    .batch-section { padding: 22px 22px 0; }
+    .batch-bars { display: flex; gap: 3px; margin-bottom: 11px; max-width: 560px; }
+    .batch-stats { display: flex; gap: 22px; flex-wrap: wrap; }
+    .batch-stat { display: flex; align-items: baseline; gap: 7px; }
+    .batch-swatch { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+    .batch-stat-label { font-size: 12px; color: #b2b6ca; }
+    .batch-stat-value { font: 500 13px ui-monospace, monospace; color: #c6c9d6; font-variant-numeric: tabular-nums; }
+
+    .timeline { display: flex; flex-direction: column; }
+    .tl-row { display: grid; grid-template-columns: 14px 1fr; column-gap: 14px; }
+    .tl-rail { display: flex; flex-direction: column; align-items: center; }
+    .tl-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex: none; }
+    .tl-line { width: 1px; flex: 1 1 auto; background: #1c1d29; }
+    .tl-content { padding-bottom: 18px; min-width: 0; }
+    .tl-expandable { cursor: pointer; }
+    .tl-headline { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    .tl-endpoint-tag { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: #8b8fa3; }
+    .tl-title { font-size: 13px; color: #c6c9d6; }
+    .tl-path { font: 11px ui-monospace, monospace; color: #8b8fa3; word-break: break-all; }
+    .tl-duration { margin-left: auto; font: 11.5px ui-monospace, monospace; color: #8b8fa3; font-variant-numeric: tabular-nums; flex: none; }
+    .tl-note { margin-top: 4px; font-size: 12.5px; color: #8b8fa3; }
+    .tl-note-warn { margin-top: 8px; background: #2c2519; border: 1px solid #5c4c2c; border-radius: 8px; padding: 9px 12px; color: #d3a35c; }
+    .tl-note-error { margin-top: 8px; background: #2c1d20; border: 1px solid #6b3a3a; border-radius: 8px; padding: 9px 12px; color: #e0807f; }
+    .tl-body-wrap { margin-top: 11px; display: flex; flex-direction: column; gap: 6px; max-width: 560px; }
+    .tl-body-label { font-size: 10.5px; font-weight: 500; letter-spacing: .08em; color: #d2cefd; }
+    .tl-body { background: #201c33; border: 1px solid #5d5294; border-radius: 4px 14px 14px 14px; padding: 13px 16px; font-size: 13px; line-height: 1.8; color: #e4e4ea; white-space: pre-line; }
+    .tl-detail { display: none; margin-top: 8px; padding: 10px 14px; background: #0e0f18; border-radius: 8px; font-size: 12px; color: #8b8fa3; white-space: pre-wrap; word-break: break-all; }
+    .tl-content.expanded .tl-detail { display: block; }
+    .tl-empty { font-size: 12.5px; color: #595d6c; }
+
+    .detail-footer { border-top: 1px solid #1c1d29; padding: 10px 22px; display: flex; gap: 8px; flex: none; }
+    .detail-footer button { font-size: 12px; color: #8b8fa3; background: transparent; border: 1px solid #262835; border-radius: 8px; padding: 8px 13px; }
+    .raw-json { margin: 0 22px 16px; padding: 12px 14px; background: #0e0f18; border-radius: 8px; font-size: 11.5px; color: #8b8fa3; white-space: pre-wrap; word-break: break-all; max-height: 320px; overflow-y: auto; }
+    .raw-json.hidden { display: none; }
+
+    #no-events { display: none; padding: 60px 20px; text-align: center; color: #595d6c; }
   </style>
 </head>
-<body>
-  <header>
-    <h1>🐶 Dobby Logs</h1>
-    <span class="count" id="count-label">${flatRows.length} entries</span>
-  </header>
+<body class="masked">
+  <div id="app">
+    <header>
+      <h1>🐶 Dobby Logs</h1>
+      <span class="divider"></span>
+      <span class="count" id="count-label">共 ${totalCount} 筆</span>
+      <span class="count-err" id="count-err-label">${errorCount} 筆需要注意</span>
+      <input type="text" id="search" placeholder="搜尋指令、回覆、reqId、使用者…" oninput="applyFilters()">
+      <button id="mask-btn" onclick="toggleMask()"><span class="id-masked">遮蔽 ID ●</span><span class="id-plain">顯示 ID ○</span></button>
+      <button id="refresh-btn" onclick="document.location.reload()">↻ 重新整理</button>
+    </header>
 
-  <div class="toolbar">
-    <div class="filter-group">
-      <span class="filter-label">View</span>
-      <div id="view-mode-filters" style="display:flex;gap:6px">
-        <button data-view="flat" class="active" onclick="setViewMode('flat')">平面模式</button>
-        <button data-view="flow" onclick="setViewMode('flow')">流程表模式</button>
+    <main>
+      <div id="ev-list-pane">
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="all" onclick="setTab('all')">全部</button>
+          <button class="tab-btn" data-tab="att" onclick="setTab('att')">需要注意</button>
+          <button class="tab-btn" data-tab="msg" onclick="setTab('msg')">訊息</button>
+          <button class="tab-btn" data-tab="cron" onclick="setTab('cron')">排程</button>
+          <button class="tab-btn" data-tab="sys" onclick="setTab('sys')">系統</button>
+        </div>
+        <div id="ev-list">${listHtml}${trailingBoundaryHtml}<div id="ev-list-empty">沒有符合的事件</div></div>
       </div>
-    </div>
-    <div class="divider"></div>
-    <div class="filter-group">
-      <span class="filter-label">Level</span>
-      <div id="level-filters" style="display:flex;gap:6px">
-        <button data-level="all" class="active" onclick="filterLevel('all')">All</button>
-        <button data-level="error" onclick="filterLevel('error')">Error</button>
-        <button data-level="warn"  onclick="filterLevel('warn')">Warn</button>
-        <button data-level="info"  onclick="filterLevel('info')">Info</button>
-        <button data-level="debug" onclick="filterLevel('debug')">Debug</button>
-      </div>
-    </div>
-    <div class="divider"></div>
-    <div class="filter-group">
-      <span class="filter-label">Time</span>
-      <div id="time-filters" style="display:flex;gap:6px">
-        <button data-range="7" class="active" onclick="filterTime(7)">Last 7 days</button>
-        <button data-range="1" onclick="filterTime(1)">Today</button>
-        <button data-range="2" onclick="filterTime(2)">Yesterday</button>
-      </div>
-    </div>
-    <div class="divider"></div>
-    <input type="text" id="search" placeholder="Search…" oninput="applyFilters()">
-    <div class="divider"></div>
-    <button class="copy-btn" id="copy-btn" onclick="copyFiltered()">⎘ Copy filtered logs</button>
-    <button onclick="document.location.reload()">↻ Refresh</button>
+      <div id="detail-pane">${detailHtml || '<div id="no-events">目前沒有日誌記錄</div>'}</div>
+    </main>
   </div>
-
-  <div id="reqid-filter-bar">
-    Filtering by reqId: <span id="reqid-filter-value"></span>
-    <button onclick="clearReqIdFilter()">✕ Clear</button>
-  </div>
-
-  <div class="table-wrap" id="table-wrap">
-    <table>
-      <thead><tr><th>Time (台北時間)</th><th>Level</th><th>reqId</th><th>Message</th></tr></thead>
-      <tbody id="log-body">${rows}</tbody>
-    </table>
-    <div id="no-results">No matching log entries</div>
-  </div>
-
-  <div id="flow-view">${flowHtml}<div id="flow-no-results">No matching log entries</div></div>
 
   <script>
-    let activeLevel = 'all';
-    let activeRange = 7;
-    let activeReqId = '';
-    let viewMode = 'flat';
+    let activeTab = 'all';
 
-    function setViewMode(mode) {
-      viewMode = mode;
-      document.querySelectorAll('#view-mode-filters button').forEach(b => b.classList.toggle('active', b.dataset.view === mode));
-      document.getElementById('table-wrap').classList.toggle('flow-hidden', mode === 'flow');
-      document.getElementById('flow-view').classList.toggle('active', mode === 'flow');
-    }
-
-    function filterLevel(level) {
-      activeLevel = level;
-      document.querySelectorAll('#level-filters button').forEach(b => b.classList.toggle('active', b.dataset.level === level));
+    function setTab(tab) {
+      activeTab = tab;
+      document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
       applyFilters();
-    }
-
-    function filterTime(days) {
-      activeRange = days;
-      document.querySelectorAll('#time-filters button').forEach(b => b.classList.toggle('active', Number(b.dataset.range) === days));
-      applyFilters();
-    }
-
-    function filterByReqId(evt, reqId) {
-      evt.stopPropagation();
-      activeReqId = reqId;
-      document.getElementById('reqid-filter-bar').classList.add('active');
-      document.getElementById('reqid-filter-value').textContent = reqId;
-      applyFilters();
-    }
-
-    function clearReqIdFilter() {
-      activeReqId = '';
-      document.getElementById('reqid-filter-bar').classList.remove('active');
-      applyFilters();
-    }
-
-    function matchesFilters(el, cutoff, endCutoff, search) {
-      const level = el.dataset.level;
-      const time = Number(el.dataset.time);
-      const msg = el.dataset.msg;
-      const reqId = el.dataset.reqid;
-      const levelMatch = activeLevel === 'all' || level === activeLevel;
-      const timeMatch = time >= cutoff && time < endCutoff;
-      const searchMatch = !search || msg.includes(search);
-      const reqIdMatch = !activeReqId || reqId === activeReqId;
-      return levelMatch && timeMatch && searchMatch && reqIdMatch;
     }
 
     function applyFilters() {
-      const search = document.getElementById('search').value.toLowerCase();
-      const now = Date.now();
-
-      let cutoff;
-      if (activeRange === 1) {
-        const d = new Date(); d.setHours(0,0,0,0); cutoff = d.getTime();
-      } else if (activeRange === 2) {
-        const d = new Date(); d.setHours(0,0,0,0); cutoff = d.getTime() - 86400000;
-      } else {
-        cutoff = now - activeRange * 86400000;
-      }
-      let endCutoff = Infinity;
-      if (activeRange === 2) {
-        const d = new Date(); d.setHours(0,0,0,0); endCutoff = d.getTime();
-      }
-
-      // 平面模式（邏輯不變，只是改用共用的 matchesFilters）
+      const search = document.getElementById('search').value.trim().toLowerCase();
       let visible = 0;
-      document.querySelectorAll('#log-body tr.log-row').forEach(row => {
-        const show = matchesFilters(row, cutoff, endCutoff, search);
-        const nextRow = row.nextElementSibling;
-        const isExtra = nextRow && nextRow.classList.contains('extra-row');
-        row.classList.toggle('hidden', !show);
-        row.classList.toggle('reqid-highlight', show && !!activeReqId);
-        if (isExtra && !show) nextRow.classList.add('hidden');
+      document.querySelectorAll('.ev-item').forEach((item) => {
+        const tabMatch = activeTab === 'all' || (activeTab === 'att' && item.dataset.status !== 'ok') || item.dataset.bucket === activeTab;
+        const searchMatch = !search || item.dataset.search.includes(search);
+        const show = tabMatch && searchMatch;
+        item.classList.toggle('hidden', !show);
         if (show) visible++;
       });
-      document.getElementById('count-label').textContent = visible + ' entries';
-      document.getElementById('no-results').style.display = visible === 0 ? 'block' : 'none';
-
-      // 流程表模式：先逐項篩選，再依 flow-group 做 rollup
-      document.querySelectorAll('#flow-view [data-level]').forEach(el => {
-        el.classList.toggle('hidden', !matchesFilters(el, cutoff, endCutoff, search));
-      });
-      let visibleGroups = 0;
-      document.querySelectorAll('#flow-view .flow-group').forEach(group => {
-        const hasVisibleItem = group.querySelector('[data-level]:not(.hidden)') !== null;
-        group.classList.toggle('hidden', !hasVisibleItem);
-        if (hasVisibleItem) visibleGroups++;
-      });
-      const flowNoResults = document.getElementById('flow-no-results');
-      if (flowNoResults) flowNoResults.style.display = visibleGroups === 0 ? 'block' : 'none';
+      document.getElementById('ev-list-empty').style.display = visible === 0 ? 'block' : 'none';
     }
 
-    function toggleExtra(row) {
-      const next = row.nextElementSibling;
-      if (next && next.classList.contains('extra-row')) {
-        next.classList.toggle('hidden');
-      }
+    function selectEvent(key) {
+      document.querySelectorAll('.ev-item').forEach((item) => item.classList.toggle('active', item.dataset.key === key));
+      document.querySelectorAll('.ev-detail').forEach((d) => d.classList.toggle('active', d.id === 'detail-' + key));
     }
 
-    function copyFiltered() {
-      const rows = document.querySelectorAll('#log-body tr.log-row:not(.hidden)');
-      const lines = [];
-      rows.forEach(row => {
-        try {
-          const raw = JSON.parse(row.dataset.raw.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"'));
-          lines.push(JSON.stringify(raw, null, 2));
-        } catch {}
-      });
-      const text = lines.join('\\n---\\n');
-      navigator.clipboard.writeText(text).then(() => {
-        const btn = document.getElementById('copy-btn');
-        btn.textContent = '✓ Copied!';
-        btn.classList.add('copied');
-        setTimeout(() => { btn.textContent = '⎘ Copy filtered logs'; btn.classList.remove('copied'); }, 2000);
+    function toggleMask() {
+      document.body.classList.toggle('masked');
+    }
+
+    function copyRawJson(key, btn) {
+      const el = document.getElementById('raw-' + key);
+      if (!el) return;
+      navigator.clipboard.writeText(el.textContent).then(() => {
+        const original = btn.textContent;
+        btn.textContent = '✓ 已複製';
+        setTimeout(() => { btn.textContent = original; }, 2000);
       });
     }
+
+    (function initSelection() {
+      const first = document.querySelector('.ev-item');
+      if (first) first.classList.add('active');
+    })();
   </script>
 </body>
 </html>`;
