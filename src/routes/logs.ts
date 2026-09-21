@@ -491,6 +491,8 @@ function computeBatch(group: FlowGroup, kind: EventKind): BatchStat[] | null {
   return stats.length >= 2 ? stats : null;
 }
 
+// 每個字串欄位都會被直接塞進 HTML，產生這個物件的函式自己要先呼叫
+// escapeHtml()——這裡不會再做一次跳脫。
 interface TimelineStep {
   levelName: string;
   color: string;
