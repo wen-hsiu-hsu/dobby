@@ -1,9 +1,9 @@
 import cron from 'node-cron';
 import { pushMessage } from '../services/line/push-service.js';
-import * as calendarRepo from '../services/notion/calendar-repository.js';
-import * as seasonRepo from '../services/notion/season-repository.js';
+import { getEventOccupancy } from '../services/notion/event-occupancy.js';
+import * as peopleRepo from '../services/notion/people-repository.js';
 import { env } from '../config/env.js';
-import { formatDate, getNextSaturday, getNextSaturdayDateText, getCurrentSeasonName } from '../utils/date-utils.js';
+import { formatDate, getNextSaturday, getNextSaturdayDateText } from '../utils/date-utils.js';
 import { logger } from '../utils/logger.js';
 import { runWithContext } from '../utils/request-context.js';
 
@@ -25,28 +25,42 @@ async function doSendWeeklyPush(): Promise<void> {
     }
 
     const nextSaturday = formatDate(getNextSaturday());
-    const calEvent = await calendarRepo.findByDate(nextSaturday);
-    const activeSeason = await seasonRepo.findByName(getCurrentSeasonName());
-
-    const dateText = getNextSaturdayDateText();
-    const seasonMemberCount = activeSeason?.members.length ?? 0;
-    const absentCount = calEvent?.absentees.length ?? 0;
-    const guestCount = calEvent?.guests.length ?? 0;
-    const present = seasonMemberCount - absentCount + guestCount;
-    const isPaused = calEvent?.isPaused ?? false;
-
-    const lines = [
-      `🏸 本週打球資訊`,
-      `📅 ${dateText}`,
-      ``,
-      isPaused ? '⛔ 本週活動暫停' : `出席人數：${present} 人`,
-    ];
-
-    if (!isPaused && calEvent && calEvent.guests.length > 0) {
-      lines.push(`\n零打名單：\n${calEvent.guests.map((g, i) => `${i + 1}. ${g}`).join('\n')}`);
+    const occupancy = await getEventOccupancy(nextSaturday);
+    if (!occupancy) {
+      logger.error({ nextSaturday }, 'Weekly push aborted: no calendar/season data for date');
+      return;
     }
 
-    const messages = [{ type: 'text' as const, text: lines.join('\n') }];
+    const { event, season, totalSlots, presentSeasonMembers } = occupancy;
+
+    let text: string;
+    if (event.isPaused) {
+      text = [`🏸 本週打球資訊`, `📅 ${getNextSaturdayDateText()}`, ``, `⛔ 本週活動暫停`].join('\n');
+    } else {
+      // Show all slots including empty ones, matching buildEventStatusMessage's guest list.
+      const displaySlots = Math.max(totalSlots, event.guests.length);
+      const guestLines = Array.from({ length: displaySlots }, (_, i) => `${i + 1}. ${event.guests[i] ?? ''}`).join(
+        '\n'
+      );
+
+      let absenteeText = '無';
+      if (event.absentees.length > 0) {
+        const absentees = await peopleRepo.findByPageIds(event.absentees);
+        absenteeText = absentees.map((p) => p.name).join('、');
+      }
+
+      text = [
+        `${nextSaturday} 不能到請喊聲`,
+        `零打名額：${totalSlots}人 $${season.guestFee}/人`,
+        guestLines,
+        ``,
+        `請假：${absenteeText}`,
+        `場地：${season.courts} 面`,
+        `應到：${presentSeasonMembers} 人`,
+      ].join('\n');
+    }
+
+    const messages = [{ type: 'text' as const, text }];
 
     let succeeded = 0;
     let failed = 0;

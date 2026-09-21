@@ -2,13 +2,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { sendWeeklyPush } from '../weekly-push.js';
 import * as calendarRepo from '../../services/notion/calendar-repository.js';
 import * as seasonRepo from '../../services/notion/season-repository.js';
+import * as peopleRepo from '../../services/notion/people-repository.js';
 import { pushMessage } from '../../services/line/push-service.js';
 import { logger } from '../../utils/logger.js';
 import { env } from '../../config/env.js';
-import type { CalendarEvent, SeasonRecord } from '../../types/notion-models.js';
+import type { CalendarEvent, SeasonRecord, PersonRecord } from '../../types/notion-models.js';
 
 vi.mock('../../services/notion/calendar-repository.js');
 vi.mock('../../services/notion/season-repository.js');
+vi.mock('../../services/notion/people-repository.js');
 vi.mock('../../services/line/push-service.js');
 vi.mock('../../config/env.js', () => ({ env: { DOBBY_GROUP_IDS: ['group-test-1'] } }));
 // logger.ts wraps pino in a Proxy with a `get`-only trap that always reads
@@ -20,6 +22,7 @@ vi.mock('../../utils/logger.js', () => ({ logger: { info: vi.fn(), warn: vi.fn()
 
 const findByDateMock = vi.mocked(calendarRepo.findByDate);
 const findByNameMock = vi.mocked(seasonRepo.findByName);
+const findByPageIdsMock = vi.mocked(peopleRepo.findByPageIds);
 const pushMessageMock = vi.mocked(pushMessage);
 const loggerErrorMock = vi.mocked(logger.error);
 const loggerInfoMock = vi.mocked(logger.info);
@@ -52,12 +55,28 @@ function makeSeasonRecord(overrides: Partial<SeasonRecord> = {}): SeasonRecord {
   };
 }
 
+function makePerson(overrides: Partial<PersonRecord> = {}): PersonRecord {
+  return {
+    pageId: 'person-1',
+    name: '某人',
+    hasPaid: true,
+    lineUserId: 'line-1',
+    ...overrides,
+  };
+}
+
+function pushedText(): string {
+  const [, messages] = pushMessageMock.mock.calls[0]!;
+  return (messages[0] as { text: string }).text;
+}
+
 describe('sendWeeklyPush', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     env.DOBBY_GROUP_IDS = ['group-test-1'];
     findByDateMock.mockResolvedValue(makeCalendarEvent());
     findByNameMock.mockResolvedValue(makeSeasonRecord());
+    findByPageIdsMock.mockResolvedValue([]);
     pushMessageMock.mockResolvedValue(undefined);
   });
 
@@ -78,15 +97,68 @@ describe('sendWeeklyPush', () => {
     expect(loggerErrorMock).toHaveBeenCalledWith('Weekly push aborted: DOBBY_GROUP_IDS is not set');
   });
 
+  it('aborts and logs an error when there is no calendar event or season for the date', async () => {
+    findByDateMock.mockResolvedValue(null);
+
+    await sendWeeklyPush();
+
+    expect(pushMessageMock).not.toHaveBeenCalled();
+    expect(loggerErrorMock).toHaveBeenCalledWith(
+      expect.objectContaining({ nextSaturday: expect.any(String) }),
+      'Weekly push aborted: no calendar/season data for date'
+    );
+  });
+
   it('shows a paused message instead of attendance count when the event is paused', async () => {
     findByDateMock.mockResolvedValue(makeCalendarEvent({ isPaused: true }));
 
     await sendWeeklyPush();
 
-    const [, messages] = pushMessageMock.mock.calls[0]!;
-    const text = (messages[0] as { text: string }).text;
+    const text = pushedText();
     expect(text).toContain('本週活動暫停');
-    expect(text).not.toContain('出席人數');
+    expect(text).not.toContain('應到');
+  });
+
+  it('builds a numbered guest list with filled and empty slots, and reports courts/fee/attendance', async () => {
+    findByDateMock.mockResolvedValue(
+      makeCalendarEvent({ date: '2026-09-26', guests: ['小明', '小華'] })
+    );
+    // courts=1 -> totalSlots = 1*7 - members.length(3) + absentees.length(0) = 4
+    findByNameMock.mockResolvedValue(makeSeasonRecord({ courts: 1, guestFee: 200, members: ['p1', 'p2', 'p3'] }));
+
+    await sendWeeklyPush();
+
+    const text = pushedText();
+    expect(text).toContain('2026-09-26 不能到請喊聲');
+    expect(text).toContain('零打名額：4人 $200/人');
+    expect(text).toContain('1. 小明');
+    expect(text).toContain('2. 小華');
+    expect(text).toContain('3. ');
+    expect(text).toContain('4. ');
+    expect(text).toContain('場地：1 面');
+    expect(text).toContain('應到：3 人');
+    expect(text).toContain('請假：無');
+  });
+
+  it('resolves absentee names and joins them with 、 when there are absentees', async () => {
+    findByDateMock.mockResolvedValue(makeCalendarEvent({ absentees: ['p-a', 'p-b'] }));
+    findByPageIdsMock.mockResolvedValue([makePerson({ name: '小美' }), makePerson({ name: '小強' })]);
+
+    await sendWeeklyPush();
+
+    expect(findByPageIdsMock).toHaveBeenCalledWith(['p-a', 'p-b']);
+    const text = pushedText();
+    expect(text).toContain('請假：小美、小強');
+  });
+
+  it('shows 無 for absentees when there are none', async () => {
+    findByDateMock.mockResolvedValue(makeCalendarEvent({ absentees: [] }));
+
+    await sendWeeklyPush();
+
+    expect(findByPageIdsMock).not.toHaveBeenCalled();
+    const text = pushedText();
+    expect(text).toContain('請假：無');
   });
 
   it('pushes to every configured group when there are multiple targets and all succeed', async () => {
