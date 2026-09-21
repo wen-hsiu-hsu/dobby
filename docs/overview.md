@@ -70,3 +70,27 @@ docker compose down
 上述 7 天保留只管得到 app 自己寫進 `logs/` 的檔案。`logger.ts` 同時用 `multistream` 把同一份 log 輸出到 `process.stdout`，這份輸出會被 Docker 的 `json-file` log driver 另外存一份，**預設沒有大小上限**，配合 `restart: unless-stopped` 長期常駐不重啟，理論上會在 host 磁碟上無限長大——尤其是在 Pi 這類儲存空間有限的機器上風險較高。`docker-compose.yml` 已加上 `logging.options`（`max-size: 10m` / `max-file: 3`，共上限約 30MB）避免這個問題，這層限制跟 app 自己的 7 天保留機制是分開的兩件事，改動其中一邊不會影響另一邊。
 
 預設 log level 是 `info`；`notion-fetch.ts` 打 Notion API 的完整 request/response（含成員姓名、LINE user_id 等 PII）只在 `debug` level 才會被記錄。要臨時診斷正式環境問題時，把 `LOG_LEVEL` 環境變數改成 `debug` 並重啟服務即可看到完整內容，不用改程式碼重新部署；**診斷完務必改回 `info`**，否則這些 PII 會持續寫進 `/logs` 可查到的檔案。為什麼要拆成 info/debug 兩個 level 記、而不是把整行都升到 info，見 `docs/adr/0005-purpose-context-layered-on-reqid.md`。
+
+**千萬不要對正在跑的容器直接 `rm` log 檔案。** `pino-roll` 在 `initLogger()`（`app.listen()` 之前就跑）就已經開好檔案控制代碼在寫入；在 Linux 上刪除一個程式還握著在寫的檔案，只會拿掉目錄裡的檔名，process 完全不知道、還是會繼續往那個已經沒有名字的 inode 寫下去。結果是：`docker compose logs app` 明明看得到 bot 還在正常處理流量，但 `logs/` 資料夾用 `ls` 看是空的，`/logs` 頁面也是空的——因為它是靠掃檔名找資料，掃到的是空資料夾。想確認是不是踩到這個雷，進容器看一下 process 手上還握著哪些檔案：
+
+```bash
+docker exec dobby-app-1 ls -la /proc/1/fd/
+# 看到類似這行就是了：
+# l-wx------ 1 root root 64 ... 19 -> /app/logs/app.2026-09-21.1.log (deleted)
+```
+
+要清空 log 的正確做法是「清空內容、留著檔名」，而不是刪檔名：
+
+```bash
+# 對還在跑的容器安全清空單個檔案（保留檔名，process 繼續寫進同一個檔案沒問題）
+docker exec dobby-app-1 sh -c ': > logs/app.2026-09-21.1.log'
+```
+
+如果真的要整批刪除檔名本身（例如要連檔案輪替的編號一起重置），刪完一定要接著明確重啟這個 service，不要刪了就走：
+
+```bash
+docker exec dobby-app-1 rm -f logs/app.*.log
+docker compose restart app   # 這一步不能省
+```
+
+**`docker compose up -d --build` 不保證會重啟 process。** `--build`只決定要不要重新打包 image；如果這次 build 的每一層都命中快取（沒有任何原始碼變動），打出來的 image 會跟現在正在跑的完全一樣，Compose 判斷「沒有變化」就不會重建容器、process 也不會重啟——上面提到的那個握著已刪除檔案的 process 就會繼續原封不動地跑下去。要在不管有沒有原始碼變動的情況下強制重啟，用 `docker compose restart app`（不用重新打包）或 `docker compose up -d --build --force-recreate`（連 image 沒變也強制重建容器）。
