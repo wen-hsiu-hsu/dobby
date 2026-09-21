@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import * as usersRepo from '../services/notion/users-repository.js';
 import { getProfile } from '../services/line/profile-service.js';
 import { logger } from '../utils/logger.js';
+import { runWithContext } from '../utils/request-context.js';
 
 // Try every group the user has ever been seen in (they may have left some of them,
 // which makes that group's profile lookup 404), stopping at the first one that
@@ -14,7 +15,16 @@ async function resolveDisplayName(userId: string, groups: string[]): Promise<str
   return null;
 }
 
+/**
+ * Wrapped in runWithContext so each cron run gets its own reqId — the /logs
+ * 頁面把「排程」事件當成一個 reqId 分組來顯示，沒有 reqId 每次執行都會被
+ * 併成同一組，看不出這是哪一次跑的。
+ */
 export async function updateDisplayNames(): Promise<void> {
+  return runWithContext(() => doUpdateDisplayNames());
+}
+
+async function doUpdateDisplayNames(): Promise<void> {
   logger.info('Starting display name batch update');
   try {
     const users = await usersRepo.findAll();

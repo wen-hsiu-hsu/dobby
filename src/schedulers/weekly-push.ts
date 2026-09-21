@@ -5,8 +5,18 @@ import * as seasonRepo from '../services/notion/season-repository.js';
 import { env } from '../config/env.js';
 import { formatDate, getNextSaturday, getNextSaturdayDateText, getCurrentSeasonName } from '../utils/date-utils.js';
 import { logger } from '../utils/logger.js';
+import { runWithContext } from '../utils/request-context.js';
 
+/**
+ * Wrapped in runWithContext so each cron run gets its own reqId — the /logs
+ * 頁面把「排程」事件當成一個 reqId 分組來顯示，沒有 reqId 每次執行都會被
+ * 併成同一組，看不出這是哪一次跑的。
+ */
 export async function sendWeeklyPush(): Promise<void> {
+  return runWithContext(() => doSendWeeklyPush());
+}
+
+async function doSendWeeklyPush(): Promise<void> {
   try {
     const groupIds = env.DOBBY_GROUP_IDS;
     if (groupIds.length === 0) {
