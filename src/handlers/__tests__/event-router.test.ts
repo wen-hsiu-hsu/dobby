@@ -28,6 +28,7 @@ describe('processEvents', () => {
       replyToken: 'token',
       source: { type: 'user', userId: 'u1' },
       message: { type: 'text', id: 'm1', text: '@Dobby +1', quoteToken: 'qt-1' },
+      deliveryContext: { isRedelivery: false },
     };
 
     await processEvents([event as any]);
@@ -46,11 +47,37 @@ describe('processEvents', () => {
       replyToken: 'token',
       source: { type: 'user', userId: 'u1' },
       message: { type: 'sticker', id: 'm1' },
+      deliveryContext: { isRedelivery: false },
     };
 
     await processEvents([event as any]);
 
     expect(seenToken).toBeUndefined();
+  });
+
+  it('logs "Processing event" with the event\'s webhookEventId/isRedelivery (not PII, safe at info level)', async () => {
+    vi.mocked(handleMessage).mockResolvedValue(undefined);
+
+    const event = {
+      type: 'message',
+      replyToken: 'token',
+      source: { type: 'group', groupId: 'g1' },
+      message: { type: 'text', id: 'm1', text: '@Dobby +1' },
+      webhookEventId: '01M31BEND6EPJ7FSWMDHC7BGRQ',
+      deliveryContext: { isRedelivery: true },
+    };
+
+    await processEvents([event as any]);
+
+    expect(logger.info).toHaveBeenCalledWith(
+      {
+        type: 'message',
+        sourceType: 'group',
+        webhookEventId: '01M31BEND6EPJ7FSWMDHC7BGRQ',
+        isRedelivery: true,
+      },
+      'Processing event',
+    );
   });
 
   it('logs "Event processed" with durationMs when handleMessage completes normally', async () => {
@@ -61,6 +88,7 @@ describe('processEvents', () => {
       replyToken: 'token',
       source: { type: 'user', userId: 'u1' },
       message: { type: 'text', id: 'm1', text: '@Dobby +1' },
+      deliveryContext: { isRedelivery: false },
     };
 
     await processEvents([event as any]);
@@ -79,6 +107,7 @@ describe('processEvents', () => {
       replyToken: 'token',
       source: { type: 'user', userId: 'u1' },
       message: { type: 'text', id: 'm1', text: '@Dobby +1' },
+      deliveryContext: { isRedelivery: false },
     };
 
     await processEvents([event as any]);

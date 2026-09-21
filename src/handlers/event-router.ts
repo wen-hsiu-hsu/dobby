@@ -14,7 +14,10 @@ export async function processEvents(events: WebhookEvent[]): Promise<void> {
     // and the user's raw message text) so the flow-table view always has a
     // starting point to show, and a debug-level line with the full detail
     // for when someone actually needs to see what was sent.
-    logger.info({ type: event.type, sourceType: event.source?.type }, 'Processing event');
+    logger.info(
+      { type: event.type, sourceType: event.source?.type, webhookEventId: event.webhookEventId, isRedelivery: event.deliveryContext.isRedelivery },
+      'Processing event'
+    );
     logger.debug({ type: event.type, source: event.source, message: 'message' in event ? event.message : undefined }, 'Processing event detail');
     const startedAt = Date.now();
     try {
