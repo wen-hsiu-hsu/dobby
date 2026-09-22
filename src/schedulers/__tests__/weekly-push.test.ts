@@ -110,12 +110,13 @@ describe('sendWeeklyPush', () => {
   });
 
   it('shows a paused message instead of attendance count when the event is paused', async () => {
-    findByDateMock.mockResolvedValue(makeCalendarEvent({ isPaused: true }));
+    findByDateMock.mockResolvedValue(makeCalendarEvent({ date: '2026-09-26', isPaused: true }));
 
     await sendWeeklyPush();
 
     const text = pushedText();
-    expect(text).toContain('本週活動暫停');
+    expect(text).toContain('2026-09-26 不能到請喊聲');
+    expect(text).toContain('⛔ 本週活動暫停');
     expect(text).not.toContain('應到');
   });
 

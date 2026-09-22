@@ -1,9 +1,9 @@
 import cron from 'node-cron';
 import { pushMessage } from '../services/line/push-service.js';
 import { getEventOccupancy } from '../services/notion/event-occupancy.js';
-import * as peopleRepo from '../services/notion/people-repository.js';
+import { buildWeeklyStatusMessage } from '../commands/weekly-status-message.js';
 import { env } from '../config/env.js';
-import { formatDate, getNextSaturday, getNextSaturdayDateText } from '../utils/date-utils.js';
+import { formatDate, getNextSaturday } from '../utils/date-utils.js';
 import { logger } from '../utils/logger.js';
 import { runWithContext } from '../utils/request-context.js';
 
@@ -31,34 +31,7 @@ async function doSendWeeklyPush(): Promise<void> {
       return;
     }
 
-    const { event, season, totalSlots, presentSeasonMembers } = occupancy;
-
-    let text: string;
-    if (event.isPaused) {
-      text = [`🏸 本週打球資訊`, `📅 ${getNextSaturdayDateText()}`, ``, `⛔ 本週活動暫停`].join('\n');
-    } else {
-      // Show all slots including empty ones, matching buildEventStatusMessage's guest list.
-      const displaySlots = Math.max(totalSlots, event.guests.length);
-      const guestLines = Array.from({ length: displaySlots }, (_, i) => `${i + 1}. ${event.guests[i] ?? ''}`).join(
-        '\n'
-      );
-
-      let absenteeText = '無';
-      if (event.absentees.length > 0) {
-        const absentees = await peopleRepo.findByPageIds(event.absentees);
-        absenteeText = absentees.map((p) => p.name).join('、');
-      }
-
-      text = [
-        `${nextSaturday} 不能到請喊聲`,
-        `零打名額：${totalSlots}人 $${season.guestFee}/人`,
-        guestLines,
-        ``,
-        `請假：${absenteeText}`,
-        `場地：${season.courts} 面`,
-        `應到：${presentSeasonMembers} 人`,
-      ].join('\n');
-    }
+    const text = await buildWeeklyStatusMessage(occupancy, nextSaturday, occupancy.season.courts);
 
     const messages = [{ type: 'text' as const, text }];
 

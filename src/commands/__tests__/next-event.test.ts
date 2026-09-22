@@ -37,9 +37,11 @@ describe('next-event', () => {
     const messages = await bot.run('@Dobby next', { userId: 'admin-user' });
     const text = (messages[0] as any)?.text ?? '';
     // season fixture: courts=3, members=[person-1, person-2]; calendar fixture: no absentees/guests
-    expect(text).toContain('季租出席：2 人');
-    expect(text).toContain('零打報名：0 人');
-    expect(text).toContain('總計：2 人');
+    // calculateTotalSlots: courts(3)*7 - members(2) + absentees(0) = 19
+    expect(text).toContain('零打名額：19人 $200/人');
+    expect(text).toContain('場地：3 面');
+    expect(text).toContain('應到：2 人');
+    expect(text).toContain('請假：無');
     expect(text).not.toContain('剩餘名額');
   });
 
@@ -47,10 +49,11 @@ describe('next-event', () => {
     const bot = createTestBot({ users: adminUsers });
     const messages = await bot.run('@Dobby next?c=5', { userId: 'admin-user' });
     const text = (messages[0] as any)?.text ?? '';
-    // 出席人數 unaffected by courtOverride
-    expect(text).toContain('季租出席：2 人');
-    expect(text).toContain('總計：2 人');
-    // calculateTotalSlots(5, members=2, absentees=0) - guests(0) = 5*7 - 2 = 33
-    expect(text).toContain('若 5 場地：剩餘名額 33 人');
+    // calculateTotalSlots: courts(5)*7 - members(2) + absentees(0) = 33
+    expect(text).toContain('零打名額：33人 $200/人');
+    // 場地 line reflects the override, not season.courts (3)
+    expect(text).toContain('場地：5 面');
+    // 應到 unaffected by courtOverride
+    expect(text).toContain('應到：2 人');
   });
 });

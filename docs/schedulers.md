@@ -13,7 +13,8 @@
 1. 讀取 `DOBBY_GROUP_IDS` 環境變數（逗號分隔字串），解析成多個推播目標的 LINE 群組 ID 清單
 2. 計算下一個週六的日期
 3. 呼叫 `getEventOccupancy(nextSaturday)`（`src/services/notion/event-occupancy.ts`）取得該日行事曆活動、當季 season 資料、總名額（`totalSlots`）與應到人數（`presentSeasonMembers`）——這個 helper 也被 `next-event.ts`、報名/請假流程共用，名額計算邏輯統一在一處，這支排程沒有另外算一次
-4. 逐一發送 Push Message 到每個群組，個別 try/catch（單一群組失敗只記 log、不影響其他群組、不重試），跑完後記一行總結 log（成功/失敗/總數）
+4. 把 `occupancy` 交給 `buildWeeklyStatusMessage()`（`src/commands/weekly-status-message.ts`）組出訊息文字——這個 builder 同時也是 `@Dobby next`（`docs/commands.md`）的訊息來源，兩邊共用同一套格式，不是各自維護一份
+5. 逐一發送 Push Message 到每個群組，個別 try/catch（單一群組失敗只記 log、不影響其他群組、不重試），跑完後記一行總結 log（成功/失敗/總數）
 
 ### 訊息格式
 
@@ -32,11 +33,9 @@
 
 零打名額那幾行永遠印到 `totalSlots`（沒人報名的格子留空），不是只列出已報名的零打名單；`請假` 有多人時用頓號（`、`）分隔真實姓名，沒人請假顯示「無」。
 
-若活動狀態為「打球暫停」，訊息改用另一套（沿用改版前的樣式，刻意不套新版欄位）：
+若活動狀態為「打球暫停」，訊息改用簡化版，但沿用同一個標頭樣式：
 ```
-🏸 本週打球資訊
-📅 3月8日（六）
-
+2026-09-26 不能到請喊聲
 ⛔ 本週活動暫停
 ```
 

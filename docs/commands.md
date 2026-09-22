@@ -131,9 +131,9 @@ Notion 內容裡的 `bulleted_list_item`（項目符號清單）在輸出時會�
 ```
 @Dobby next
 @Dobby next?-=N     ← 查 N 天前的週六（除錯用）
-@Dobby next?c=N     ← what-if 預覽：若場地數為 N，剩餘名額多少（不寫回 Notion，不影響出席人數）
+@Dobby next?c=N     ← what-if 預覽：若場地數為 N，零打名額/場地那兩行會直接改用 N 計算（不寫回 Notion，不影響應到人數）
 ```
-管理員可查看下次打球的完整資訊（包含隱藏資訊）。
+管理員可查看下次打球的完整資訊。回覆內容跟每週打球資訊推播（`docs/schedulers.md`）完全同一套訊息格式，由 `src/commands/weekly-status-message.ts` 的 `buildWeeklyStatusMessage()` 共用產生 —— `next` 只是手動查看目前狀態的方式，不是另一種摘要格式。
 
 ---
 
