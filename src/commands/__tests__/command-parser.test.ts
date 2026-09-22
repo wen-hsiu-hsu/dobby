@@ -96,25 +96,9 @@ describe('parseCommand', () => {
     expect(parseCommand('@Dobby next')?.type).toBe(CommandType.NEXT_EVENT);
   });
 
-  it('parses @Dobby next?-=1&c=2 with structured queryParams', () => {
-    const cmd = parseCommand('@Dobby next?-=1&c=2');
-    expect(cmd?.type).toBe(CommandType.NEXT_EVENT);
-    expect(cmd?.queryParams).toEqual({ dayOffset: -1, courtOverride: 2 });
-  });
-
-  it('parses @Dobby next?c=3 with only courtOverride', () => {
-    const cmd = parseCommand('@Dobby next?c=3');
-    expect(cmd?.queryParams).toEqual({ courtOverride: 3 });
-  });
-
-  it('parses @Dobby next?-=2 with only dayOffset', () => {
-    const cmd = parseCommand('@Dobby next?-=2');
-    expect(cmd?.queryParams).toEqual({ dayOffset: -2 });
-  });
-
-  it('parses @Dobby next without query as no queryParams', () => {
-    const cmd = parseCommand('@Dobby next');
-    expect(cmd?.queryParams).toBeUndefined();
+  it('does not treat @Dobby next?c=2 or @Dobby nextfoo as NEXT_EVENT now that matching is exact', () => {
+    expect(parseCommand('@Dobby next?c=2')?.type).toBe(CommandType.UNKNOWN);
+    expect(parseCommand('@Dobby nextfoo')?.type).toBe(CommandType.UNKNOWN);
   });
 
   it('parses @Dobby news as NEWS', () => {

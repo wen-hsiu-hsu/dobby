@@ -5,18 +5,8 @@ import type { EventOccupancy } from '../services/notion/event-occupancy.js';
  * Renders the weekly status message shared by the Sunday push (`weekly-push.ts`) and the
  * `@Dobby next` admin command (`next-event.ts`) — both show the same "current state" view,
  * just triggered differently.
- *
- * `courts` is taken as a separate param rather than read from `occupancy.season.courts`
- * because `getEventOccupancy(date, courtsOverride)` uses `courtsOverride` to compute
- * `totalSlots` but still returns the original (non-overridden) `season` — callers doing a
- * court-override what-if query must pass the same override here so the `場地` line stays
- * consistent with `totalSlots`/`零打名額`.
  */
-export async function buildWeeklyStatusMessage(
-  occupancy: EventOccupancy,
-  dateStr: string,
-  courts: number
-): Promise<string> {
+export async function buildWeeklyStatusMessage(occupancy: EventOccupancy, dateStr: string): Promise<string> {
   const { event, season, totalSlots, presentSeasonMembers } = occupancy;
 
   if (event.isPaused) {
@@ -39,7 +29,7 @@ export async function buildWeeklyStatusMessage(
     guestLines,
     ``,
     `請假：${absenteeText}`,
-    `場地：${courts} 面`,
+    `場地：${season.courts} 面`,
     `應到：${presentSeasonMembers} 人`,
   ].join('\n');
 }

@@ -12,18 +12,11 @@ export enum CommandType {
   UNKNOWN = 'unknown',
 }
 
-export interface NextEventQueryParams {
-  dayOffset?: number;      // from -=N
-  courtOverride?: number;  // from c=N
-}
-
 export interface ParsedCommand {
   type: CommandType;
   rawText: string;
   /** For registration: +N or -N (e.g. "+1", "-2") */
   delta?: string;
-  /** For next_event: parsed "-=N" / "c=N" query DSL */
-  queryParams?: NextEventQueryParams;
 }
 
 export interface RegistrationTarget {

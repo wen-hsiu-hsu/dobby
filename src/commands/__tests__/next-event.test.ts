@@ -44,16 +44,4 @@ describe('next-event', () => {
     expect(text).toContain('請假：無');
     expect(text).not.toContain('剩餘名額');
   });
-
-  it('shows what-if remaining slots when c=N is provided, without affecting attendance', async () => {
-    const bot = createTestBot({ users: adminUsers });
-    const messages = await bot.run('@Dobby next?c=5', { userId: 'admin-user' });
-    const text = (messages[0] as any)?.text ?? '';
-    // calculateTotalSlots: courts(5)*7 - members(2) + absentees(0) = 33
-    expect(text).toContain('零打名額：33人 $200/人');
-    // 場地 line reflects the override, not season.courts (3)
-    expect(text).toContain('場地：5 面');
-    // 應到 unaffected by courtOverride
-    expect(text).toContain('應到：2 人');
-  });
 });

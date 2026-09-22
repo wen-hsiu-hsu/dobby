@@ -31,7 +31,7 @@ async function doSendWeeklyPush(): Promise<void> {
       return;
     }
 
-    const text = await buildWeeklyStatusMessage(occupancy, nextSaturday, occupancy.season.courts);
+    const text = await buildWeeklyStatusMessage(occupancy, nextSaturday);
 
     const messages = [{ type: 'text' as const, text }];
 

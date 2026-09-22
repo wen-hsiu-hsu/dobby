@@ -64,7 +64,7 @@ describe('buildWeeklyStatusMessage', () => {
   it('renders the unified paused-week format', async () => {
     const occupancy = makeOccupancy({ event: makeCalendarEvent({ isPaused: true }) });
 
-    const text = await buildWeeklyStatusMessage(occupancy, '2026-09-26', 2);
+    const text = await buildWeeklyStatusMessage(occupancy, '2026-09-26');
 
     expect(text).toBe(['2026-09-26 不能到請喊聲', '⛔ 本週活動暫停'].join('\n'));
     expect(findByPageIdsMock).not.toHaveBeenCalled();
@@ -78,7 +78,7 @@ describe('buildWeeklyStatusMessage', () => {
       presentSeasonMembers: 3,
     });
 
-    const text = await buildWeeklyStatusMessage(occupancy, '2026-09-26', 2);
+    const text = await buildWeeklyStatusMessage(occupancy, '2026-09-26');
 
     expect(text).toContain('2026-09-26 不能到請喊聲');
     expect(text).toContain('零打名額：4人 $200/人');
@@ -98,7 +98,7 @@ describe('buildWeeklyStatusMessage', () => {
       event: makeCalendarEvent({ absentees: ['p-a', 'p-b'] }),
     });
 
-    const text = await buildWeeklyStatusMessage(occupancy, '2026-09-26', 2);
+    const text = await buildWeeklyStatusMessage(occupancy, '2026-09-26');
 
     expect(findByPageIdsMock).toHaveBeenCalledWith(['p-a', 'p-b']);
     expect(text).toContain('請假：小美、小強');
@@ -110,25 +110,22 @@ describe('buildWeeklyStatusMessage', () => {
       totalSlots: 2,
     });
 
-    const text = await buildWeeklyStatusMessage(occupancy, '2026-09-26', 2);
+    const text = await buildWeeklyStatusMessage(occupancy, '2026-09-26');
 
     expect(text).toContain('1. A');
     expect(text).toContain('2. B');
     expect(text).toContain('3. C');
   });
 
-  it('uses the courts param for the 場地 line independently of occupancy.season.courts', async () => {
+  it('reflects occupancy.season.courts directly in the 場地 line', async () => {
     const occupancy = makeOccupancy({
-      season: makeSeasonRecord({ courts: 3 }),
+      season: makeSeasonRecord({ courts: 5 }),
       totalSlots: 33,
       presentSeasonMembers: 2,
     });
 
-    // Caller passed an override courts value (e.g. a what-if query) that differs from
-    // season.courts — the 場地 line must reflect the override, not the original season value.
-    const text = await buildWeeklyStatusMessage(occupancy, '2026-09-26', 5);
+    const text = await buildWeeklyStatusMessage(occupancy, '2026-09-26');
 
     expect(text).toContain('場地：5 面');
-    expect(text).not.toContain('場地：3 面');
   });
 });
