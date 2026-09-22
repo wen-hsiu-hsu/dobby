@@ -136,4 +136,51 @@ describe('updateDisplayNames', () => {
 
     expect(updateMock).toHaveBeenCalledWith('page-user-good', { customName: 'New-user-good' });
   });
+
+  it('waits 400ms after processing each user to respect the Notion rate limit', async () => {
+    vi.useFakeTimers();
+    try {
+      const setTimeoutSpy = vi.spyOn(global, 'setTimeout');
+      findAllMock.mockResolvedValue([
+        makeUser({ userId: 'user-1', customName: 'Old1', groups: ['group-1'] }),
+        makeUser({ userId: 'user-2', customName: 'Old2', groups: ['group-1'] }),
+        makeUser({ userId: 'user-3', customName: 'Old3', groups: ['group-1'] }),
+      ]);
+      getProfileMock.mockImplementation(async (userId: string) => ({ userId, displayName: `New-${userId}` }));
+
+      const promise = updateDisplayNames();
+      // Generously covers the 3 * 400ms of throttling this run should perform.
+      await vi.advanceTimersByTimeAsync(2000);
+      await promise;
+
+      // Unlike calendar-repository's findByPageIds (which skips the delay before the
+      // first item), this loop's delay sits after the try/catch and runs once per
+      // user that isn't skipped by an earlier `continue` — including the very first
+      // one — so 3 processed users means 3 delays, not 2.
+      expect(setTimeoutSpy).toHaveBeenCalledTimes(3);
+      for (const call of setTimeoutSpy.mock.calls) {
+        expect(call[1]).toBe(400);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not delay for users skipped via `continue` (no known groups)', async () => {
+    vi.useFakeTimers();
+    try {
+      const setTimeoutSpy = vi.spyOn(global, 'setTimeout');
+      findAllMock.mockResolvedValue([
+        makeUser({ userId: 'user-nogroup', customName: 'X', groups: [] }),
+      ]);
+
+      const promise = updateDisplayNames();
+      await vi.advanceTimersByTimeAsync(0);
+      await promise;
+
+      expect(setTimeoutSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

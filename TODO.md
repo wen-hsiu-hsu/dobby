@@ -101,12 +101,14 @@
   - `REGISTRATION`/`LEAVE`/`CANCEL_LEAVE` 這三種有額外參數處理的分支（`delta` 解析、`isCancel` 布林值）要驗證有正確傳給 `handleRegistration`/`handleLeave`。
   - 這個測試檔案建議命名 `src/commands/__tests__/command-router.test.ts`，跟其他 command handler 測試放在同一層。
 
-- [ ] **批次 Notion 寫入之間的 400ms 節流延遲（因應 Notion API ~3 req/s rate limit 的慣例做法）沒有任何測試斷言它真的有執行，目前純靠人工審查程式碼有沒有照著慣例寫。**
+- [x] **批次 Notion 寫入之間的 400ms 節流延遲（因應 Notion API ~3 req/s rate limit 的慣例做法）沒有任何測試斷言它真的有執行，目前純靠人工審查程式碼有沒有照著慣例寫。**（2026-09-22 已完成，新增測試於 `src/services/notion/__tests__/calendar-repository.test.ts`、`src/schedulers/__tests__/display-name-update.test.ts`；發現 `display-name-update.ts:63` 的延遲跟 `calendar-repository.ts:40` 邏輯不同——後者用 `if (i > 0)` 跳過第一筆（N 筆延遲 N-1 次），前者延遲寫在 try/catch 之後、沒有跳過第一筆，只要沒被前面的 `continue` 跳過就每筆都延遲（N 筆處理成功則延遲 N 次），測試已依實際行為分別斷言，未改動 production 邏輯）
   背景：專案慣例（`CLAUDE.md`）要求批次操作間要加 delay，目前已知的兩處實作是 `src/services/notion/calendar-repository.ts:40`（迴圈裡 `if (i > 0) await new Promise((r) => setTimeout(r, 400))`）跟 `src/schedulers/display-name-update.ts:63`（同樣的 400ms delay）。這兩處都沒有測試驗證這段 delay 真的存在、真的在每一筆之間執行（而不是被重構時不小心刪掉、或條件寫錯只在某些情況才生效）。
   為什麼重要：如果之後有人重構這兩個檔案時不小心把 delay 弄丟，測試套件不會示警，只有在真實環境批次操作對 Notion 打太快、開始收到 429 錯誤時才會被發現（而且可能要等到社團人數變多、批次筆數變多才會踩到）。
   需要驗證的情境：
   - 用 `vi.useFakeTimers()`（參考 `mutex.test.ts` 的既有寫法）驗證這兩處迴圈在處理 N 筆資料時，`setTimeout` 總共被呼叫了 N-1 次、每次間隔是 400ms，而不是斷言「總耗時」這種容易 flaky 的寫法。
   - 只需要驗證「延遲機制有被觸發」，不需要驗證 Notion API 本身的 rate limit 行為（那是 `notion-fetch.test.ts` 已經覆蓋的 429 重試邏輯範疇）。
+
+本章節 6 項已全數完成。
 
 ---
 

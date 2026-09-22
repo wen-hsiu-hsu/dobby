@@ -106,6 +106,47 @@ describe('calendar-repository', () => {
       expect(notionGetAllResultsMock).toHaveBeenCalledTimes(1);
       expect(notionGetAllResultsMock).toHaveBeenCalledWith('/pages/page-1/properties/prop-a');
     });
+
+    it('waits 400ms between each page fetch (Notion rate limit throttle), but not before the first', async () => {
+      vi.useFakeTimers();
+      try {
+        const setTimeoutSpy = vi.spyOn(global, 'setTimeout');
+        notionGetMock.mockImplementation(async (path: string) =>
+          makePage(baseProps(), path.replace('/pages/', '')),
+        );
+
+        const promise = findByPageIds(['page-1', 'page-2', 'page-3']);
+        // Generously covers the 2 * 400ms of throttling this call should perform.
+        await vi.advanceTimersByTimeAsync(2000);
+        const events = await promise;
+
+        expect(events).toHaveLength(3);
+        // 3 pages -> 2 delays (no wait before the first page).
+        expect(setTimeoutSpy).toHaveBeenCalledTimes(2);
+        for (const call of setTimeoutSpy.mock.calls) {
+          expect(call[1]).toBe(400);
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not delay at all when there is only a single page to fetch', async () => {
+      vi.useFakeTimers();
+      try {
+        const setTimeoutSpy = vi.spyOn(global, 'setTimeout');
+        notionGetMock.mockResolvedValue(makePage(baseProps(), 'page-1'));
+
+        const promise = findByPageIds(['page-1']);
+        await vi.advanceTimersByTimeAsync(0);
+        const events = await promise;
+
+        expect(events).toHaveLength(1);
+        expect(setTimeoutSpy).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe('updateAbsentees', () => {
