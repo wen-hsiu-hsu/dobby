@@ -69,6 +69,12 @@ npm run dev:docker
 | `NODE_ENV` | ❌ | `development` 或 `production` |
 | `DOBBY_GROUP_IDS` | ❌ | 每週打球推播訊息的目標 LINE 群組 ID，可用逗號分隔多個群組 ID，見 `docs/schedulers.md`。沒設定的話該排程會記一行 error log 並跳過，不會讓 app 啟動失敗 |
 | `LOG_LEVEL` | ❌ | pino log level（`trace`/`debug`/`info`/`warn`/`error`/`fatal`，預設 `info`）。要臨時診斷正式環境問題（例如看 Notion API 完整 request/response）時，把 Zeabur 上的這個變數改成 `debug` 並重啟服務即可，不用改程式碼重新部署；診斷完記得改回 `info`，否則 debug log 會把 Notion 回傳的完整資料（含姓名、LINE user_id 等）持續寫進 `/logs` 可查到的檔案。 |
+| `R2_ACCOUNT_ID` | ❌ | Cloudflare R2 帳號 ID，跟下面三個變數必須「全部有值」或「全部沒值」（`src/config/env.ts` 有驗證，中間狀態會讓服務啟動失敗），見 `docs/adr/0006-log-r2-sync-is-periodic-full-directory-not-rotation-hook.md` |
+| `R2_ACCESS_KEY_ID` | ❌ | R2 S3 相容 API 的 access key ID |
+| `R2_SECRET_ACCESS_KEY` | ❌ | R2 S3 相容 API 的 secret access key |
+| `R2_BUCKET_NAME` | ❌ | 存放 log 備份的 R2 bucket 名稱 |
+| `R2_LOG_PREFIX` | ❌ | R2 上 log 物件 key 的前綴（`logs/<prefix>/<檔名>`），沒設定時預設用 `NODE_ENV` |
+| `R2_LOG_SYNC_INTERVAL_MINUTES` | ❌ | log 同步到 R2 的週期（分鐘），沒設定時預設 `15` |
 
 Notion 資料庫 ID 可從 Notion 頁面 URL 取得（32 字元的 UUID）。
 

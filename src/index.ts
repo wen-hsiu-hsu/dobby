@@ -64,6 +64,9 @@ if (process.env['NODE_ENV'] !== 'test') {
     const { startLogCleanup } = await import('./utils/log-cleanup.js');
     startLogCleanup(LOG_DIR);
 
+    const { startLogUpload, uploadAllLogs } = await import('./utils/log-upload.js');
+    startLogUpload(LOG_DIR);
+
     const port = parseInt(env.PORT, 10);
     const server = app.listen(port, () => {
       logger.info({ port }, 'Server started');
@@ -78,11 +81,24 @@ if (process.env['NODE_ENV'] !== 'test') {
       }, 10_000);
       forceExitTimer.unref();
 
-      server.close(() => {
-        clearTimeout(forceExitTimer);
-        logger.info('Server closed, exiting');
-        process.exit(0);
-      });
+      // 關閉前多同步一次 log——套獨立的短逾時，逾時或失敗都吞掉繼續往下走，
+      // 不能卡住既有的 10 秒 forceExitTimer/server.close() 流程。
+      const uploadWithTimeout = Promise.race([
+        uploadAllLogs(LOG_DIR),
+        new Promise<void>((resolveTimeout) => setTimeout(resolveTimeout, 5_000)),
+      ]);
+
+      uploadWithTimeout
+        .catch((err: unknown) => {
+          logger.error({ err }, 'R2 log sync on shutdown failed');
+        })
+        .finally(() => {
+          server.close(() => {
+            clearTimeout(forceExitTimer);
+            logger.info('Server closed, exiting');
+            process.exit(0);
+          });
+        });
     };
 
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

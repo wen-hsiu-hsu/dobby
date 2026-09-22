@@ -93,4 +93,6 @@ docker exec dobby-app-1 rm -f logs/app.*.log
 docker compose restart app   # 這一步不能省
 ```
 
+完成輪替（或仍在寫入中）的 log 檔案，會另外週期性（預設 15 分鐘，見 `R2_LOG_SYNC_INTERVAL_MINUTES`）整份同步一份到 Cloudflare R2（S3 相容物件儲存）做異地備份，跟上面講的本機 7 天保留機制是分開的兩件事——R2 上的備份不受 7 天保留限制，也不會因為容器重啟／重新部署（例如部署到 Zeabur 這類檔案系統是 ephemeral 的平台）而消失。服務正常關閉（graceful shutdown）時，也會在 `server.close()` 之前額外多同步一次。要不要啟用這個功能、同步邏輯為什麼是「全目錄週期性重傳」而不是掛 `pino-roll` 的輪替事件，見 `docs/adr/0006-log-r2-sync-is-periodic-full-directory-not-rotation-hook.md`；環境變數見 `docs/development.md` 的環境變數表。
+
 **`docker compose up -d --build` 不保證會重啟 process。** `--build`只決定要不要重新打包 image；如果這次 build 的每一層都命中快取（沒有任何原始碼變動），打出來的 image 會跟現在正在跑的完全一樣，Compose 判斷「沒有變化」就不會重建容器、process 也不會重啟——上面提到的那個握著已刪除檔案的 process 就會繼續原封不動地跑下去。要在不管有沒有原始碼變動的情況下強制重啟，用 `docker compose restart app`（不用重新打包）或 `docker compose up -d --build --force-recreate`（連 image 沒變也強制重建容器）。

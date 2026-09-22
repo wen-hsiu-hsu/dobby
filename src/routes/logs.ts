@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { readRecentLogs, type LogEntry } from '../utils/log-reader.js';
 import { getLogLevel } from '../utils/logger.js';
+import { getR2SyncStatus, type R2SyncStatus } from '../utils/log-upload.js';
 import { logsAuthMiddleware } from '../middleware/logs-auth.js';
 import {
   groupPairedEntries,
@@ -109,6 +110,41 @@ function logLevelBadgeHtml(level: string): string {
     : 'color:#d3a35c;background:#2c2519;border:1px solid #5c4c2c';
   const dotColor = isDebug ? '#d2cefd' : '#d3a35c';
   return `<span class="level-badge" style="${css}"><span class="level-badge-dot" style="background:${dotColor}"></span>LOG_LEVEL=${escapeHtml(level)}</span>`;
+}
+
+/**
+ * R2 同步狀態徽章——跟 `logLevelBadgeHtml` 同一種 `.level-badge` 外觀。顏色
+ * 沿用既有的 `STATUS_COLORS`（綠 ok／琥珀 warn）；中性灰的色值跟
+ * `KIND_META.system` 相同，但這裡是獨立字面值、border 用 solid（不是
+ * `KIND_META.system.css` 的 dashed）——`.level-badge` 家族（跟
+ * `logLevelBadgeHtml` 一樣）一律用 solid border，直接引用 `KIND_META.system`
+ * 會混進不同視覺家族的 dashed 邊框，不是這裡要的效果。這是跨執行的全域狀
+ * 態（哪一次 setInterval 執行成功/失敗），不屬於任何單一 reqId/事件，所以
+ * 只放在 header，不進事件時間軸。
+ */
+function r2SyncBadgeHtml(status: R2SyncStatus): string {
+  const NEUTRAL_CSS = 'color:#8b8fa3;background:#1c1d29;border:1px solid #262835';
+
+  if (!status.enabled) {
+    return `<span class="level-badge" style="${NEUTRAL_CSS}"><span class="level-badge-dot" style="background:#8b8fa3"></span>R2 備份：未啟用</span>`;
+  }
+  if (status.lastSuccessAt === null && status.lastFailureAt === null) {
+    return `<span class="level-badge" style="${NEUTRAL_CSS}"><span class="level-badge-dot" style="background:#8b8fa3"></span>R2 備份：尚未同步</span>`;
+  }
+
+  const lastIsSuccess =
+    status.lastFailureAt === null || (status.lastSuccessAt !== null && status.lastSuccessAt > status.lastFailureAt);
+
+  if (lastIsSuccess) {
+    const css = `color:${STATUS_COLORS.ok};background:transparent;border:1px solid ${STATUS_COLORS.ok}`;
+    const time = escapeHtml(taipeiTimeOnlyFormatter.format(new Date(status.lastSuccessAt!)));
+    return `<span class="level-badge" style="${css}"><span class="level-badge-dot" style="background:${STATUS_COLORS.ok}"></span>R2 備份 · ${time} 成功</span>`;
+  }
+
+  const css = `color:${STATUS_COLORS.warn};background:transparent;border:1px solid ${STATUS_COLORS.warn}`;
+  const time = escapeHtml(taipeiTimeOnlyFormatter.format(new Date(status.lastFailureAt!)));
+  const titleAttr = status.lastFailureMessage ? ` title="${escapeHtml(status.lastFailureMessage)}"` : '';
+  return `<span class="level-badge" style="${css}"${titleAttr}><span class="level-badge-dot" style="background:${STATUS_COLORS.warn}"></span>R2 備份 · ${time} 失敗，等待下次重試</span>`;
 }
 
 /**
@@ -1116,6 +1152,7 @@ function bucketRawEntries(entries: LogEntry[]): Map<string, LogEntry[]> {
 
 function renderHtml(entries: LogEntry[]): string {
   const levelBadgeHtml = logLevelBadgeHtml(getLogLevel());
+  const r2BadgeHtml = r2SyncBadgeHtml(getR2SyncStatus());
   // 排程（weekly-push/display-name-update）現在也各自用 runWithContext 包住整
   // 次執行，所以真的完全沒有 reqId 的只剩伺服器生命週期訊息跟少數 HTTP 層級
   // 的錯誤（例如 LINE 簽章驗證失敗，在 webhook 事件處理、也就是 reqId 產生
@@ -1316,6 +1353,7 @@ function renderHtml(entries: LogEntry[]): string {
       <h1>🐶 Dobby Logs</h1>
       <span class="divider"></span>
       ${levelBadgeHtml}
+      ${r2BadgeHtml}
       <span class="count" id="count-label">共 ${totalCount} 筆</span>
       <span class="count-err" id="count-err-label">${errorCount} 筆需要注意</span>
       <input type="text" id="search" placeholder="搜尋指令、回覆、reqId、使用者…" oninput="applyFilters()">

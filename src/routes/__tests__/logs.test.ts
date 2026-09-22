@@ -2,6 +2,14 @@ import { describe, it, expect, vi } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 
+const { getR2SyncStatusMock } = vi.hoisted(() => ({
+  getR2SyncStatusMock: vi.fn().mockReturnValue({ enabled: false }),
+}));
+
+vi.mock('../../utils/log-upload.js', () => ({
+  getR2SyncStatus: getR2SyncStatusMock,
+}));
+
 vi.mock('../../utils/log-reader.js', () => ({
   readRecentLogs: vi.fn().mockResolvedValue([
     {
@@ -695,5 +703,60 @@ describe('createLogsRouter', () => {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
     expect(html).toContain(`<pre class="raw-json-copy-source" style="display:none">${expectedJson}</pre>`);
+  });
+
+  describe('R2 sync status badge', () => {
+    it('shows a neutral "未啟用" badge when R2 is not configured', async () => {
+      getR2SyncStatusMock.mockReturnValueOnce({ enabled: false });
+
+      const html = await getLogsHtml();
+
+      expect(html).toContain('R2 備份：未啟用');
+      expect(html).toContain('color:#8b8fa3');
+    });
+
+    it('shows a neutral "尚未同步" badge when enabled but never run', async () => {
+      getR2SyncStatusMock.mockReturnValueOnce({
+        enabled: true,
+        lastSuccessAt: null,
+        lastFailureAt: null,
+        lastFailureMessage: null,
+      });
+
+      const html = await getLogsHtml();
+
+      expect(html).toContain('R2 備份：尚未同步');
+      expect(html).toContain('color:#8b8fa3');
+    });
+
+    it('shows a green "成功" badge with Taipei time when the last run succeeded', async () => {
+      getR2SyncStatusMock.mockReturnValueOnce({
+        enabled: true,
+        // 2024-01-01T00:00:00Z -> Asia/Taipei is UTC+8
+        lastSuccessAt: Date.UTC(2024, 0, 1, 0, 0, 0),
+        lastFailureAt: null,
+        lastFailureMessage: null,
+      });
+
+      const html = await getLogsHtml();
+
+      expect(html).toContain('R2 備份 · 08:00:00 成功');
+      expect(html).toContain('color:#7fb894'); // STATUS_COLORS.ok
+    });
+
+    it('shows an amber "失敗，等待下次重試" badge with the failure message in title when the last run failed', async () => {
+      getR2SyncStatusMock.mockReturnValueOnce({
+        enabled: true,
+        lastSuccessAt: Date.UTC(2024, 0, 1, 0, 0, 0),
+        lastFailureAt: Date.UTC(2024, 0, 1, 1, 0, 0), // later than lastSuccessAt
+        lastFailureMessage: '2/3 個檔案上傳失敗',
+      });
+
+      const html = await getLogsHtml();
+
+      expect(html).toContain('R2 備份 · 09:00:00 失敗，等待下次重試');
+      expect(html).toContain('color:#d3a35c'); // STATUS_COLORS.warn
+      expect(html).toContain('title="2/3 個檔案上傳失敗"');
+    });
   });
 });

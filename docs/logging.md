@@ -99,6 +99,16 @@ LINE 回覆/推播的訊息全文，以及 userId 這類身分識別資訊，比
 
 `profile-service.ts` 的 `getProfile()` 現在也有一行摘要 log（`'LINE get profile'`，成功/失敗都有），沒有被時間軸特別合併/配對顯示，會以通用渲染器的樣子出現在時間軸上。
 
+## R2 同步狀態徽章
+
+Header 的 LOG_LEVEL 徽章旁邊還有一個「R2 備份」徽章，顯示 log 檔案同步到 Cloudflare R2 的狀態（背景說明見 `docs/overview.md`「日誌」小節、`docs/adr/0006-log-r2-sync-is-periodic-full-directory-not-rotation-hook.md`）。三種語意：
+
+- 灰色「R2 備份：未啟用」或「R2 備份：尚未同步」——功能沒開，或開了但還沒跑過第一次。
+- 綠色「R2 備份 · `<時間>` 成功」——最近一次同步成功。
+- 琥珀色「R2 備份 · `<時間>` 失敗，等待下次重試」——最近一次同步失敗，滑鼠 hover 可以看到簡短的失敗原因；不需要手動處理，下一次週期性同步（或下次 graceful shutdown）會自動重試。
+
+**這是跨執行的全域狀態，不屬於任何一個 reqId／事件，不會出現在左側的事件列表或任何分頁裡**——跟這份文件其他小節描述的「事件時間軸」是完全不同的機制，判斷邏輯也不共用「完成／降級／警告／失敗」那套 `STATUS_COLORS`/`groupStatus` 規則（雖然顏色本身有沿用同一組色票）。
+
 ## 429 重試怎麼顯示
 
 Notion API 回應 429（rate limit）時程式會自動重試，同一次呼叫因此會在底層產生好幾行 request log。這些重試會被辨識成同一次呼叫、合併成**一個**時間軸步驟，標題後面會加註「· 重試 N 次」；底層記錄重試本身的那行 warn log（`Notion API rate limited, retrying`）則是獨立的一個時間軸步驟（通用渲染器顯示），不會被吃掉。
