@@ -57,7 +57,7 @@
 
 ### 🟡 Medium
 
-- [ ] **`owe.ts`、`participants.ts` 完全没有測試檔（coverage 0%），是目前指令系統裡兩個測試死角。**
+- [x] **`owe.ts`、`participants.ts` 完全没有測試檔（coverage 0%），是目前指令系統裡兩個測試死角。**（2026-09-22 已完成，新增 `src/commands/__tests__/owe.test.ts`、`src/commands/__tests__/participants.test.ts`，兩檔皆達 100% coverage）
   兩個 handler 都很單純（`src/commands/owe.ts`、`src/commands/participants.ts`，各約 20 行）：`owe.ts` 呼叫 `peopleRepo.findAllUnpaid()` 列出未繳費名單；`participants.ts` 呼叫 `seasonRepo.findByName()` + `peopleRepo.findByPageIds()` 列出當季報名成員。兩者都有 try/catch 包住、失敗時回覆「系統錯誤，請稍後再試」。
   需要驗證的情境（可參考 `src/commands/__tests__/news.test.ts` 或 `payment.test.ts` 的寫法跟 mock 方式）：
   - `owe.ts`：無人欠費時回「目前沒有未繳費成員 🎉」；有欠費名單時訊息格式正確（編號 + 姓名，換行分隔）；repository 拋錯時回系統錯誤訊息而不是讓例外往外丟。
