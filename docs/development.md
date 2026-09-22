@@ -21,6 +21,35 @@ npm run dev
 
 服務在 `http://localhost:3000` 啟動。
 
+## 用 Docker + ngrok 本地開發（固定網址接真實 LINE）
+
+要用 docker 跑本地服務、並讓 LINE webhook 能打進來測試，用 `docker-compose.dev.yml`（純本地開發用，跟 production 的 `docker-compose.yml` 分開）：
+
+```bash
+# 1. 複製並填寫環境變數（若還沒做過）
+cp .env.example .env
+
+# 2. 複製並填寫 ngrok 設定
+cp .env.ngrok.example .env.ngrok
+# NGROK_AUTHTOKEN: https://dashboard.ngrok.com/get-started/your-authtoken
+# NGROK_DOMAIN: 到 https://dashboard.ngrok.com/domains 申請一個免費 static domain
+#   （每個帳號可以申請一個永久固定的網域，不會因為重啟而換掉）
+
+# 3. 啟動（app 用 volume mount + tsx watch，改檔案會自動重啟；ngrok 建好固定網址的 tunnel）
+npm run dev:docker
+```
+
+啟動後：
+- app 本身在 `http://localhost:3000`
+- ngrok 面板在 `http://localhost:4040`（可以看到每次 webhook 的原始 request/response，比對簽章驗證失敗時很好用）
+- 把 `https://<NGROK_DOMAIN>/webhook` 填到 LINE Developers Console 的 Webhook URL 欄位，設定一次之後網址不會變，不用每次重啟都重新貼
+
+`docker-compose.dev.yml` 的 `app` service 只把 `npm ci` 的結果 bake 進 image（`Dockerfile` 的 `dev` stage），原始碼是 bind mount 進去的，所以改 TypeScript 檔案會即時重啟，不用重建 image；只有改 `package.json` 才需要 `npm run dev:docker` 重新 `--build`。
+
+`docker-compose.dev.yml` 跟正式的 `docker-compose.yml` 各自用 `name:` 指定了不同的 compose project 名稱（`dobby-dev` / `dobby`）。兩者預設都會用資料夾名稱當 project 名稱，沒特別指定的話會撞名——`up` 其中一個會把另一個正在跑的 container 悄悄換掉，`down -v` 打錯檔案也會把對方的 volume 一起清掉。改指令時不要拿掉這個 `name:`。
+
+`app` 在 dev 模式（`NODE_ENV=development`）只會把 log 印到 console，不會寫進 `logs/` 資料夾（見 `src/utils/logger.ts` 的 `isDev` 分支），所以 `/logs` 頁面在這個 flow 下看不到即時新進的 log，只能看到已經存在 `logs/` 資料夾裡的歷史檔案。
+
 ## 環境變數
 
 所有變數在 `src/config/env.ts` 用 Zod schema 驗證，缺少任何必要變數會在啟動時 `process.exit(1)`。

@@ -1,4 +1,7 @@
 version: '3.8'
+# Explicit project name — see docker-compose.dev.yml for why this matters
+# (keeps this stack's containers/volumes isolated from the dev stack).
+name: dobby
 services:
   app:
     build: .
