@@ -65,7 +65,7 @@
   - 兩個測試檔都應該用 `createTestBot`（`src/test-utils/`），比照 `command-integration.test.ts` 或 `news.test.ts` 的既有寫法，不需要另外設計新的測試手法。
   - 完成後用 `npm run test:coverage` 確認這兩個檔案的 coverage 從 0% 提升到跟其他 command handler 相近的水準（80% 以上）。
 
-- [ ] **LINE webhook 簽章驗證（HMAC signature）從來沒有被自動化測試真正執行過，目前唯一驗證過這條路徑的方式是人工用 ngrok 接真實 LINE 帳號手動測試。**
+- [x] **LINE webhook 簽章驗證（HMAC signature）從來沒有被自動化測試真正執行過，目前唯一驗證過這條路徑的方式是人工用 ngrok 接真實 LINE 帳號手動測試。**（已完成 2026-09-22，新增 `src/__tests__/webhook-signature.test.ts`）
   背景：`src/webhook.ts:9` 的路由掛了 `lineSignatureMiddleware`（`src/middleware/line-signature.ts`，本質是 `@line/bot-sdk` 的 `middleware()`，用 `LINE_CHANNEL_SECRET` 驗證請求簽章）。但 `src/__tests__/webhook.test.ts` 開頭直接用 `vi.mock('@line/bot-sdk', ...)` 把整個 `middleware()` 換成一個永遠 `next()` 放行、只負責把 raw body parse 成 JSON 的假中介層（理由寫在該檔案的註解裡：要繞過簽章驗證,同時還原「middleware 也負責 parse body」這個副作用，因為 `index.ts` 沒有另外掛 `express.json()`）。也就是說「壞簽章 / 沒有簽章的請求會被擋下」這件事，全專案目前沒有任何一個自動化測試覆蓋到。
   為什麼重要：這是唯一對外開放、不需要登入就能打的 HTTP endpoint，如果之後有人改動 `webhook.ts` 的 middleware 掛載順序、或不小心把簽章驗證繞過去，現有測試套件完全不會示警，只能等下次剛好有人手動用 ngrok 測試，或是等真實環境被打偽造請求才會發現。
   需要驗證的情境（不用 mock 掉 `@line/bot-sdk` 的 `middleware`，改成用真實的 `LINE_CHANNEL_SECRET` 產生正確/錯誤的 `X-Line-Signature`）：
