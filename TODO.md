@@ -92,7 +92,7 @@
   - 確認 `duplicates` 防禦性偵測那段邏輯：如果刻意構造出會產生重複字串的情境，`logger.warn` 有沒有被呼叫（可以 mock `../../utils/logger.js` 來斷言）。
   - 現有 `capacity-calculator.test.ts` 目前只測了「`event.guests` 起始為空」的情境（見該測試檔），這些新案例是要補進同一個檔案，不是取代既有測試。
 
-- [ ] **`command-router.ts` 沒有專屬的 dispatch 測試檔，只靠 `src/__tests__/command-integration.test.ts` 間接覆蓋部分指令類型，目前 coverage 52%。**
+- [x] **`command-router.ts` 沒有專屬的 dispatch 測試檔，只靠 `src/__tests__/command-integration.test.ts` 間接覆蓋部分指令類型，目前 coverage 52%。**（2026-09-22 完成，新增 `src/commands/__tests__/command-router.test.ts`，coverage 提升至 100%）
   背景：`command-router.ts` 是一個單純的 `switch (command.type)` 分派表（`src/command-router.ts:24-60`），把 `CommandType` enum（定義在 `src/types/commands.ts`，共 10 種：`REGISTRATION`/`LEAVE`/`CANCEL_LEAVE`/`INTRODUCE`/`OWE`/`COMMAND_LIST`/`PARTICIPANTS`/`NEXT_EVENT`/`NEWS`/`PAYMENT`，加上 fallback 的 `UNKNOWN`）分派到對應的 handler。`command-integration.test.ts` 目前只驗證了少數幾種指令（`command`、空字串→INTRODUCE 等），沒有把 10 種指令類型都跑過一遍，也沒有專門測「未知指令會被安靜忽略、不會呼叫任何 handler」這個 default 分支，更沒有驗證 `REGISTRATION` 分支裡 `delta` 字串解析（`command-router.ts:47`，`parseInt(command.delta ?? '+1', 10)`）在邊界輸入（例如 `delta` 是 `undefined`、空字串）下的行為。
   為什麼重要：這張分派表是新增指令流程（`CLAUDE.md`「專案慣例」列的 5 步驟之一）的最後一步，如果之後改動時不小心打錯 `CommandType` 或漏接某個 case，沒有專屬測試會讓這個迴歸只能等到真實使用者送出該指令沒反應才發現。
   需要驗證的情境：
