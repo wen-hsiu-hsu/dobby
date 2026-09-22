@@ -83,7 +83,7 @@
 
 ### 🟢 Low
 
-- [ ] **`capacity-calculator.ts` 缺少「`event.guests` 已經含有同一個 `targetName` 先前條目」情境的回歸測試。**
+- [x] **`capacity-calculator.ts` 缺少「`event.guests` 已經含有同一個 `targetName` 先前條目」情境的回歸測試。**（2026-09-22 完成）
   重要澄清：這個「訪客命名重複」的 bug 本身**已經修好了**，不是還沒修——`docs/code-review-2026-09-17.md` 4.3 節描述的問題（同一人分兩次 `+1`，第二次呼叫又從 0 開始編號，導致「Bob的朋友」重複兩筆、被 Notion multi_select 靜默去重、憑空少一筆報名）已經在 `capacity-calculator.ts` 用 `findMaxExistingIndex()`（`capacity-calculator.ts:34-60`）修掉了，`calculateAddCapacity()`（`capacity-calculator.ts:100-104`）呼叫時會先掃描 `event.guests` 找出這個 targetName 已經用到的最大編號才接續往下編號，甚至還加了一段防禦性的重複偵測跟 `logger.warn`（`capacity-calculator.ts:118-133`）。**接手這項的人不需要、也不應該重新修這個邏輯**，只需要補上保護這段邏輯的回歸測試。
   需要驗證的情境（純函式測試，不需要透過 `createTestBot`，直接呼叫 `calculateAddCapacity` 即可，參考現有 `src/commands/registration/__tests__/capacity-calculator.test.ts` 的寫法）：
   - `event.guests` 傳入時已經含有 `"Bob的朋友"`（季租成員朋友情境）,再呼叫一次 `calculateAddCapacity(..., targetName: "Bob", delta: 1, isSelfSeasonMember: true)`，預期新產生的條目是 `"Bob的朋友2"` 而不是重複的 `"Bob的朋友"`。

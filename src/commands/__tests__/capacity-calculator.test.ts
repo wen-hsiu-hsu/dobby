@@ -1,6 +1,15 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { calculateAddCapacity, calculateRemoveCapacity, calculateTotalSlots } from '../registration/capacity-calculator.js';
 import type { CalendarEventData, SeasonData } from '../registration/capacity-calculator.js';
+
+vi.mock('../../utils/logger.js', () => ({
+  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+import { logger } from '../../utils/logger.js';
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 const baseEvent: CalendarEventData = {
   pageId: 'evt1',
@@ -175,6 +184,69 @@ describe('calculateAddCapacity', () => {
       expect(result.newGuests).toEqual(['許文修的朋友', '許文修的朋友2', '許文修的朋友3']);
       // No duplicate strings in the array that gets sent to Notion's multi_select.
       expect(new Set(result.newGuests)).toHaveProperty('size', result.newGuests?.length);
+    });
+  });
+
+  // TODO.md (2026-09-22) 🟢 Low: regression coverage for "event.guests already contains
+  // this targetName's previous entries when calculateAddCapacity is called" — the
+  // duplicate-naming bug itself is already fixed via findMaxExistingIndex(); these tests
+  // just pin down the behavior directly (the scenarios above already exercise the same
+  // logic via repeated-call loops / interleaved guests, but these spell out the exact
+  // cases called out in the TODO for clarity).
+  describe('event.guests already contains this target\'s previous entries', () => {
+    it('season member: existing "Bob的朋友" leads to "Bob的朋友2", not a duplicate "Bob的朋友"', () => {
+      const event: CalendarEventData = { ...baseEvent, guests: ['Bob的朋友'] };
+      const result = calculateAddCapacity(event, season, 'Bob', 1, true);
+
+      expect(result.canAdd).toBe(true);
+      expect(result.newGuests).toEqual(['Bob的朋友', 'Bob的朋友2']);
+    });
+
+    it('non-season member: existing "Alice" leads to "Alice 2", not a duplicate "Alice"', () => {
+      const event: CalendarEventData = { ...baseEvent, guests: ['Alice'] };
+      const result = calculateAddCapacity(event, season, 'Alice', 1, false);
+
+      expect(result.canAdd).toBe(true);
+      expect(result.newGuests).toEqual(['Alice', 'Alice 2']);
+    });
+
+    it('existing "Bob的朋友" and "Bob的朋友2" leads to "Bob的朋友3" next', () => {
+      const event: CalendarEventData = { ...baseEvent, guests: ['Bob的朋友', 'Bob的朋友2'] };
+      const result = calculateAddCapacity(event, season, 'Bob', 1, true);
+
+      expect(result.canAdd).toBe(true);
+      expect(result.newGuests).toEqual(['Bob的朋友', 'Bob的朋友2', 'Bob的朋友3']);
+    });
+  });
+
+  // TODO.md (2026-09-22) 🟢 Low: coverage for the defense-in-depth duplicate check
+  // (capacity-calculator.ts:118-133). The normal numbering path above is guaranteed by
+  // findMaxExistingIndex() to never produce a duplicate for the target being processed,
+  // so it cannot be used to trigger this branch. The one realistic way to trigger it
+  // (per the code's own comment: "a future bug, an admin path, manual data") is
+  // event.guests already containing a duplicate string *before* this call runs — e.g.
+  // corrupted data from before this fix existed, or a manual Notion edit — which the
+  // scan-the-whole-array check still catches even though it has nothing to do with the
+  // targetName/delta this particular call is processing.
+  describe('defensive duplicate detection (logger.warn)', () => {
+    it('warns when event.guests already contains a pre-existing duplicate name unrelated to this call\'s target', () => {
+      const event: CalendarEventData = { ...baseEvent, guests: ['Bob的朋友', 'Bob的朋友'] };
+      const result = calculateAddCapacity(event, season, 'Carol', 1, true);
+
+      expect(result.canAdd).toBe(true);
+      expect(result.newGuests).toEqual(['Bob的朋友', 'Bob的朋友', 'Carol的朋友']);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ targetName: 'Carol', duplicates: ['Bob的朋友'] }),
+        expect.stringContaining('duplicate guest name')
+      );
+    });
+
+    it('does NOT warn on the normal, non-colliding numbering path', () => {
+      const event: CalendarEventData = { ...baseEvent, guests: ['Bob的朋友'] };
+      const result = calculateAddCapacity(event, season, 'Bob', 1, true);
+
+      expect(result.canAdd).toBe(true);
+      expect(logger.warn).not.toHaveBeenCalled();
     });
   });
 });
