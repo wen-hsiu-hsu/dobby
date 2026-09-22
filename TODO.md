@@ -74,7 +74,7 @@
   - 完全沒帶 `X-Line-Signature` header 的請求會被擋下。
   - 這需要新增一個獨立測試檔（例如 `src/__tests__/webhook-signature.test.ts`），跟現有 `webhook.test.ts` 分開，因為兩者對 `@line/bot-sdk` 的 mock 策略互相衝突（一個要 mock 掉、一個要用真的），不要嘗試合併成同一個檔案。
 
-- [ ] **`withMutex` 鎖跟報名/請假的完整 command handler 流程沒有整合測試驗證併發情境，目前 mutex 只有「純函式層」的單元測試。**
+- [x] **`withMutex` 鎖跟報名/請假的完整 command handler 流程沒有整合測試驗證併發情境，目前 mutex 只有「純函式層」的單元測試。**（2026-09-22 已完成，新增 `src/commands/registration/__tests__/registration-concurrency.test.ts`）
   背景：`src/services/mutex.ts` 本身有很扎實的單元測試（`src/services/__tests__/mutex.test.ts`，用 `vi.useFakeTimers()` 驗證了排隊順序、逾時後背景任務仍需跑完才換下一個任務等細節）。但 `src/test-utils/create-test-bot.ts:197` 為了讓一般指令測試好寫，把 `withMutex` mock 成「直接執行 callback、不真的排隊」的 no-op（`notionPatch` 也永遠 mock 成 `resolves({})`）。這代表所有透過 `createTestBot` 寫的報名/請假測試（包含 `registration-handler.test.ts`、`leave-handler.test.ts`），驗證的都是「假設鎖已經拿到之後」的業務邏輯，從來沒有測過「兩個人同時對同一天送出 `+1`」這種真實併發情境下，command handler 層有沒有正確依賴鎖的 key（活動日期字串）序列化執行、有沒有可能因為某個分支忘記包進 `withMutex` 而產生 race condition。
   需要驗證的情境：
   - 用真的 `withMutex`（不 mock，或只 mock 更底層的 `notionPatch`/`notion-fetch`）驅動 `handleRegistration`／`handleLeave`，模擬兩個「幾乎同時」對同一天發出的報名/請假請求，驗證兩次寫入是依序執行、不會互相覆蓋對方的計算結果（例如 A 跟 B 同時 +1，最終名額要正確扣兩次，不是只扣一次）。
