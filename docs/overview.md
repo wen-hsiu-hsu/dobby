@@ -59,6 +59,19 @@ docker compose down
 
 `logs` 是具名 volume（`docker-compose.yml` 裡的 `volumes: logs:`），log 檔案會持久化在這個 volume 裡，容器重啟或重新部署都不會遺失。
 
+### 對外曝露與自動部署
+
+正式環境跑在自架的 Raspberry Pi 上（上面的 Docker Compose 方式不變），對外曝露跟自動部署都不是這個 repo 自己管的，而是 Pi 上兩個獨立於任何專案 repo 之外的**共用基礎設施**，之後 Pi 上新增其他專案時也共用同一套，不用每個專案各自處理一份：
+
+- **Cloudflare Tunnel**：outbound-only 連線，Pi 不用在路由器開任何 inbound port，家用（浮動）IP 不會曝光。同一個 tunnel 下用多條 Public Hostname 規則分流到 Pi 上不同的服務，dobby 分到的 hostname 導到 `localhost:<PORT>`（實際 port 看 Pi 上那份 `.env` 的 `PORT` 值，見下方）。`/webhook`、`/health`、`/logs` 三個端點都走同一個 hostname，沒有分開設定。
+- **pi-deployer**：Pi 上自架的通用 webhook 部署服務（不是 dobby 的一部分），GitHub push 新 commit 到這個 repo 時觸發自動 `git pull` + `docker compose up -d --build`，取代手動 SSH 上去部署。
+
+**`/logs` 沒有額外套 Cloudflare Access 保護**——這是討論過的既定決定，維持現有的 `LOGS_ACCESS_TOKEN` 機制即可，不是遺漏。`/webhook` 的安全性一樣不靠曝露方式本身，靠的是 `@line/bot-sdk` 內建的 signature 驗證（見上方「Webhook 端點」）；Tunnel 只是換掉封包怎麼送到 Pi，不影響、也不能取代這層驗證。
+
+`docker-compose.yml` 的 `ports: "${PORT:-3000}:${PORT:-3000}"` 是特意保留給 Pi host 上的 Cloudflare Tunnel / pi-deployer 用的，不要因為「反正走 tunnel 不需要開 port」而誤刪——host 上這兩個服務都是透過這個對外的 port mapping 打到 container 裡的 app，不是走 docker network 內部解析。這裡的 `${PORT}` 是 Compose 在解析這份 YAML 時，從專案根目錄的 `.env` 讀值替換（跟同一個 `.env` 透過 `env_file:` 注入到容器內部是兩個不同機制，只是剛好共用同一份檔案），沒設的話 fallback 回 `3000`，跟 `src/config/env.ts` 的 zod schema 預設值一致。要換 port 只需要改 `.env` 的 `PORT`，不用再動這個檔案；但如果啟動 `docker compose` 的 shell 本身也 export 了 `PORT`，會蓋過 `.env` 裡的值，要注意這個優先順序。
+
+`docker-compose.dev.yml`（本地開發用）**刻意**維持 `"3000:3000"` 寫死，不吃這個機制——本地開發不需要換 port 的彈性，且裡面 ngrok tunnel 那行 `command` 也寫死指向 `app:3000`，兩處要嘛一起吃變數、要嘛都不動，目前選擇都不動，不是漏改。
+
 ### Zeabur
 
 專案使用 Docker multi-stage build，理論上可以直接部署至 Zeabur（把 `.env` 的變數設成 Zeabur 的環境變數即可），但**目前實際上沒有這樣用**——如果之後改用 Zeabur 或其他 PaaS，切記那類平台通常沒有持久化本機磁碟，`docker-compose.yml` 宣告的 volume 不會被沿用，需要另外在平台上設定持久化儲存，否則容器重啟會讓 `logs/` 整批消失。
