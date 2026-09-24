@@ -479,6 +479,54 @@ describe('createLogsRouter', () => {
     expect(html).not.toContain('POST /webhook');
   });
 
+  // 正式環境每次重啟都會記這兩行（啟動時、runWithContext 外面，沒有
+  // reqId）；沒排除的話會變成兩張「來源：POST /webhook」的系統卡片，看起來
+  // 像 webhook 出事。
+  it('treats the two "... scheduler started" startup lines as lifecycle messages: no event cards, not counted, and the restart boundary still renders', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), msg: 'Received shutdown signal, closing server', signal: 'SIGTERM' },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 1), msg: 'Server closed, exiting' },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 3), msg: 'Weekly push scheduler started' },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 4), msg: 'Display name update scheduler started' },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 5), msg: 'Server started', port: 3000 },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 6), msg: 'Weekly push scheduler started' },
+    ]);
+
+    const html = await getLogsHtml();
+
+    expect(html).not.toContain('class="ev-item"');
+    expect(html).not.toContain('data-bucket="sys"');
+    expect(html).not.toContain('scheduler started');
+    expect(html).toContain('共 0 筆');
+    // 分隔線照常只有一條，而且 scheduler started 夾在關閉訊號跟 Server
+    // started 之間，不會打斷兩者的配對
+    expect((html.match(/class="ev-boundary"/g) ?? []).length).toBe(1);
+    expect(html).toContain('SIGTERM · port 3000');
+  });
+
+  it('shows a neutral 來源 for an unknown reqId-less message instead of guessing POST /webhook, while known webhook system events keep HTTP · POST /webhook', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 30, time: Date.UTC(2024, 0, 1, 1, 0, 0), msg: 'Deleted old log file', file: 'app.2023-12-01.1.log' },
+    ]);
+
+    const unknownHtml = await getLogsHtml();
+
+    expect((unknownHtml.match(/data-bucket="sys"/g) ?? []).length).toBe(1);
+    expect(unknownHtml).toContain('（未知系統來源）');
+    expect(unknownHtml).toContain('<span class="ev-source">未知</span>');
+    expect(unknownHtml).not.toContain('POST /webhook');
+
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 40, time: Date.UTC(2024, 0, 1, 1, 0, 0), msg: 'LINE signature validation failed', err: { message: 'bad signature' }, path: '/webhook', method: 'POST' },
+      { level: 30, time: Date.UTC(2024, 0, 1, 2, 0, 0), msg: 'Webhook received multiple events', eventCount: 2 },
+    ]);
+
+    const webhookHtml = await getLogsHtml();
+
+    expect((webhookHtml.match(/<span class="ev-source">HTTP · POST \/webhook<\/span>/g) ?? []).length).toBe(2);
+    expect(webhookHtml).not.toContain('<span class="ev-source">未知</span>');
+  });
+
   // 之前只驗證過 event-router.ts 有沒有把 webhookEventId/isRedelivery 記
   // 進 log（見 event-router.test.ts），沒有驗證 /logs 頁面實際渲染出來的
   // HTML 裡看不看得到——這裡才是這兩個欄位真正「顯示給人看」的地方。

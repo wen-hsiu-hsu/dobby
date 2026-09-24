@@ -86,12 +86,25 @@ const DEGRADATION_EXPLANATIONS: Record<string, string> = {
   'User tracking failed (non-blocking)': '使用者訊息計數/群組清單更新失敗，不影響這次回覆，但這位使用者的統計資料可能少算一筆。',
 };
 
-/** 伺服器生命週期訊息——沒有 reqId，且不代表任何一次事件處理，用來拼服務重啟的分隔線，不會被當成獨立事件列出。 */
+/**
+ * 伺服器生命週期訊息——沒有 reqId，且不代表任何一次事件處理，不會被當成
+ * 獨立事件列出。其中只有 `Server started` 跟 `Received shutdown signal,
+ * closing server` 會被 `buildBoundaryMarkers` 拿來拼服務重啟的分隔線，其
+ * 餘的（包括兩個排程啟動時各記一次的 `... scheduler started`）在
+ * `buildBoundaryMarkers` 裡不會命中任何分支，等於靜默忽略：不產生分隔線，
+ * 也不會重設「最近一次關閉訊號」的配對狀態。
+ *
+ * 排程的 `... scheduler started` 是在啟動時、`runWithContext` 外面記的，
+ * 沒放進來的話，每次重啟 /logs 都會多出兩張看起來像 webhook 出事的「系統」
+ * 卡片。原始 log 檔裡照樣保留這兩行，只是不在事件列表顯示。
+ */
 const LIFECYCLE_MESSAGES = new Set([
   'Server started',
   'Received shutdown signal, closing server',
   'Graceful shutdown timed out, forcing exit',
   'Server closed, exiting',
+  'Weekly push scheduler started',
+  'Display name update scheduler started',
 ]);
 
 function escapeHtml(str: string): string {
@@ -914,12 +927,14 @@ const SYSTEM_EVENT_INFO: Record<string, SystemEventInfo> = {
   'Webhook received multiple events': { origin: 'webhook.ts（事件批次提示，非錯誤）', source: 'HTTP · POST /webhook', stepsHeading: '說明' },
   'R2 not configured, log sync disabled': { origin: 'log-upload.ts（R2 未設定，啟動時提示一次，非錯誤）', source: '啟動 · log-upload.ts', stepsHeading: '說明' },
 };
-// fallback 的 source 維持原本的 `HTTP · POST /webhook`：沒有 reqId 的訊息
-// 目前多半來自 HTTP 層（reqId 在 webhook 事件處理時才產生，比它早發生的
-// 錯誤都沒有 reqId），而且這就是加上逐筆 source 之前的既有行為，未知訊息
-// 不因這次修改而改變顯示。「來自」已經標成「（未知系統來源）」，看得出
-// 這是猜測。
-const SYSTEM_EVENT_FALLBACK: SystemEventInfo = { origin: '（未知系統來源）', source: 'HTTP · POST /webhook', stepsHeading: '發生了什麼' };
+// fallback 的 source 用中性的「未知」，不猜 HTTP：沒有 reqId 的訊息來源很
+// 雜，HTTP 層只是其中之一（例如 `index.ts` 的 `Unhandled request error`），
+// 其他還有 log-cleanup.ts 的 `Deleted old log file` 等定期清理訊息、各種
+// 背景作業 `.catch` 裡記的錯誤（`Log cleanup run failed`、`R2 log sync run
+// failed`、`R2 log sync on shutdown failed`、webhook.ts 的 `Error processing
+// events`）——這些都不是 webhook 請求本身，寫死成 `POST /webhook` 會誤導人
+// 以為 webhook 出了事。
+const SYSTEM_EVENT_FALLBACK: SystemEventInfo = { origin: '（未知系統來源）', source: '未知', stepsHeading: '發生了什麼' };
 
 /** 沒有配對到任何 reqId、也不是伺服器生命週期訊息的單行 log（例如 LINE 簽章驗證失敗、webhook 一次收到多筆事件）——每一筆各自變成一個獨立的「系統」事件，不跟別的無 reqId 訊息合併。 */
 function buildSystemEventView(entry: LogEntry, index: number): EventView {
@@ -1164,11 +1179,14 @@ function bucketRawEntries(entries: LogEntry[]): Map<string, LogEntry[]> {
 function renderHtml(entries: LogEntry[]): string {
   const levelBadgeHtml = logLevelBadgeHtml(getLogLevel());
   const r2BadgeHtml = r2SyncBadgeHtml(getR2SyncStatus());
-  // 排程（weekly-push/display-name-update）現在也各自用 runWithContext 包住整
-  // 次執行，所以真的完全沒有 reqId 的只剩伺服器生命週期訊息跟少數 HTTP 層級
-  // 的錯誤（例如 LINE 簽章驗證失敗，在 webhook 事件處理、也就是 reqId 產生
-  // 之前就發生）。這兩種不能沿用 groupPairedEntries 的「沒有 reqId 就併成同
-  // 一組」規則——生命週期訊息要配對成分隔線，其餘的每一筆各自是獨立事件。
+  // 排程（weekly-push/display-name-update）跟 R2 同步（uploadAllLogs）各自用
+  // runWithContext 包住整次執行，但仍有不少 log 完全沒有 reqId：伺服器生命
+  // 週期訊息、啟動時的提示（排程的 `... scheduler started`、R2 未設定提示）、
+  // HTTP 層級的錯誤（例如 LINE 簽章驗證失敗，在 webhook 事件處理、也就是
+  // reqId 產生之前就發生）、log-cleanup.ts 的清理訊息，以及各種背景作業
+  // `.catch` 裡記的錯誤。這些不能沿用 groupPairedEntries 的「沒有 reqId 就
+  // 併成同一組」規則——生命週期訊息（含排程啟動提示）不列成事件，其中重啟
+  // 相關的會配對成分隔線；其餘的每一筆各自是獨立的「系統」事件。
   const reqIdEntries = entries.filter((e) => typeof e.reqId === 'string' && e.reqId);
   const noReqIdEntries = entries.filter((e) => !(typeof e.reqId === 'string' && e.reqId));
   const lifecycleEntries = noReqIdEntries.filter((e) => LIFECYCLE_MESSAGES.has(String(e.msg ?? '')));

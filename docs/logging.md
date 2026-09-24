@@ -12,7 +12,7 @@
 - **需要注意**：只顯示狀態不是「完成」的事件（降級／警告／失敗）。
 - **訊息**：LINE 事件觸發的事件——指令、一般對話（自動回覆）、成員加入都算在內。
 - **排程**：排程觸發的事件（`weekly-push`/`display-name-update`，見下方「事件種類」）。
-- **系統**：跟任何一次事件處理都無關的系統層級訊息（例如 webhook 簽章驗證失敗）。
+- **系統**：跟任何一次事件處理都無關的系統層級訊息（例如 webhook 簽章驗證失敗、log-cleanup 刪除舊 log 檔、背景作業 `.catch` 記下的錯誤）。
 
 搜尋框比對的是事件標題、預覽內容、`reqId`、使用者顯示名稱/userId、「來自」欄位，不是逐行比對 log 訊息文字。
 
@@ -28,7 +28,7 @@
 | 對話 | 有 `Processing event`（`type: 'message'`），但不是指令——通常是自動回覆（`services/auto-reply.ts`，靜態 JSON） | 訊息 |
 | 加入 | `Processing event` 的 `type` 是 `join` 或 `memberJoined` | 訊息 |
 | 排程 | 沒有 `Processing event`，但有 `reqId`——`weekly-push.ts`/`display-name-update.ts` 各自用 `runWithContext` 包住整次執行（見下方「排程事件的 reqId」） | 排程 |
-| 系統 | 完全沒有 `reqId`，且不是伺服器生命週期訊息（見下方「服務重啟分隔線」）——目前有三種已知情況：LINE webhook 簽章驗證失敗（`index.ts` 的全域錯誤處理，發生在事件處理、也就是 reqId 產生之前，真正的異常）、`webhook.ts` 一次收到兩筆以上事件時的批次提示（正常、預期內的情況，不是錯誤）、`log-upload.ts` 在 R2 未設定時於啟動時記一次的提示（debug 層，非錯誤）。這三種各有各自的「來自」文案，其餘未知的無 reqId 訊息會退回一個通用的「（未知系統來源）」 | 系統 |
+| 系統 | 完全沒有 `reqId`，且不是伺服器生命週期訊息（見下方「服務重啟分隔線」；兩個排程啟動時各記一次的 `... scheduler started` 也算生命週期訊息，不會變成卡片）。有專屬文案的有三種：LINE webhook 簽章驗證失敗（`index.ts` 的全域錯誤處理，發生在事件處理、也就是 reqId 產生之前，真正的異常）、`webhook.ts` 一次收到兩筆以上事件時的批次提示（正常、預期內的情況，不是錯誤）、`log-upload.ts` 在 R2 未設定時於啟動時記一次的提示（debug 層，非錯誤）。其他沒有 reqId 的訊息——例如 `log-cleanup.ts` 的 `Deleted old log file`、錯誤處理的 `.catch` 記下的 `Log cleanup run failed`/`R2 log sync run failed`/`R2 log sync on shutdown failed`/`Error processing events`、`index.ts` 的 `Unhandled request error`——會退回通用文案：「來自」顯示「（未知系統來源）」，「來源」顯示中性的「未知」 | 系統 |
 
 **指令 vs 對話只有在 `LOG_LEVEL=debug` 才能準確判斷**——`Routing command`/`Auto-reply lookup`/`Skipping auto-reply for admin` 全部是 debug 層。`LOG_LEVEL=info` 下這些線都不存在，程式碼退而用「這個流程有沒有 Notion API 呼叫」猜測（指令通常會查/寫 Notion，單純聊天不會），可能誤判，不是決定性的依據。
 
@@ -37,7 +37,7 @@
 列表裡每張卡片顯示：狀態圓點（綠/黃/紅）、種類標籤、標題、時間、使用者顯示名稱與 userId（有才顯示，預設遮蔽，見下方）、內容預覽、來源、總耗時、以及重試次數/失敗種類的小標記（如果有）。
 
 - **標題**：訊息類事件用 `Processing event detail`（debug 層）解析出的指令/對話文字加引號；加入事件顯示事件類型；排程/系統事件用它自己第一筆摘要 log 的訊息名稱當標題。
-- **來源**：訊息類事件顯示群組／多人聊天室／1 對 1；排程顯示「排程 · cron」；系統事件依訊息各自顯示（對照 `src/routes/logs.ts` 的 `SYSTEM_EVENT_INFO`）：webhook 簽章驗證失敗跟批次提示是「HTTP · POST /webhook」，R2 未設定的啟動提示是「啟動 · log-upload.ts」，未知訊息退回「HTTP · POST /webhook」（沒有 reqId 的訊息目前多半來自 HTTP 層）。
+- **來源**：訊息類事件顯示群組／多人聊天室／1 對 1；排程顯示「排程 · cron」；系統事件依訊息各自顯示（對照 `src/routes/logs.ts` 的 `SYSTEM_EVENT_INFO`）：webhook 簽章驗證失敗跟批次提示是「HTTP · POST /webhook」，R2 未設定的啟動提示是「啟動 · log-upload.ts」，其他沒有專屬文案的訊息顯示中性的「未知」（這類訊息多半不是 HTTP 請求來的，例如 log-cleanup 或背景作業的 `.catch`，不猜成 `POST /webhook`）。
 - **來自**（詳情頁欄位）：指令類事件顯示 `Routing command` 的 `command.type`（debug 層才有，否則顯示「（未知，需要 LOG_LEVEL=debug）」）；對話顯示「自動回覆（非指令）」；加入顯示事件類型（`join`/`memberJoined`）；排程顯示排程檔案的短名稱（`weekly-push`/`display-name-update`，靠比對已知的摘要 log 訊息辨認，猜不到就顯示「排程作業」）；系統事件依訊息顯示各自的文案（對照 `src/routes/logs.ts` 的 `SYSTEM_EVENT_INFO`，例如簽章驗證失敗是「index.ts 錯誤處理」、批次提示是 `webhook.ts`、R2 未設定提示是 `log-upload.ts`），未知訊息顯示「（未知系統來源）」。
 - **狀態**（完成／完成（有降級）／警告／失敗）：見下一節。
 
@@ -117,11 +117,11 @@ Notion API 回應 429（rate limit）時程式會自動重試，同一次呼叫�
 
 事件分組底層是 `request-context.ts` 的 `runWithContext`：同一次事件處理過程中所有 log 都會自動帶上同一個 `reqId`（見 `docs/architecture.md` 的「Request Correlation ID」小節）。`weekly-push.ts`/`display-name-update.ts` 這兩個排程也各自用 `runWithContext` 包住整次執行，所以每次排程執行也會有自己專屬的 reqId、在 `/logs` 頁面上變成一個獨立的「排程」事件，不會跟其他次執行、或其他排程的 log 混在同一組。
 
-完全沒有 reqId 的 log 分兩種處理：伺服器生命週期訊息（`Server started`/`Received shutdown signal, closing server`/`Server closed, exiting`/`Graceful shutdown timed out, forcing exit`）會被拼成下面說的「服務重啟」分隔線，其餘的（目前有 webhook 簽章驗證失敗、webhook 一次收到多筆事件、R2 未設定的啟動提示三種，見上方分類表）每一筆各自獨立變成一個「系統」事件，不會因為都沒有 reqId 就被合併成同一筆。
+完全沒有 reqId 的 log 分兩種處理：伺服器生命週期訊息（`Server started`/`Received shutdown signal, closing server`/`Server closed, exiting`/`Graceful shutdown timed out, forcing exit`/`Weekly push scheduler started`/`Display name update scheduler started`）不會列成事件，其中重啟相關的會被拼成下面說的「服務重啟」分隔線；其餘的每一筆各自獨立變成一個「系統」事件，不會因為都沒有 reqId 就被合併成同一筆——有專屬文案的是 webhook 簽章驗證失敗、webhook 一次收到多筆事件、R2 未設定的啟動提示三種，其他（log-cleanup、錯誤處理的 `.catch` 等）退回通用文案，見上方分類表。
 
 ## 服務重啟分隔線
 
-事件列表裡偶爾會插入一條「⏻ 服務重新啟動」的分隔線，不是可以點開的事件——它是從 `Server started` 往回找最近一次的 `Received shutdown signal, closing server` 拼出來的（例如「SIGTERM · port 3000」），找不到對應的關閉訊號就只顯示 port。分隔線依時間插在正確位置，讓你一眼看出「這批事件是在服務重啟前還是重啟後發生的」，尤其是重啟前後的行為對不上時（例如重啟後某個環境變數沒設好）特別有用。
+事件列表裡偶爾會插入一條「⏻ 服務重新啟動」的分隔線，不是可以點開的事件——它是從 `Server started` 往回找最近一次的 `Received shutdown signal, closing server` 拼出來的（例如「SIGTERM · port 3000」），找不到對應的關閉訊號就只顯示 port。其他生命週期訊息（`Server closed, exiting`、`Graceful shutdown timed out, forcing exit`、兩個排程啟動時的 `... scheduler started`）不參與分隔線的拼湊，也不會打斷關閉訊號跟 `Server started` 的配對，只是單純不列成事件；原始 log 檔裡照樣保留。分隔線依時間插在正確位置，讓你一眼看出「這批事件是在服務重啟前還是重啟後發生的」，尤其是重啟前後的行為對不上時（例如重啟後某個環境變數沒設好）特別有用。
 
 ## 看原始 log／複製 JSON
 
