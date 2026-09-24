@@ -50,14 +50,7 @@
 
 ## 文件與程式碼落差比對發現的程式碼問題（2026-09-24）
 
-> 背景：這次是針對 `docs/` 底下所有文件跟程式碼做交叉比對（找文件落差，見各 `docs/*.md` 已同步修正的部分），過程中額外發現以下兩項不是文件寫錯、而是程式碼本身的問題，記在這裡待處理。
-
-### 🟡 Medium
-
-- [ ] **「行事曆」資料庫的 `場地數` 欄位是一個從未實作的功能缺口，不是單純文件寫錯。** 該欄位的 schema 描述（「本週場地數，優先使用此值，若為空則使用當季預設場地數」）至少從 2026-03-03（commit `8caa87a`）就存在，但程式碼從頭到尾沒有實作這條讀取路徑：`calendar-repository.ts` 的 `pageToEvent()` 從未讀取過這個屬性（用 `git log -p --all` 追過整個歷史，任何版本都沒讀），`CalendarEvent` 型別（`src/types/notion-models.ts`）也沒有對應欄位。目前**所有**會用到場地數的功能（`+N`/`-N` 報名取消、請假、銷假、`next`、`weekly-push.ts` 週報推播）100% 只吃「季租承租紀錄」的 `season.courts`，完全不看 Calendar 每週的值。
-  - **注意**：`event-occupancy.ts` 保留的 `courtsOverride` 參數跟這個 Notion 欄位**無關**，那是已於 2026-09-22 移除的 `next?c=N` LINE 指令 what-if 預覽功能殘留（讀的是管理員在訊息裡手打的 `c=N`，不是 Notion 屬性），兩者是各自獨立的歷史，不要混為一談（見上方「已評估、不採納」章節裡對 `next?c=N` 的說明，那條記錄純粹在講已移除的 LINE 指令功能，跟這裡的 Calendar 場地數欄位無關）。
-  - **是否要修屬於產品決定**：先去 Notion「行事曆」資料庫確認最近幾筆活動的 `場地數` 欄位是不是普遍空白。如果普遍空白，代表目前沒人依賴這個欄位，影響面很小；如果有人陸續在填、以為會生效，資料正在被靜默忽略，應提高優先度。
-  - **若要實作**，需要動：(1) `notion-models.ts` 的 `CalendarEvent` 加 `courts: number | null`；(2) `calendar-repository.ts` 的 `pageToEvent()` 補讀 `getNumber(p, '場地數')`；(3) `event-occupancy.ts` 改成 `const effectiveCourts = event.courts ?? season.courts`（需決定要不要保留現有 `courtsOverride` 參數當更高優先度的顯式覆寫，或乾脆拿掉改成純兩層 fallback）；(4) `leave-handler.ts:105` 銷假成功後重算 `newTotalSlots` 那行是繞過 `occupancy` 自己重算的，要一併套用 `effectiveCourts`，否則會出現「報名用 Calendar 場地數、銷假卻用回 season 場地數」的不一致；(5) 補測試（`event-occupancy.test.ts`、`next-event.test.ts`、`registration-handler`/`leave-handler` 測試）涵蓋「Calendar 有填時覆寫」與「未填時 fallback」兩種情境；(6) 同步更新 `docs/notion/schemas/calendar.json`、`docs/registration.md` 容量計算公式章節。
+> 背景：這次是針對 `docs/` 底下所有文件跟程式碼做交叉比對（找文件落差，見各 `docs/*.md` 已同步修正的部分），過程中額外發現以下項目不是文件寫錯、而是程式碼本身的問題，記在這裡待處理。
 
 ### 🟢 Low
 

@@ -36,7 +36,7 @@ Dobby 會介紹自己並 @mention 觸發者和管理員。
 | `{LIST_ALL_PEOPLE}` | 當季報名人名單，頓號分隔的單行（`許文修、陳玟育、...`） |
 | `{PRICE_PER_PERSON_FOR_SEASON}` | 每人平均場租，無條件進位到整數（僅供參考，非實際繳費金額）。預設是 Notion formula「每人平均場租」算出來的值；若「每人平均場租（特殊狀況）」欄位有填值，改顯示該手動覆寫值，不再用 formula 值（見 `src/commands/news.ts`） |
 | `{PRICE_PER_PERSON_FOR_ONCE}` | 零打（單次）費用 |
-| `{COURT_COUNT}` | 場地數 |
+| `{COURT_COUNT}` | 當季預設場地數（季租承租紀錄的 `場地數`，不含行事曆單週調整） |
 | `{WEEK_COUNTS}` | 本季租借次數 |
 | `{TOTAL_PRICE}` | 場租總金額 |
 | `{LIST_ALL_DATES}` | 本季所有打球日期，依月份分行、同月用 `, ` 相隔，格式 `M/DD`（如 `7/04, 7/11`） |

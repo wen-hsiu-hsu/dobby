@@ -29,7 +29,7 @@
     },
     "場地數": {
       "type": "number",
-      "description": "⚠️ 未實作：本欄位的設計意圖是「本週場地數，優先於當季（季租承租紀錄）預設場地數」，此描述至少從 2026-03 就存在，但程式碼從未實作這條讀取路徑——`calendar-repository.ts` 的 `pageToEvent()` 完全不讀取這個屬性，`CalendarEvent` 型別也沒有對應欄位，在 Notion 填這個欄位目前不會有任何效果，場地數一律來自「季租承租紀錄」的 `場地數`。注意：`event-occupancy.ts` 保留的 `courtsOverride` 參數跟這個欄位無關，那是已移除的 `next?c=N` LINE 指令 what-if 預覽功能的殘留（讀的是指令文字裡手打的 `c=N`，不是這個 Notion 屬性），兩者是各自獨立的歷史，不要混為一談，詳見 TODO.md「文件與程式碼落差比對發現的程式碼問題」。是否要真正實作「Calendar 優先、season fallback」待產品決定",
+      "description": "本週場地數，優先於當季（季租承租紀錄）預設場地數；留空則使用當季預設。只接受正整數，0／負數／小數視為未填並記 warn log（本週不打請用 類型=打球暫停）。讀取與 fallback 見 `calendar-repository.ts` 的 `pageToEvent()` 與 `capacity-calculator.ts` 的 `resolveCourts()`；與季預設不同時，週報／`next` 的場地行會標示「（本週調整）」",
       "config": {
         "format": "number"
       }

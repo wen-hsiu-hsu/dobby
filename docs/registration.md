@@ -45,7 +45,7 @@ Capacity Calculator
 可用名額 = 場地數 × 7 - 季租成員數 + 請假人數 - 已報名零打數
 ```
 
-- **場地數**：當季的 `courts` 欄位
+- **場地數**：本週行事曆的 `場地數`，未填則用當季的 `courts` 欄位（`resolveCourts()`，`src/commands/registration/capacity-calculator.ts`）。`calculateTotalSlots` 內部就會套用這個 fallback，所以報名時的名額判斷（`calculateAddCapacity`）、請假／銷假後重算的名額、週報顯示都一致。為什麼 fallback 只能寫在這一處，見 [ADR 0007](adr/0007-calendar-courts-fallback-in-one-place.md)
 - **季租成員數**：當季 `members` 關聯的人員數量
 - **請假人數**：本週行事曆 `請假人` 關聯的人員數量
 - **已報名零打數**：本週行事曆 `零打` multi-select 的項目數量
