@@ -127,8 +127,10 @@ docker run -p 3000:3000 --env-file .env dobby
 ```
 
 使用 multi-stage build：
-1. **builder**：安裝所有依賴、編譯 TypeScript
-2. **runtime**：只複製 `dist/`、安裝 production 依賴
+1. **builder**：安裝所有依賴、編譯 TypeScript、`npm prune --omit=dev` 就地清掉 devDependencies
+2. **runtime**：只複製 `dist/` 跟 builder 已經 prune 過的 `node_modules`，不再自己另外 `npm ci`（避免 production 依賴被裝兩次）
+
+兩個 `npm ci` 都掛了 BuildKit 的 `--mount=type=cache,target=/root/.npm`，讓 npm cache 能跨次 build 保留，加速重複部署（例如 Pi 每次 push 都會重新 build）。這個語法需要 BuildKit（`# syntax=docker/dockerfile:1`），較舊版本的 Docker / `docker-compose` v1 如果沒開 BuildKit 會直接 build 失敗，不是靜默降級。
 
 ### 日誌
 
