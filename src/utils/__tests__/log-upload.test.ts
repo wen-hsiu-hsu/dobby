@@ -1,13 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { readdirMock, readFileMock } = vi.hoisted(() => ({
+const { readdirMock, readFileMock, statMock } = vi.hoisted(() => ({
   readdirMock: vi.fn(),
   readFileMock: vi.fn(),
+  statMock: vi.fn(),
 }));
 
 vi.mock('node:fs/promises', () => ({
   readdir: readdirMock,
   readFile: readFileMock,
+  stat: statMock,
 }));
 
 const { loggerDebugMock, loggerInfoMock, loggerWarnMock, loggerErrorMock } = vi.hoisted(() => ({
@@ -102,6 +104,9 @@ describe('log-upload', () => {
     envMock.R2_LOG_SYNC_INTERVAL_MINUTES = undefined;
     readdirMock.mockReset();
     readFileMock.mockReset();
+    statMock.mockReset();
+    // 預設每個檔案 stat 都回傳固定值；需要模擬「檔案有變動」的測試自己覆寫。
+    statMock.mockResolvedValue({ mtimeMs: 1000, size: 100 });
     sendMock.mockReset();
   });
 
@@ -228,6 +233,9 @@ describe('log-upload', () => {
     readFileMock.mockResolvedValue(Buffer.from('x'));
     sendMock.mockResolvedValue({});
 
+    // 第二輪讓檔案有變動（mtime 不同），否則會被變動偵測跳過。
+    statMock.mockResolvedValueOnce({ mtimeMs: 1000, size: 100 }).mockResolvedValueOnce({ mtimeMs: 2000, size: 100 });
+
     const { uploadAllLogs } = await loadModule();
 
     await uploadAllLogs(LOG_DIR);
@@ -296,6 +304,8 @@ describe('log-upload', () => {
       const successAt = afterSuccess.enabled ? afterSuccess.lastSuccessAt : null;
       expect(successAt).not.toBeNull();
 
+      // 第二輪讓檔案有變動，才會真的嘗試上傳並失敗（沒變動會被跳過）。
+      statMock.mockResolvedValue({ mtimeMs: 2000, size: 100 });
       sendMock.mockRejectedValueOnce(new Error('boom')); // second run fails
       await uploadAllLogs(LOG_DIR);
 
@@ -307,6 +317,163 @@ describe('log-upload', () => {
         // 上一次成功的時間戳不會被這次失敗清掉。
         expect(afterFailure.lastSuccessAt).toBe(successAt);
       }
+    });
+  });
+
+  describe('change detection (per-file mtime/size)', () => {
+    const FILE_A = 'app.2026-01-01.log';
+    const FILE_B = 'app.2026-01-02.log';
+
+    function uploadedKeys(): string[] {
+      return putObjectCommandCtorMock.mock.calls.map((call) => (call[0] as { Key: string }).Key);
+    }
+
+    beforeEach(() => {
+      setEnabledEnv();
+      readFileMock.mockResolvedValue(Buffer.from('x'));
+      sendMock.mockResolvedValue({});
+    });
+
+    it('uploads everything on the first run, then 0 PUTs when nothing changed while still updating lastSuccessAt', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date('2026-01-02T00:00:00Z'));
+        readdirMock.mockResolvedValue([FILE_A, FILE_B]);
+
+        const { uploadAllLogs, getR2SyncStatus } = await loadModule();
+        await uploadAllLogs(LOG_DIR);
+        expect(sendMock).toHaveBeenCalledTimes(2);
+        const first = getR2SyncStatus();
+        const firstSuccessAt = first.enabled ? first.lastSuccessAt : null;
+        expect(firstSuccessAt).not.toBeNull();
+
+        vi.setSystemTime(new Date('2026-01-02T00:15:00Z'));
+        sendMock.mockClear();
+        await uploadAllLogs(LOG_DIR);
+
+        expect(sendMock).not.toHaveBeenCalled();
+        const second = getR2SyncStatus();
+        expect(second.enabled).toBe(true);
+        if (second.enabled) {
+          // 沒有任何上傳也算成功，閒置時徽章時間不會停住。
+          expect(second.lastSuccessAt).toBeGreaterThan(firstSuccessAt!);
+          expect(second.lastFailureAt).toBeNull();
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it.each([
+      ['mtime', { mtimeMs: 2000, size: 100 }],
+      ['size', { mtimeMs: 1000, size: 200 }],
+    ])('only re-uploads the file whose %s changed', async (_label, changedStat) => {
+      readdirMock.mockResolvedValue([FILE_A, FILE_B]);
+
+      const { uploadAllLogs } = await loadModule();
+      await uploadAllLogs(LOG_DIR);
+      expect(sendMock).toHaveBeenCalledTimes(2);
+
+      statMock.mockImplementation(async (path: string) =>
+        path.endsWith(FILE_B) ? changedStat : { mtimeMs: 1000, size: 100 }
+      );
+      putObjectCommandCtorMock.mockClear();
+      sendMock.mockClear();
+      await uploadAllLogs(LOG_DIR);
+
+      expect(sendMock).toHaveBeenCalledTimes(1);
+      expect(uploadedKeys()).toEqual([`logs/test/${FILE_B}`]);
+    });
+
+    it('retries a file on the next run after its upload failed (state not recorded on failure)', async () => {
+      readdirMock.mockResolvedValue([FILE_A, FILE_B]);
+      // FILE_A 成功、FILE_B 失敗。
+      sendMock.mockResolvedValueOnce({}).mockRejectedValueOnce(new Error('network error'));
+
+      const { uploadAllLogs, getR2SyncStatus } = await loadModule();
+      await uploadAllLogs(LOG_DIR);
+      const afterFailure = getR2SyncStatus();
+      expect(afterFailure.enabled && afterFailure.lastFailureAt).not.toBeNull();
+
+      putObjectCommandCtorMock.mockClear();
+      sendMock.mockClear();
+      sendMock.mockResolvedValue({});
+      await uploadAllLogs(LOG_DIR);
+
+      // stat 值都沒變，但 FILE_B 上次失敗沒有記錄，所以只重傳它。
+      expect(uploadedKeys()).toEqual([`logs/test/${FILE_B}`]);
+    });
+
+    it('treats a stat failure like an upload failure: warn, count as failed, continue with other files', async () => {
+      readdirMock.mockResolvedValue([FILE_A, FILE_B]);
+      statMock.mockImplementation(async (path: string) => {
+        if (path.endsWith(FILE_A)) throw new Error('EACCES');
+        return { mtimeMs: 1000, size: 100 };
+      });
+
+      const { uploadAllLogs, getR2SyncStatus } = await loadModule();
+      await expect(uploadAllLogs(LOG_DIR)).resolves.toBeUndefined();
+
+      expect(uploadedKeys()).toEqual([`logs/test/${FILE_B}`]);
+      expect(loggerWarnMock).toHaveBeenCalledWith(
+        expect.objectContaining({ file: FILE_A }),
+        'Failed to upload log file to R2, skipping'
+      );
+      const status = getR2SyncStatus();
+      if (status.enabled) {
+        expect(status.lastFailureMessage).toBe('1/2 個檔案上傳失敗');
+      }
+    });
+
+    it('drops files that disappeared from the directory, so the same name reappearing is uploaded again', async () => {
+      readdirMock.mockResolvedValue([FILE_A, FILE_B]);
+
+      const { uploadAllLogs } = await loadModule();
+      await uploadAllLogs(LOG_DIR);
+      expect(sendMock).toHaveBeenCalledTimes(2);
+
+      // FILE_A 被 log-cleanup 刪掉。
+      readdirMock.mockResolvedValue([FILE_B]);
+      putObjectCommandCtorMock.mockClear();
+      sendMock.mockClear();
+      await uploadAllLogs(LOG_DIR);
+      expect(sendMock).not.toHaveBeenCalled();
+
+      // 同名檔案再出現，stat 值跟以前完全一樣，仍然要重新上傳。
+      readdirMock.mockResolvedValue([FILE_A, FILE_B]);
+      await uploadAllLogs(LOG_DIR);
+      expect(uploadedKeys()).toEqual([`logs/test/${FILE_A}`]);
+    });
+
+    it('re-uploads everything after the module is reloaded (simulated restart, in-memory state lost)', async () => {
+      readdirMock.mockResolvedValue([FILE_A, FILE_B]);
+
+      const first = await loadModule();
+      await first.uploadAllLogs(LOG_DIR);
+      await first.uploadAllLogs(LOG_DIR);
+      expect(sendMock).toHaveBeenCalledTimes(2); // 第二輪全部跳過
+
+      sendMock.mockClear();
+      const restarted = await loadModule();
+      await restarted.uploadAllLogs(LOG_DIR);
+      expect(sendMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('logs the completion message at debug level (not info) with a skipped count', async () => {
+      readdirMock.mockResolvedValue([FILE_A, FILE_B]);
+
+      const { uploadAllLogs } = await loadModule();
+      await uploadAllLogs(LOG_DIR);
+      statMock.mockImplementation(async (path: string) =>
+        path.endsWith(FILE_B) ? { mtimeMs: 2000, size: 100 } : { mtimeMs: 1000, size: 100 }
+      );
+      await uploadAllLogs(LOG_DIR);
+
+      expect(loggerInfoMock).not.toHaveBeenCalledWith(expect.anything(), 'R2 log sync complete');
+      expect(loggerDebugMock).toHaveBeenLastCalledWith(
+        { succeeded: 1, skipped: 1, failed: 0, total: 2 },
+        'R2 log sync complete'
+      );
     });
   });
 });
