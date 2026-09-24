@@ -13,3 +13,5 @@ Dobby 準備部署到 Zeabur 這類容器檔案系統是 ephemeral 的平台，�
 **為什麼 `/logs` 的 R2 同步狀態徽章不借用既有事件時間軸的「完成／降級／警告／失敗」機制**：事件時間軸（`docs/logging.md`）的每一張卡片對應一個 `reqId`——一次 LINE 事件處理、一次排程執行。R2 同步狀態不是這樣的東西：它是「目前」這個服務對 R2 的健康狀態，是跨越所有執行、只看「最近一次成功/失敗發生在什麼時候」的全域狀態，語意上不屬於任何單一 reqId 或事件。硬要塞進事件時間軸（例如把每次 `uploadAllLogs()` 執行都當成一個「排程」事件列出來）會製造出大量同質、對日常使用沒有價值的卡片（預設 15 分鐘跑一次，一天就接近一百筆），而且回答不了真正該問的問題：「現在」R2 備份有沒有在正常運作。所以另外用 `getR2SyncStatus()` 維護一組模組層級的 `lastSuccessAt`/`lastFailureAt`/`lastFailureMessage`（模式比照 `logger.ts` 的 `getLogLevel()`），直接放在 header 當一個獨立徽章，跟 LOG_LEVEL 徽章並列，而不是進事件列表。這兩個時間戳互不清空——這次失敗不會把上次的 `lastSuccessAt` 清掉，反之亦然——讓徽章邏輯可以單純比較兩者的新舊來判斷「目前」是不是正常。
 
 不過 `uploadAllLogs()` 整次執行仍然用 `runWithContext` 包住（跟 `weekly-push.ts`/`display-name-update.ts` 一樣），所以底層真的想追某一次同步跑了什麼（例如診斷「為什麼這次失敗」），還是找得到對應的 reqId、在事件時間軸的「排程」分頁看到那次執行的完整過程——徽章只是不把它當成使用者平常會想逐筆瀏覽的「事件」。
+
+沒設定 R2 時（`isR2Enabled()` 在模組載入時就算好，執行期間不會變），`startLogUpload()` 直接不排程，只在 `runWithContext` 外面記一行 debug（`R2 not configured, log sync disabled`，沒有 reqId，在 `/logs` 只會是一筆「系統」事件）；`uploadAllLogs()` 本身則靜默 return，避免每個週期或 graceful shutdown 都在事件時間軸多出一張沒有意義的「排程」卡片。

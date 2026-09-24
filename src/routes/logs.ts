@@ -907,6 +907,7 @@ function buildEventView(group: FlowGroup, rawEntries: LogEntry[]): EventView {
 const SYSTEM_EVENT_INFO: Record<string, { origin: string; stepsHeading: string }> = {
   'LINE signature validation failed': { origin: 'index.ts 錯誤處理', stepsHeading: '發生了什麼' },
   'Webhook received multiple events': { origin: 'webhook.ts（事件批次提示，非錯誤）', stepsHeading: '說明' },
+  'R2 not configured, log sync disabled': { origin: 'log-upload.ts（R2 未設定，啟動時提示一次，非錯誤）', stepsHeading: '說明' },
 };
 const SYSTEM_EVENT_FALLBACK: { origin: string; stepsHeading: string } = { origin: '（未知系統來源）', stepsHeading: '發生了什麼' };
 

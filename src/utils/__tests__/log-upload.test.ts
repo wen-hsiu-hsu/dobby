@@ -105,14 +105,44 @@ describe('log-upload', () => {
     sendMock.mockReset();
   });
 
-  it('skips entirely without creating an S3 client when R2 is not configured', async () => {
+  it('silently skips (no log, no readdir, no S3 client) when R2 is not configured', async () => {
     const { uploadAllLogs, isR2Enabled } = await loadModule();
     expect(isR2Enabled()).toBe(false);
 
     await expect(uploadAllLogs(LOG_DIR)).resolves.toBeUndefined();
 
+    // graceful shutdown 會直接呼叫 uploadAllLogs，這裡一定要靜默，否則 /logs
+    // 每次關機都會多一張背景作業卡片。
+    expect(loggerDebugMock).not.toHaveBeenCalled();
+    expect(loggerInfoMock).not.toHaveBeenCalled();
+    expect(loggerWarnMock).not.toHaveBeenCalled();
+    expect(loggerErrorMock).not.toHaveBeenCalled();
     expect(readdirMock).not.toHaveBeenCalled();
     expect(s3ClientCtorMock).not.toHaveBeenCalled();
+  });
+
+  it('startLogUpload logs once and schedules nothing when R2 is not configured', async () => {
+    vi.useFakeTimers();
+    try {
+      const { startLogUpload } = await loadModule();
+
+      startLogUpload(LOG_DIR);
+
+      expect(loggerDebugMock).toHaveBeenCalledTimes(1);
+      expect(loggerDebugMock).toHaveBeenCalledWith('R2 not configured, log sync disabled');
+      expect(vi.getTimerCount()).toBe(0);
+
+      // 推過好幾個預設週期（15 分鐘），確認沒有任何同步被排程執行。
+      await vi.advanceTimersByTimeAsync(5 * 15 * 60 * 1000);
+
+      expect(loggerDebugMock).toHaveBeenCalledTimes(1);
+      expect(loggerInfoMock).not.toHaveBeenCalled();
+      expect(loggerErrorMock).not.toHaveBeenCalled();
+      expect(readdirMock).not.toHaveBeenCalled();
+      expect(s3ClientCtorMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('uploads each .log file with the correct Bucket/Key (with prefix)/Body', async () => {

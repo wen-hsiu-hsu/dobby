@@ -462,6 +462,18 @@ describe('createLogsRouter', () => {
     expect(html).toContain('（未知系統來源）');
   });
 
+  it('shows the one-time "R2 not configured" startup hint as a system event with the log-upload.ts origin', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 20, time: Date.UTC(2024, 0, 1, 1, 0, 0), msg: 'R2 not configured, log sync disabled' },
+    ]);
+
+    const html = await getLogsHtml();
+
+    expect((html.match(/data-bucket="sys"/g) ?? []).length).toBe(1);
+    expect(html).toContain('log-upload.ts（R2 未設定，啟動時提示一次，非錯誤）');
+    expect(html).not.toContain('（未知系統來源）');
+  });
+
   // 之前只驗證過 event-router.ts 有沒有把 webhookEventId/isRedelivery 記
   // 進 log（見 event-router.test.ts），沒有驗證 /logs 頁面實際渲染出來的
   // HTML 裡看不看得到——這裡才是這兩個欄位真正「顯示給人看」的地方。

@@ -28,7 +28,7 @@
 | 對話 | 有 `Processing event`（`type: 'message'`），但不是指令——通常是自動回覆（`services/auto-reply.ts`，靜態 JSON） | 訊息 |
 | 加入 | `Processing event` 的 `type` 是 `join` 或 `memberJoined` | 訊息 |
 | 排程 | 沒有 `Processing event`，但有 `reqId`——`weekly-push.ts`/`display-name-update.ts` 各自用 `runWithContext` 包住整次執行（見下方「排程事件的 reqId」） | 排程 |
-| 系統 | 完全沒有 `reqId`，且不是伺服器生命週期訊息（見下方「服務重啟分隔線」）——目前有兩種已知情況：LINE webhook 簽章驗證失敗（`index.ts` 的全域錯誤處理，發生在事件處理、也就是 reqId 產生之前，真正的異常）、`webhook.ts` 一次收到兩筆以上事件時的批次提示（正常、預期內的情況，不是錯誤）。這兩種各有各自的「來自」文案，其餘未知的無 reqId 訊息會退回一個通用的「（未知系統來源）」 | 系統 |
+| 系統 | 完全沒有 `reqId`，且不是伺服器生命週期訊息（見下方「服務重啟分隔線」）——目前有三種已知情況：LINE webhook 簽章驗證失敗（`index.ts` 的全域錯誤處理，發生在事件處理、也就是 reqId 產生之前，真正的異常）、`webhook.ts` 一次收到兩筆以上事件時的批次提示（正常、預期內的情況，不是錯誤）、`log-upload.ts` 在 R2 未設定時於啟動時記一次的提示（debug 層，非錯誤）。這三種各有各自的「來自」文案，其餘未知的無 reqId 訊息會退回一個通用的「（未知系統來源）」 | 系統 |
 
 **指令 vs 對話只有在 `LOG_LEVEL=debug` 才能準確判斷**——`Routing command`/`Auto-reply lookup`/`Skipping auto-reply for admin` 全部是 debug 層。`LOG_LEVEL=info` 下這些線都不存在，程式碼退而用「這個流程有沒有 Notion API 呼叫」猜測（指令通常會查/寫 Notion，單純聊天不會），可能誤判，不是決定性的依據。
 
@@ -103,7 +103,7 @@ LINE 回覆/推播的訊息全文，以及 userId 這類身分識別資訊，比
 
 Header 的 LOG_LEVEL 徽章旁邊還有一個「R2 備份」徽章，顯示 log 檔案同步到 Cloudflare R2 的狀態（背景說明見 `docs/overview.md`「日誌」小節、`docs/adr/0006-log-r2-sync-is-periodic-full-directory-not-rotation-hook.md`）。三種語意：
 
-- 灰色「R2 備份：未啟用」或「R2 備份：尚未同步」——功能沒開，或開了但還沒跑過第一次。
+- 灰色「R2 備份：未啟用」或「R2 備份：尚未同步」——功能沒開，或開了但還沒跑過第一次。沒開時完全不排程同步，只在啟動時記一行 debug `R2 not configured, log sync disabled`（沒有 reqId，所以在事件列表是一筆「系統」事件，「來自」顯示 `log-upload.ts`，非錯誤）。
 - 綠色「R2 備份 · `<時間>` 成功」——最近一次同步成功。
 - 琥珀色「R2 備份 · `<時間>` 失敗，等待下次重試」——最近一次同步失敗，滑鼠 hover 可以看到簡短的失敗原因；不需要手動處理，下一次週期性同步（或下次 graceful shutdown）會自動重試。
 

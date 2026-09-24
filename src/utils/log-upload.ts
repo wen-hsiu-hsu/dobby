@@ -71,10 +71,9 @@ export async function uploadAllLogs(logDir: string): Promise<void> {
 }
 
 async function doUploadAllLogs(logDir: string): Promise<void> {
-  if (!r2Enabled) {
-    logger.debug('R2 log sync skipped: R2 is not configured');
-    return;
-  }
+  // 靜默 return：沒設定 R2 的提示只在 startLogUpload() 啟動時記一次；這裡
+  // 還會被 graceful shutdown 直接呼叫，寫 log 會在 /logs 多冒出一張背景作業卡片。
+  if (!r2Enabled) return;
 
   let files: string[];
   try {
@@ -122,6 +121,14 @@ async function doUploadAllLogs(logDir: string): Promise<void> {
 }
 
 export function startLogUpload(logDir: string): void {
+  // r2Enabled 在模組載入時就算好、執行期間不會變，沒設定時每次檢查結果都
+  // 一樣，所以直接不排程。這行刻意寫在 runWithContext 外面（沒有 reqId），
+  // /logs 會把它歸成單一筆「系統」事件，而不是每 15 分鐘一張背景作業卡片。
+  if (!r2Enabled) {
+    logger.debug('R2 not configured, log sync disabled');
+    return;
+  }
+
   uploadAllLogs(logDir).catch((err: unknown) => {
     logger.error({ err }, 'R2 log sync run failed');
   });
