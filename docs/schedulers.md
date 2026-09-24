@@ -31,7 +31,7 @@
 應到：10 人
 ```
 
-零打名額那幾行永遠印到 `totalSlots`（沒人報名的格子留空），不是只列出已報名的零打名單；`請假` 有多人時用頓號（`、`）分隔真實姓名，沒人請假顯示「無」。
+零打名額那幾行印到 `Math.max(totalSlots, 已報名人數)`（沒人報名的格子留空），不是只列出已報名的零打名單；正常情況下等於 `totalSlots`，但已報名人數超過 `totalSlots` 的邊界情況下會印出更多行，不會截斷。`請假` 有多人時用頓號（`、`）分隔真實姓名，沒人請假顯示「無」。
 
 若活動狀態為「打球暫停」，訊息改用簡化版，但沿用同一個標頭樣式：
 ```
@@ -65,7 +65,7 @@
 1. 查詢所有 USERS 資料庫的使用者
 2. 對每個使用者，**依序嘗試 `groups` 欄位（該使用者曾出現過的所有群組 ID，可能包含已離開的群組）裡的每一個 group ID**，用 `getGroupMemberProfile(groupId, userId)` 查詢，取第一個查詢成功的 displayName；`groups` 為空或全部查詢失敗則跳過該使用者（記 log，不影響其他使用者）
 3. 若 displayName 有變動，更新 Notion 的 `Custom Name` 欄位
-4. 兩次 Notion 更新之間 delay 400ms（避免觸發 Notion rate limit）
+4. 每個處理過的使用者之間 delay 400ms（避免觸發 Notion rate limit）——這個 delay 寫在迴圈本體最底部、try/catch 之後，只要這次迴圈沒有提早 `continue`（例如 `groups` 為空、查不到 profile），就會執行，不論這次有沒有真的呼叫 Notion 更新、或是進了 catch 記錄失敗
 
 **⚠️ 這裡一定要帶 `groupId` 查詢**：LINE 的 profile API 不帶 `groupId` 查的是「一對一好友」資料，社團成員多半只在群組互動、沒加 bot 為個人好友，不帶 `groupId` 幾乎必定回 404。2026-09-17 曾經因為漏帶這個參數，讓這支排程實質上永遠不會成功更新任何人，詳見 `docs/code-review-2026-09-17.md` 第 5.1 節。
 

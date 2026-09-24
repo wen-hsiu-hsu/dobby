@@ -112,6 +112,24 @@
 
 ---
 
+## 文件與程式碼落差比對發現的程式碼問題（2026-09-24）
+
+> 背景：這次是針對 `docs/` 底下所有文件跟程式碼做交叉比對（找文件落差，見各 `docs/*.md` 已同步修正的部分），過程中額外發現以下兩項不是文件寫錯、而是程式碼本身的問題，記在這裡待處理。
+
+### 🟡 Medium
+
+- [ ] **「行事曆」資料庫的 `場地數` 欄位是一個從未實作的功能缺口，不是單純文件寫錯。** 該欄位的 schema 描述（「本週場地數，優先使用此值，若為空則使用當季預設場地數」）至少從 2026-03-03（commit `8caa87a`）就存在，但程式碼從頭到尾沒有實作這條讀取路徑：`calendar-repository.ts` 的 `pageToEvent()` 從未讀取過這個屬性（用 `git log -p --all` 追過整個歷史，任何版本都沒讀），`CalendarEvent` 型別（`src/types/notion-models.ts`）也沒有對應欄位。目前**所有**會用到場地數的功能（`+N`/`-N` 報名取消、請假、銷假、`next`、`weekly-push.ts` 週報推播）100% 只吃「季租承租紀錄」的 `season.courts`，完全不看 Calendar 每週的值。
+  - **注意**：`event-occupancy.ts` 保留的 `courtsOverride` 參數跟這個 Notion 欄位**無關**，那是已於 2026-09-22 移除的 `next?c=N` LINE 指令 what-if 預覽功能殘留（讀的是管理員在訊息裡手打的 `c=N`，不是 Notion 屬性），兩者是各自獨立的歷史，不要混為一談（見上方「已評估、不採納」章節裡對 `next?c=N` 的說明，那條記錄純粹在講已移除的 LINE 指令功能，跟這裡的 Calendar 場地數欄位無關）。
+  - **是否要修屬於產品決定**：先去 Notion「行事曆」資料庫確認最近幾筆活動的 `場地數` 欄位是不是普遍空白。如果普遍空白，代表目前沒人依賴這個欄位，影響面很小；如果有人陸續在填、以為會生效，資料正在被靜默忽略，應提高優先度。
+  - **若要實作**，需要動：(1) `notion-models.ts` 的 `CalendarEvent` 加 `courts: number | null`；(2) `calendar-repository.ts` 的 `pageToEvent()` 補讀 `getNumber(p, '場地數')`；(3) `event-occupancy.ts` 改成 `const effectiveCourts = event.courts ?? season.courts`（需決定要不要保留現有 `courtsOverride` 參數當更高優先度的顯式覆寫，或乾脆拿掉改成純兩層 fallback）；(4) `leave-handler.ts:105` 銷假成功後重算 `newTotalSlots` 那行是繞過 `occupancy` 自己重算的，要一併套用 `effectiveCourts`，否則會出現「報名用 Calendar 場地數、銷假卻用回 season 場地數」的不一致；(5) 補測試（`event-occupancy.test.ts`、`next-event.test.ts`、`registration-handler`/`leave-handler` 測試）涵蓋「Calendar 有填時覆寫」與「未填時 fallback」兩種情境；(6) 同步更新 `docs/notion/schemas/calendar.json`、`docs/registration.md` 容量計算公式章節。
+
+### 🟢 Low
+
+- [ ] **`people-repository.ts:14` 讀取 `Line User ID` 欄位是死碼，該欄位在真實 Notion「人員清單」資料庫裡已不存在。** 直接呼叫 Notion API（`GET /v1/databases/{NOTION_DB_PEOPLE}`）確認實際欄位只有 `Name`、`USER`、`報名季度`、`結清`、`未繳季租`、`已繳季租`、`付款`、`📅 行事曆`，沒有 `Line User ID`。`getRichText(p, 'Line User ID')` 會靜默回傳空字串，`PersonRecord.lineUserId`（`src/types/notion-models.ts:34-39`）全專案沒有任何讀取端使用。建議確認是否還需要這個欄位／型別，不需要就整組移除（讀取程式碼 + 型別欄位）。`docs/notion/schemas/people-list.json` 也已同步移除該欄位描述、補上實際存在的 `📅 行事曆` 欄位。
+- [ ] **`welcome-message.ts:6-17` 自己內嵌了一份簡化版 `blocksToText`（不加 `•` bullet 前綴），沒有共用 `src/services/notion/blocks-to-text.ts` 的版本；`payment.ts`／`introduce.ts`／`news.ts` 則有共用。** 兩份實作邏輯會隨時間分岔，未來修 [1.6]（`blocks-to-text.ts` 不遞迴處理 `has_children`）時很可能漏改這份副本。建議讓 `welcome-message.ts` 改為呼叫共用函式，或說明兩者刻意不同的理由。
+
+---
+
 ## 效能觀察（2026-09-21，從真實 log 分析發現，尚未處理）
 
 - [ ] **`people-repository.ts:40-44` `findAllUnpaid()` 用 `結清` 這個 formula 欄位當篩選條件，比篩一般欄位慢一個檔次。** 真實環境的 log 顯示這個查詢（`owe` 指令用到）耗時落在 715ms～3540ms，而其他篩一般欄位的查詢中位數只要 400～600ms——Notion 官方文件跟社群經驗都指出篩 formula/rollup 欄位沒辦法用索引、每次都要即時算。不是這個查詢寫錯，是 formula 欄位篩選本來就有這個代價；如果之後 `owe` 指令的回應速度變成明顯困擾，可以考慮的方向是另外維護一個非 formula 的「是否結清」欄位讓 Notion 自動同步，或是接受這個延遲。

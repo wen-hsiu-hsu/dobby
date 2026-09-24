@@ -38,15 +38,19 @@ parseCommand(text)
 
 ```
 src/services/notion/
-├── notion-client.ts        ← Notion SDK 實例
-├── notion-fetch.ts         ← REST API 底層封裝（notionPost, notionGet）
+├── notion-fetch.ts         ← REST API 底層封裝（notionGet, notionPost, notionPatch, notionGetAllResults）
 ├── property-helpers.ts     ← 讀寫各種 Notion property 型別的 helper
+├── paginated-relation.ts   ← relation/people/rollup 屬性補抓超過 25 筆截斷的完整清單
+├── blocks-to-text.ts       ← 把 Notion block children 攤平成純文字
+├── event-occupancy.ts      ← 彙整單一活動的名額／已報名人數等 occupancy 資訊
 ├── users-repository.ts     ← USERS 資料庫
 ├── people-repository.ts    ← 人員清單
 ├── calendar-repository.ts  ← 行事曆
 ├── season-repository.ts    ← 季租承租紀錄
 └── announcement-repository.ts ← 所有公告
 ```
+
+（`@notionhq/client` 只被用來 import type，專案沒有 Notion SDK client 實例，一律走上面的 REST API 封裝。）
 
 ## 自動回覆
 

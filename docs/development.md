@@ -99,9 +99,12 @@ npm test -- --watch
 src/
 ├── __tests__/                    ← 整合測試 / E2E 測試
 │   ├── webhook.test.ts
+│   ├── webhook-signature.test.ts
 │   ├── command-integration.test.ts
 │   ├── registration-flow.test.ts
-│   └── auto-reply.test.ts
+│   ├── auto-reply.test.ts
+│   ├── log-dir.test.ts
+│   └── logs-auth.test.ts
 ├── commands/__tests__/           ← 指令單元測試
 ├── services/__tests__/           ← 服務單元測試
 └── utils/__tests__/              ← 工具函式測試

@@ -34,7 +34,7 @@ Dobby 會介紹自己並 @mention 觸發者和管理員。
 | `{FROM_TO_MONTH}` | 季度月份範圍，如 `7~9月` |
 | `{TOTAL_PEOPLE}` | 當季報名人數 |
 | `{LIST_ALL_PEOPLE}` | 當季報名人名單，頓號分隔的單行（`許文修、陳玟育、...`） |
-| `{PRICE_PER_PERSON_FOR_SEASON}` | 每人平均場租，Notion formula 算出來的小數無條件進位到整數（僅供參考，非實際繳費金額） |
+| `{PRICE_PER_PERSON_FOR_SEASON}` | 每人平均場租，無條件進位到整數（僅供參考，非實際繳費金額）。預設是 Notion formula「每人平均場租」算出來的值；若「每人平均場租（特殊狀況）」欄位有填值，改顯示該手動覆寫值，不再用 formula 值（見 `src/commands/news.ts`） |
 | `{PRICE_PER_PERSON_FOR_ONCE}` | 零打（單次）費用 |
 | `{COURT_COUNT}` | 場地數 |
 | `{WEEK_COUNTS}` | 本季租借次數 |
@@ -119,11 +119,13 @@ Notion 內容裡的 `bulleted_list_item`（項目符號清單）在輸出時會�
 管理員可以在指令中 @mention 目標，代替他人報名或請假：
 
 ```
-@Dobby @Vic +1        ← 幫 Vic 報名
+@Dobby +1 @Vic        ← 幫 Vic 報名
 @Dobby @Vic 假        ← 幫 Vic 請假
 @Dobby @Vic 銷假      ← 幫 Vic 銷假
-@Dobby @Vic -1        ← 幫 Vic 取消報名
+@Dobby -1 @Vic        ← 幫 Vic 取消報名
 ```
+
+報名／取消報名時 `+N`/`-N` 跟 `@mention` 的前後順序皆可解析（`@Dobby @Vic +1` 也可以），上面採用跟 `@Dobby command` 指令說明文字（`src/commands/command-list.ts`）一致的順序。
 
 **注意：** 電腦版 LINE 的 @mention 有時無法正確傳遞，建議用手機操作代他人指令。
 

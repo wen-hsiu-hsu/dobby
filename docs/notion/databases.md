@@ -56,8 +56,8 @@ USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員�
 | `零打費用` | 當季零打（單次）價格 |
 | `地點` | 打球地點，`news` 指令 `{LOCATION}` |
 | `租借次數 (2hrs)` | 本季總租借次數，`news` 指令 `{WEEK_COUNTS}` |
-| `每人平均場租` | formula，本季每人應繳場租，`news` 指令 `{PRICE_PER_PERSON_FOR_SEASON}` |
-| `每人平均場租（特殊狀況）` | 手動覆寫值，設定後取代上面的 formula |
+| `每人平均場租` | formula，本季每人應繳場租，`news` 指令 `{PRICE_PER_PERSON_FOR_SEASON}` 的預設來源 |
+| `每人平均場租（特殊狀況）` | 手動覆寫值，設定後 `news` 指令 `{PRICE_PER_PERSON_FOR_SEASON}` 改顯示這個值，不再用上面的 formula 值（`src/commands/news.ts` 的 `pricePerPersonOverride ?? pricePerPersonForSeason`） |
 | `場租總金額` | formula，本季場租總額，`news` 指令 `{TOTAL_PRICE}` |
 | `打球日` | Relation，關聯至「行事曆」，本季所有打球日，`news` 指令 `{LIST_ALL_DATES}` |
 
@@ -74,7 +74,7 @@ USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員�
 
 | 欄位 | 用途 |
 |------|------|
-| 日期 | 活動日期（通常是週六），用於查詢 |
+| `時間` | 活動日期（通常是週六），報名系統以此欄位查詢當週活動。⚠️ 不要跟 `名稱`（title 欄位，內容通常也是日期字串）搞混，查詢用的是 `時間` |
 | `請假人` | Relation，關聯至「人員清單」，記錄本週請假的季租球員。⚠️ 同樣受 25 筆截斷限制，且 `updateAbsentees` 是整包覆寫（非增量 patch）——若讀取時沒有透過 `getFullRelation` 補齊完整清單就整包寫回，會把第 26 筆以後的請假紀錄永久刪除。唯一安全的來源是 `calendar-repository.ts` 的 `pageToEvent()`，不要用其他管道拼湊這個陣列 |
 | `零打` | Multi-select，記錄本週補位名單（guest 名稱字串）。⚠️ multi_select 的選項用名稱去重，陣列裡出現重複字串會被 Notion 靜默合併成一筆、無聲遺失資料，寫入前必須確保完整清單裡沒有重複字串，見 `docs/adr/0004-guest-name-must-be-globally-unique.md` |
 | `類型` | 若為「打球暫停」，報名和推播都會顯示暫停 |

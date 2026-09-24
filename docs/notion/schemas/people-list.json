@@ -56,6 +56,11 @@
         "database_id": "4573dc24-ef10-4241-971f-af4ed8a986d1",
         "type": "dual_property"
       }
+    },
+    "📅 行事曆": {
+      "type": "relation",
+      "description": "關聯至「行事曆」，推測用於記錄此球員參與/請假的活動。目前程式碼（`people-repository.ts`）未讀取此欄位，用途細節未確認",
+      "config": null
     }
   }
 }

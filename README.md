@@ -1,6 +1,6 @@
 # Dobby
 
-羽球社 LINE 機器人，管理每週打球的報名、請假與公告事務。以 TypeScript + Express 建置，使用 Notion 作為資料庫，部署於 Docker/Zeabur。
+羽球社 LINE 機器人，管理每週打球的報名、請假與公告事務。以 TypeScript + Express 建置，使用 Notion 作為資料庫，正式環境跑在自架 Raspberry Pi 上的 Docker Compose（詳見 [docs/overview.md](docs/overview.md)）。
 
 ## 快速啟動
 

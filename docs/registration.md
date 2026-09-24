@@ -37,7 +37,7 @@ Capacity Calculator
 回覆 LINE：新名單 + 剩餘名額 + 請假名單
 ```
 
-失敗或邊界情況（名額不足、重複請假、未請假卻銷假、代他人操作對象不符資格等）也會回覆同一種「完整名額狀態」格式，只是第一行換成對應的說明，而不是只回一句話（`src/commands/registration/event-status-message.ts`）。
+失敗或邊界情況（名額不足、重複請假、未請假卻銷假等）也會回覆同一種「完整名額狀態」格式，只是第一行換成對應的說明，而不是只回一句話（`src/commands/registration/event-status-message.ts`）。例外情況見下方「請假邏輯」一節。
 
 ## 容量計算公式
 
@@ -50,7 +50,7 @@ Capacity Calculator
 - **請假人數**：本週行事曆 `請假人` 關聯的人員數量
 - **已報名零打數**：本週行事曆 `零打` multi-select 的項目數量
 
-管理員報名時**不受名額限制**。
+管理員報名時**不受名額限制**，但這只在活動未暫停的前提下成立：`calculateAddCapacity`（`src/commands/registration/capacity-calculator.ts`）一開始就檢查活動是否為「打球暫停」，若已暫停會直接拒絕（回「本次活動已暫停，無法報名」），這個檢查在判斷是否為管理員**之前**，管理員也一樣會被擋下。
 
 非管理員 `+N` 超過剩餘名額時，**不會整筆拒絕**：改成報到剩餘名額為止，並在回覆說明「已達上限，僅報名 X 位」。剩餘名額恰好為 0（完全沒有名額可報）時才維持整筆拒絕，回「名額不足」。
 
@@ -92,9 +92,11 @@ src/services/mutex.ts
 
 | 情境 | 判斷條件 | 處理方式 |
 |------|----------|----------|
-| 自己報名 | 無 mention | 查 USERS 資料庫取得 customName |
-| @mention 指定 | 有目標 userId | 查 USERS 資料庫取得 customName |
+| 自己報名 | 無 mention | 查 USERS 資料庫取得對應 userId 的記錄 |
+| @mention 指定 | 有目標 userId | 查 USERS 資料庫取得對應 userId 的記錄 |
 | 名字指定（文字） | 有目標名字文字 | 查 People List 比對 |
+
+「自己報名」「@mention 指定」這兩種情境查到 USERS 記錄後，顯示名稱不是直接用 `customName`：會**優先**用該 user 的 `registeredPersonPageId` 去查 People DB，若查得到就用 People DB 上的 `person.name`；只有查不到對應的 People 記錄（例如非季租成員從未在 People DB 註冊）時，才 fallback 用 USERS 資料庫的 `customName`（見 `src/commands/registration/target-resolver.ts`）。
 
 管理員才能代他人操作（非管理員發出代他人指令會被拒絕）。
 
