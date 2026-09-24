@@ -476,4 +476,162 @@ describe('log-upload', () => {
       );
     });
   });
+
+  describe('startLogUpload (R2 configured)', () => {
+    const MINUTE_MS = 60 * 1000;
+
+    beforeEach(() => {
+      setEnabledEnv();
+      readdirMock.mockResolvedValue(['app.2026-01-01.log']);
+      readFileMock.mockResolvedValue(Buffer.from('x'));
+      sendMock.mockResolvedValue({});
+    });
+
+    // setInterval 在正式程式碼裡永遠不會被清掉，每個測試結束都要清掉 fake
+    // timers 再還原 real timers，避免排程殘留影響後面的測試。
+    async function withFakeTimers(fn: () => Promise<void>): Promise<void> {
+      vi.useFakeTimers();
+      try {
+        await fn();
+      } finally {
+        vi.clearAllTimers();
+        vi.useRealTimers();
+      }
+    }
+
+    it('runs the first sync immediately and does not log the "not configured" line', async () => {
+      await withFakeTimers(async () => {
+        const { startLogUpload } = await loadModule();
+
+        startLogUpload(LOG_DIR);
+        // 讓第一次同步的 promise 鏈跑完（不推進時間）。
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(readdirMock).toHaveBeenCalledTimes(1);
+        expect(sendMock).toHaveBeenCalledTimes(1);
+        // 防止有人把「未設定」的提示搬到判斷式外面，啟用時也冒出這行。
+        expect(loggerDebugMock).not.toHaveBeenCalledWith('R2 not configured, log sync disabled');
+        expect(loggerErrorMock).not.toHaveBeenCalled();
+      });
+    });
+
+    it('schedules repeated syncs at R2_LOG_SYNC_INTERVAL_MINUTES', async () => {
+      envMock.R2_LOG_SYNC_INTERVAL_MINUTES = 5;
+      await withFakeTimers(async () => {
+        const { startLogUpload } = await loadModule();
+
+        startLogUpload(LOG_DIR);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(readdirMock).toHaveBeenCalledTimes(1);
+
+        // 間隔前一刻還不會跑。
+        await vi.advanceTimersByTimeAsync(5 * MINUTE_MS - 1);
+        expect(readdirMock).toHaveBeenCalledTimes(1);
+
+        // 推過間隔，跑第二次。
+        await vi.advanceTimersByTimeAsync(1);
+        expect(readdirMock).toHaveBeenCalledTimes(2);
+
+        // 再推一個間隔，跑第三次（是 setInterval 而不是只跑一次的 setTimeout）。
+        await vi.advanceTimersByTimeAsync(5 * MINUTE_MS);
+        expect(readdirMock).toHaveBeenCalledTimes(3);
+      });
+    });
+
+    it('defaults to a 15-minute interval when R2_LOG_SYNC_INTERVAL_MINUTES is unset', async () => {
+      await withFakeTimers(async () => {
+        const { startLogUpload } = await loadModule();
+
+        startLogUpload(LOG_DIR);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(readdirMock).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(15 * MINUTE_MS - 1);
+        expect(readdirMock).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(1);
+        expect(readdirMock).toHaveBeenCalledTimes(2);
+      });
+    });
+
+    it('catches a rejected sync run with logger.error instead of an unhandled rejection', async () => {
+      // doUploadAllLogs 內部幾乎每一步都有 try/catch，能讓整輪 reject 的路徑
+      // 是最後那行 logger.debug 本身丟例外（例如 logger transport 壞掉）。
+      const boom = new Error('logger exploded');
+      loggerDebugMock.mockImplementation((_obj: unknown, msg?: string) => {
+        if (msg === 'R2 log sync complete') throw boom;
+      });
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown) => unhandled.push(reason);
+      process.on('unhandledRejection', onUnhandled);
+
+      try {
+        await withFakeTimers(async () => {
+          const { startLogUpload } = await loadModule();
+
+          startLogUpload(LOG_DIR);
+          await vi.advanceTimersByTimeAsync(0);
+          expect(loggerErrorMock).toHaveBeenCalledTimes(1);
+          expect(loggerErrorMock).toHaveBeenLastCalledWith({ err: boom }, 'R2 log sync run failed');
+
+          // 排程觸發的那一輪也要被接住（檔案沒變動會跳過上傳，但最後那行
+          // debug 不論有沒有上傳都會呼叫，所以一樣會 reject）。
+          await vi.advanceTimersByTimeAsync(15 * MINUTE_MS);
+          expect(loggerErrorMock).toHaveBeenCalledTimes(2);
+          expect(loggerErrorMock).toHaveBeenLastCalledWith({ err: boom }, 'R2 log sync run failed');
+        });
+        // unhandledRejection 事件在 microtask 之後的 tick 才發出，多等一輪 macrotask。
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(unhandled).toEqual([]);
+      } finally {
+        process.off('unhandledRejection', onUnhandled);
+      }
+    });
+  });
+
+  describe('request context of startLogUpload / uploadAllLogs logs', () => {
+    // log-upload.ts 用的是真的 request-context（這個檔案沒有 mock 它）。因為
+    // loadModule() 會 vi.resetModules()，必須在 loadModule() 之後再動態 import
+    // request-context，才會拿到跟 log-upload.ts 同一份 AsyncLocalStorage。
+    async function loadWithReqIdCapture() {
+      const mod = await loadModule();
+      const { getReqId } = await import('../request-context.js');
+      const reqIdByMessage = new Map<string, string | undefined>();
+      loggerDebugMock.mockImplementation((...args: unknown[]) => {
+        const msg = args.find((a): a is string => typeof a === 'string');
+        if (msg) reqIdByMessage.set(msg, getReqId());
+      });
+      return { ...mod, reqIdByMessage };
+    }
+
+    it('logs "R2 not configured" outside runWithContext (no reqId), so /logs shows it as a system event', async () => {
+      vi.useFakeTimers();
+      try {
+        const { startLogUpload, reqIdByMessage } = await loadWithReqIdCapture();
+
+        startLogUpload(LOG_DIR);
+
+        expect(reqIdByMessage.has('R2 not configured, log sync disabled')).toBe(true);
+        // 如果這行被包進 runWithContext，就會拿到 reqId，/logs 會把它從「系統」
+        // 事件變成一張「背景作業」卡片。
+        expect(reqIdByMessage.get('R2 not configured, log sync disabled')).toBeUndefined();
+      } finally {
+        vi.clearAllTimers();
+        vi.useRealTimers();
+      }
+    });
+
+    it('control: logs inside uploadAllLogs DO see a reqId (proves the capture technique works)', async () => {
+      setEnabledEnv();
+      readdirMock.mockResolvedValue(['app.2026-01-01.log']);
+      readFileMock.mockResolvedValue(Buffer.from('x'));
+      sendMock.mockResolvedValue({});
+
+      const { uploadAllLogs, reqIdByMessage } = await loadWithReqIdCapture();
+      await uploadAllLogs(LOG_DIR);
+
+      expect(reqIdByMessage.has('R2 log sync complete')).toBe(true);
+      expect(reqIdByMessage.get('R2 log sync complete')).toMatch(/^[0-9a-f]{6}$/);
+    });
+  });
 });
