@@ -17,15 +17,16 @@ COPY package*.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci
 COPY . .
 RUN npm run build
-# Prune devDependencies in place instead of a second `npm ci --omit=dev` in the
-# runtime stage — no network fetch, just deletes what's already on disk.
-RUN npm prune --omit=dev
 
-# Runtime stage
+# Runtime stage — installs its own node_modules independently (rather than
+# copying builder's) so BuildKit can run this npm ci in parallel with
+# builder's build instead of serializing behind it; the cache mount below
+# keeps the actual install fast either way.
 FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
-COPY --from=builder /app/node_modules ./node_modules
+COPY package*.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
 COPY src/data ./src/data
 EXPOSE 3000

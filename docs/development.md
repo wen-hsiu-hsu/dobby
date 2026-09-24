@@ -127,8 +127,10 @@ docker run -p 3000:3000 --env-file .env dobby
 ```
 
 使用 multi-stage build：
-1. **builder**：安裝所有依賴、編譯 TypeScript、`npm prune --omit=dev` 就地清掉 devDependencies
-2. **runtime**：只複製 `dist/` 跟 builder 已經 prune 過的 `node_modules`，不再自己另外 `npm ci`（避免 production 依賴被裝兩次）
+1. **builder**：安裝所有依賴、編譯 TypeScript
+2. **runtime**：只複製 `dist/`、自己獨立 `npm ci --omit=dev` 安裝 production 依賴
+
+`runtime` 特意不用 `COPY --from=builder` 複製 builder 的 `node_modules`，而是自己獨立跑 `npm ci --omit=dev`——這樣 BuildKit 才能把 `runtime` 的安裝跟 `builder` 的編譯平行執行，而不是序列等 builder 全部跑完。實測過在 Pi 上改成「builder prune 完再讓 runtime 複製」反而更慢：一來失去了平行執行的空間，二來 `COPY --from=builder` 本身在慢儲存（SD 卡/eMMC）上複製上百個小檔案也不便宜。
 
 兩個 `npm ci` 都掛了 BuildKit 的 `--mount=type=cache,target=/root/.npm`，讓 npm cache 能跨次 build 保留，加速重複部署（例如 Pi 每次 push 都會重新 build）。這個語法需要 BuildKit（`# syntax=docker/dockerfile:1`），較舊版本的 Docker / `docker-compose` v1 如果沒開 BuildKit 會直接 build 失敗，不是靜默降級。
 
