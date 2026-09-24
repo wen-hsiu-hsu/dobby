@@ -34,7 +34,9 @@ export function getR2SyncStatus(): R2SyncStatus {
 // 刻意只存在記憶體：重啟後這個 Map 是空的，第一輪會把所有檔案全部重傳，
 // 行為跟改動前的「全目錄重傳」完全一樣。狀態遺失時退回的是安全的全量重傳，
 // 而上傳本身是對同一個 key 覆寫、天生冪等，所以不需要把這份狀態持久化，
-// 也不會因為狀態遺失而漏傳。見 ADR 0006 的「以檔案為單位的變動偵測」段落。
+// 也不會因為狀態遺失而漏傳。這只涵蓋本機這一側的狀態遺失；R2 物件被外部
+// 刪除時，重啟前不會補傳，是刻意接受的取捨。見 ADR 0006 的「以檔案為單位
+// 的變動偵測」段落。
 //
 // 記錄的是「上傳前」stat 拿到的值，而且只在上傳成功後才寫入：上傳失敗就不
 // 更新，下一輪比對時仍然會被判定為有變動而自然重試。如果 stat 之後、讀檔
@@ -157,7 +159,9 @@ async function doUploadAllLogs(logDir: string): Promise<void> {
   // (b) 這裡在 runWithContext 裡（有 reqId），info 會讓正式環境的 /logs 每
   //     15 分鐘冒出一張背景作業卡片，違反 ADR 0006 徽章段落的意圖。
   // 正式環境如果設 LOG_LEVEL=debug，這行仍會寫進檔案，今天的檔案每輪都會
-  // 重傳一次，可以接受。（開發環境 initLogger() 不寫 log 檔，不受影響。）
+  // 重傳一次，/logs 也會每 15 分鐘再冒出一張背景作業卡片；debug 本來就是
+  // 除錯用的，這是預期中、可以接受的代價。（開發環境 initLogger() 不寫 log
+  // 檔，不受影響。）
   logger.debug({ succeeded, skipped, failed, total: logFiles.length }, 'R2 log sync complete');
 }
 

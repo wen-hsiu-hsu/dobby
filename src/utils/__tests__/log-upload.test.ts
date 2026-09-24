@@ -404,6 +404,35 @@ describe('log-upload', () => {
       expect(uploadedKeys()).toEqual([`logs/test/${FILE_B}`]);
     });
 
+    it('records the stat taken BEFORE upload, so a write during read/upload is re-uploaded next run', async () => {
+      // 守住「記錄的是上傳前 stat 的值」這個不變式。如果實作改成上傳後再 stat
+      // 一次、記錄新的值，就會漏傳：readFile 讀到 c1，上傳途中 pino 又補寫一行，
+      // 上傳後 stat 變成 (m2, s2) 並被記下，R2 上卻只有 c1；下一輪 stat 仍是
+      // (m2, s2)，檔案被判定沒變動而跳過，補寫的那行在重啟前永遠傳不上去。
+      readdirMock.mockResolvedValue([FILE_A]);
+      let currentStat = { mtimeMs: 1000, size: 100 };
+      statMock.mockImplementation(async () => currentStat);
+      // 讀檔拿到 c1 之後，檔案馬上被補寫（模擬讀取／上傳過程中 pino 寫入）。
+      readFileMock.mockImplementation(async () => {
+        const body = Buffer.from('c1');
+        currentStat = { mtimeMs: 2000, size: 150 };
+        return body;
+      });
+
+      const { uploadAllLogs } = await loadModule();
+      await uploadAllLogs(LOG_DIR);
+      expect(sendMock).toHaveBeenCalledTimes(1);
+
+      // 下一輪 stat 是 (m2, s2)，跟記錄的 (m1, s1) 不同，必須重傳。
+      readFileMock.mockResolvedValue(Buffer.from('c2'));
+      putObjectCommandCtorMock.mockClear();
+      sendMock.mockClear();
+      await uploadAllLogs(LOG_DIR);
+
+      expect(uploadedKeys()).toEqual([`logs/test/${FILE_A}`]);
+      expect(putObjectCommandCtorMock).toHaveBeenCalledWith(expect.objectContaining({ Body: Buffer.from('c2') }));
+    });
+
     it('treats a stat failure like an upload failure: warn, count as failed, continue with other files', async () => {
       readdirMock.mockResolvedValue([FILE_A, FILE_B]);
       statMock.mockImplementation(async (path: string) => {
