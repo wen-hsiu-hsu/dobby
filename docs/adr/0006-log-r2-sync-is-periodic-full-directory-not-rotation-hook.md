@@ -14,7 +14,7 @@ Dobby 準備部署到 Zeabur 這類容器檔案系統是 ephemeral 的平台，�
 
 不過 `uploadAllLogs()` 整次執行仍然用 `runWithContext` 包住（跟 `weekly-push.ts`/`display-name-update.ts` 一樣），所以底層真的想追某一次同步跑了什麼（例如診斷「為什麼這次失敗」），還是找得到對應的 reqId、在事件時間軸的「排程」分頁看到那次執行的完整過程——徽章只是不把它當成使用者平常會想逐筆瀏覽的「事件」。
 
-沒設定 R2 時（`isR2Enabled()` 在模組載入時就算好，執行期間不會變），`startLogUpload()` 直接不排程，只在 `runWithContext` 外面記一行 debug（`R2 not configured, log sync disabled`，沒有 reqId，在 `/logs` 只會是一筆「系統」事件）；`uploadAllLogs()` 本身則靜默 return，避免每個週期或 graceful shutdown 都在事件時間軸多出一張沒有意義的「排程」卡片。
+沒設定 R2 時（`isR2Enabled()` 在模組載入時就算好，執行期間不會變），`startLogUpload()` 直接不排程，只在 `runWithContext` 外面記一行 debug（`R2 not configured, log sync disabled`，沒有 reqId，在 `/logs` 只會是一筆「系統」事件；因為是 debug 層，只有正式環境＋`LOG_LEVEL=debug` 時才會出現在 /logs，預設 info 或本機開發環境都看不到）；`uploadAllLogs()` 本身則靜默 return，避免每個週期或 graceful shutdown 都在事件時間軸多出一張沒有意義的「排程」卡片。
 
 ## 以檔案為單位的變動偵測（後續修改）
 
@@ -29,7 +29,7 @@ Dobby 準備部署到 Zeabur 這類容器檔案系統是 ephemeral 的平台，�
 
 **完成訊息 `R2 log sync complete` 必須是 debug，不能是 info**，原因有兩個：
 
-1. **自我觸發變動**：正式環境 `LOG_LEVEL=info`，如果這行是 info，它本身就會寫進今天的 log 檔，下一輪今天的檔案 `mtime`/`size` 一定變了，變動偵測等於自己觸發自己。降成 debug 後正式環境不會寫進檔案。（開發環境 `LOG_LEVEL=debug` 仍會寫進檔案，所以開發環境今天的檔案每輪都會重傳，這可以接受。）
+1. **自我觸發變動**：正式環境 `LOG_LEVEL=info`，如果這行是 info，它本身就會寫進今天的 log 檔，下一輪今天的檔案 `mtime`/`size` 一定變了，變動偵測等於自己觸發自己。降成 debug 後正式環境不會寫進檔案。（正式環境如果設 `LOG_LEVEL=debug`，這行仍會寫進檔案，今天的檔案每輪都會重傳一次，這可以接受。本機開發環境 `initLogger()` 根本不寫 log 檔，不受影響。）
 2. **卡片洗版**：這行在 `runWithContext` 裡（有 reqId），是 info 的話正式環境的 `/logs` 每 15 分鐘就會冒出一張背景作業卡片，正是上面徽章段落想避免的情況。
 
 真的要追某一輪同步的細節，把 `LOG_LEVEL` 調成 debug 就看得到（帶 `succeeded`/`skipped`/`failed`/`total`）；個別檔案失敗的 warn 不受影響，正式環境一樣會記錄。

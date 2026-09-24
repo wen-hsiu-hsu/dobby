@@ -903,19 +903,29 @@ function buildEventView(group: FlowGroup, rawEntries: LogEntry[]): EventView {
  * 對照表——跟 `SCHEDULE_ORIGIN_MARKERS` 同一套「已知訊息對照表＋通用
  * fallback」模式。不要假設掉進這個分類的訊息一定是錯誤：webhook 一次收到
  * 多筆事件是正常、預期內的情況，只是少見；簽章驗證失敗才是真正的異常。
+ *
+ * `source`（列表卡片跟詳情頁的「來源」）也要逐筆寫：不是每一筆系統事件都
+ * 來自 HTTP 層，例如 R2 未設定的提示是啟動時記的，寫死成 `POST /webhook`
+ * 會跟「來自：log-upload.ts」互相矛盾。
  */
-const SYSTEM_EVENT_INFO: Record<string, { origin: string; stepsHeading: string }> = {
-  'LINE signature validation failed': { origin: 'index.ts 錯誤處理', stepsHeading: '發生了什麼' },
-  'Webhook received multiple events': { origin: 'webhook.ts（事件批次提示，非錯誤）', stepsHeading: '說明' },
-  'R2 not configured, log sync disabled': { origin: 'log-upload.ts（R2 未設定，啟動時提示一次，非錯誤）', stepsHeading: '說明' },
+type SystemEventInfo = { origin: string; source: string; stepsHeading: string };
+const SYSTEM_EVENT_INFO: Record<string, SystemEventInfo> = {
+  'LINE signature validation failed': { origin: 'index.ts 錯誤處理', source: 'HTTP · POST /webhook', stepsHeading: '發生了什麼' },
+  'Webhook received multiple events': { origin: 'webhook.ts（事件批次提示，非錯誤）', source: 'HTTP · POST /webhook', stepsHeading: '說明' },
+  'R2 not configured, log sync disabled': { origin: 'log-upload.ts（R2 未設定，啟動時提示一次，非錯誤）', source: '啟動 · log-upload.ts', stepsHeading: '說明' },
 };
-const SYSTEM_EVENT_FALLBACK: { origin: string; stepsHeading: string } = { origin: '（未知系統來源）', stepsHeading: '發生了什麼' };
+// fallback 的 source 維持原本的 `HTTP · POST /webhook`：沒有 reqId 的訊息
+// 目前多半來自 HTTP 層（reqId 在 webhook 事件處理時才產生，比它早發生的
+// 錯誤都沒有 reqId），而且這就是加上逐筆 source 之前的既有行為，未知訊息
+// 不因這次修改而改變顯示。「來自」已經標成「（未知系統來源）」，看得出
+// 這是猜測。
+const SYSTEM_EVENT_FALLBACK: SystemEventInfo = { origin: '（未知系統來源）', source: 'HTTP · POST /webhook', stepsHeading: '發生了什麼' };
 
 /** 沒有配對到任何 reqId、也不是伺服器生命週期訊息的單行 log（例如 LINE 簽章驗證失敗、webhook 一次收到多筆事件）——每一筆各自變成一個獨立的「系統」事件，不跟別的無 reqId 訊息合併。 */
 function buildSystemEventView(entry: LogEntry, index: number): EventView {
   const levelName = levelNameOf(entry);
   const msg = String(entry.msg ?? '系統事件');
-  const { origin, stepsHeading } = SYSTEM_EVENT_INFO[msg] ?? SYSTEM_EVENT_FALLBACK;
+  const { origin, source, stepsHeading } = SYSTEM_EVENT_INFO[msg] ?? SYSTEM_EVENT_FALLBACK;
   const { level: _level, time: _time, msg: _msg, reqId: _reqId, pid: _pid, hostname: _hostname, ...extra } = entry;
   const pairs = Object.entries(extra).filter(([, v]) => v !== null && v !== undefined);
   const noteText = pairs.map(([k, v]) => `${k}: ${formatExtraValue(v)}`).join(' · ');
@@ -948,7 +958,7 @@ function buildSystemEventView(entry: LogEntry, index: number): EventView {
     name: null,
     userIdRaw: '',
     groupIdRaw: '',
-    source: 'HTTP · POST /webhook',
+    source,
     origin,
     status,
     statusLabel: STATUS_LABELS[status],

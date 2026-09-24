@@ -156,8 +156,8 @@ async function doUploadAllLogs(logDir: string): Promise<void> {
   //     mtime/size 一定變了，變動偵測等於自己觸發自己、永遠有效不了。
   // (b) 這裡在 runWithContext 裡（有 reqId），info 會讓正式環境的 /logs 每
   //     15 分鐘冒出一張背景作業卡片，違反 ADR 0006 徽章段落的意圖。
-  // 開發環境 LOG_LEVEL=debug 仍會寫進檔案，所以開發環境今天的檔案每輪都會
-  // 重傳一次，這可以接受。
+  // 正式環境如果設 LOG_LEVEL=debug，這行仍會寫進檔案，今天的檔案每輪都會
+  // 重傳一次，可以接受。（開發環境 initLogger() 不寫 log 檔，不受影響。）
   logger.debug({ succeeded, skipped, failed, total: logFiles.length }, 'R2 log sync complete');
 }
 

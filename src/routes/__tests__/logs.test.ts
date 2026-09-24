@@ -442,6 +442,8 @@ describe('createLogsRouter', () => {
     expect((html.match(/data-bucket="sys"/g) ?? []).length).toBe(2);
     // 伺服器啟動訊息不會被當成獨立事件列出（會變成分隔線，不是 ev-item）
     expect(html).not.toContain('Server started<');
+    // 簽章驗證失敗確實發生在 HTTP 層，「來源」維持 POST /webhook
+    expect(html).toContain('HTTP · POST /webhook');
   });
 
   it('gives each known "system" message its own accurate 來自/stepsHeading instead of a shared "index.ts 錯誤處理" label for everything', async () => {
@@ -472,6 +474,9 @@ describe('createLogsRouter', () => {
     expect((html.match(/data-bucket="sys"/g) ?? []).length).toBe(1);
     expect(html).toContain('log-upload.ts（R2 未設定，啟動時提示一次，非錯誤）');
     expect(html).not.toContain('（未知系統來源）');
+    // 「來源」要跟「來自：log-upload.ts」一致，是啟動時記的，不是 webhook 進來的
+    expect(html).toContain('啟動 · log-upload.ts');
+    expect(html).not.toContain('POST /webhook');
   });
 
   // 之前只驗證過 event-router.ts 有沒有把 webhookEventId/isRedelivery 記

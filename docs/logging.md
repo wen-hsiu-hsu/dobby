@@ -37,8 +37,8 @@
 列表裡每張卡片顯示：狀態圓點（綠/黃/紅）、種類標籤、標題、時間、使用者顯示名稱與 userId（有才顯示，預設遮蔽，見下方）、內容預覽、來源、總耗時、以及重試次數/失敗種類的小標記（如果有）。
 
 - **標題**：訊息類事件用 `Processing event detail`（debug 層）解析出的指令/對話文字加引號；加入事件顯示事件類型；排程/系統事件用它自己第一筆摘要 log 的訊息名稱當標題。
-- **來源**：訊息類事件顯示群組／多人聊天室／1 對 1；排程顯示「排程 · cron」；系統顯示「HTTP · POST /webhook」。
-- **來自**（詳情頁欄位）：指令類事件顯示 `Routing command` 的 `command.type`（debug 層才有，否則顯示「（未知，需要 LOG_LEVEL=debug）」）；對話顯示「自動回覆（非指令）」；加入顯示事件類型（`join`/`memberJoined`）；排程顯示排程檔案的短名稱（`weekly-push`/`display-name-update`，靠比對已知的摘要 log 訊息辨認，猜不到就顯示「排程作業」）；系統顯示「index.ts 錯誤處理」。
+- **來源**：訊息類事件顯示群組／多人聊天室／1 對 1；排程顯示「排程 · cron」；系統事件依訊息各自顯示（對照 `src/routes/logs.ts` 的 `SYSTEM_EVENT_INFO`）：webhook 簽章驗證失敗跟批次提示是「HTTP · POST /webhook」，R2 未設定的啟動提示是「啟動 · log-upload.ts」，未知訊息退回「HTTP · POST /webhook」（沒有 reqId 的訊息目前多半來自 HTTP 層）。
+- **來自**（詳情頁欄位）：指令類事件顯示 `Routing command` 的 `command.type`（debug 層才有，否則顯示「（未知，需要 LOG_LEVEL=debug）」）；對話顯示「自動回覆（非指令）」；加入顯示事件類型（`join`/`memberJoined`）；排程顯示排程檔案的短名稱（`weekly-push`/`display-name-update`，靠比對已知的摘要 log 訊息辨認，猜不到就顯示「排程作業」）；系統事件依訊息顯示各自的文案（對照 `src/routes/logs.ts` 的 `SYSTEM_EVENT_INFO`，例如簽章驗證失敗是「index.ts 錯誤處理」、批次提示是 `webhook.ts`、R2 未設定提示是 `log-upload.ts`），未知訊息顯示「（未知系統來源）」。
 - **狀態**（完成／完成（有降級）／警告／失敗）：見下一節。
 
 ## 狀態判定：完成／降級／警告／失敗
@@ -103,7 +103,7 @@ LINE 回覆/推播的訊息全文，以及 userId 這類身分識別資訊，比
 
 Header 的 LOG_LEVEL 徽章旁邊還有一個「R2 備份」徽章，顯示 log 檔案同步到 Cloudflare R2 的狀態（背景說明見 `docs/overview.md`「日誌」小節、`docs/adr/0006-log-r2-sync-is-periodic-full-directory-not-rotation-hook.md`）。三種語意：
 
-- 灰色「R2 備份：未啟用」或「R2 備份：尚未同步」——功能沒開，或開了但還沒跑過第一次。沒開時完全不排程同步，只在啟動時記一行 debug `R2 not configured, log sync disabled`（沒有 reqId，所以在事件列表是一筆「系統」事件，「來自」顯示 `log-upload.ts`，非錯誤）。
+- 灰色「R2 備份：未啟用」或「R2 備份：尚未同步」——功能沒開，或開了但還沒跑過第一次。沒開時完全不排程同步，只在啟動時記一行 debug `R2 not configured, log sync disabled`（沒有 reqId，所以在事件列表是一筆「系統」事件，「來自」顯示 `log-upload.ts`、「來源」顯示「啟動 · log-upload.ts」，非錯誤）。因為是 debug 層，只有正式環境＋`LOG_LEVEL=debug` 時才會出現在 /logs；預設 `LOG_LEVEL=info` 或本機開發環境（不寫 log 檔）都看不到這筆事件。
 - 綠色「R2 備份 · `<時間>` 成功」——最近一次同步成功。同步只會上傳有變動的檔案，一整輪所有檔案都沒變動、實際沒傳任何檔案也算成功，所以閒置時時間仍會持續更新。
 - 琥珀色「R2 備份 · `<時間>` 失敗，等待下次重試」——最近一次同步失敗，滑鼠 hover 可以看到簡短的失敗原因；不需要手動處理，下一次週期性同步（或下次 graceful shutdown）會自動重試。
 
@@ -117,7 +117,7 @@ Notion API 回應 429（rate limit）時程式會自動重試，同一次呼叫�
 
 事件分組底層是 `request-context.ts` 的 `runWithContext`：同一次事件處理過程中所有 log 都會自動帶上同一個 `reqId`（見 `docs/architecture.md` 的「Request Correlation ID」小節）。`weekly-push.ts`/`display-name-update.ts` 這兩個排程也各自用 `runWithContext` 包住整次執行，所以每次排程執行也會有自己專屬的 reqId、在 `/logs` 頁面上變成一個獨立的「排程」事件，不會跟其他次執行、或其他排程的 log 混在同一組。
 
-完全沒有 reqId 的 log 分兩種處理：伺服器生命週期訊息（`Server started`/`Received shutdown signal, closing server`/`Server closed, exiting`/`Graceful shutdown timed out, forcing exit`）會被拼成下面說的「服務重啟」分隔線，其餘的（目前只有 webhook 簽章驗證失敗）每一筆各自獨立變成一個「系統」事件，不會因為都沒有 reqId 就被合併成同一筆。
+完全沒有 reqId 的 log 分兩種處理：伺服器生命週期訊息（`Server started`/`Received shutdown signal, closing server`/`Server closed, exiting`/`Graceful shutdown timed out, forcing exit`）會被拼成下面說的「服務重啟」分隔線，其餘的（目前有 webhook 簽章驗證失敗、webhook 一次收到多筆事件、R2 未設定的啟動提示三種，見上方分類表）每一筆各自獨立變成一個「系統」事件，不會因為都沒有 reqId 就被合併成同一筆。
 
 ## 服務重啟分隔線
 
