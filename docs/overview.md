@@ -86,7 +86,7 @@ Pi 上另外跑了一套通用的監控 stack（跟 Cloudflare Tunnel、pi-deplo
 
 ### 日誌
 
-啟動後日誌會寫入 `logs/` 資料夾，每日輪替，自動保留最近 7 天（cutoff 以 UTC 為基準計算，不受容器時區設定影響——即使之後把 TZ 設成 Asia/Taipei 也不會偏移刪除邊界）。開發模式下同時輸出至 console（pino-pretty 格式）。`logs/` 的實際路徑固定錨定在專案根目錄（`src/index.ts` 用 `process.argv[1]` 算出，往下傳給需要的模組），不會受到啟動當下的工作目錄影響，見 `docs/adr/0003-log-dir-anchored-via-argv.md`。`/logs` 這個路由（見上方端點表）需要 `LOGS_ACCESS_TOKEN` 驗證，頁面顯示時間是台北時間，不是 UTC。
+正式環境（`NODE_ENV=production`）啟動後日誌會寫入 `logs/` 資料夾，每日輪替，自動保留最近 7 天（cutoff 以 UTC 為基準計算，不受容器時區設定影響——即使之後把 TZ 設成 Asia/Taipei 也不會偏移刪除邊界）。開發模式只輸出到 console（pino-pretty 格式），不寫 log 檔——`logger.ts` 的 `initLogger()` 在非正式環境直接 return，所以本機的 `logs/` 跟 `/logs` 頁面都會是空的。`logs/` 的實際路徑固定錨定在專案根目錄（`src/index.ts` 用 `process.argv[1]` 算出，往下傳給需要的模組），不會受到啟動當下的工作目錄影響，見 `docs/adr/0003-log-dir-anchored-via-argv.md`。`/logs` 這個路由（見上方端點表）需要 `LOGS_ACCESS_TOKEN` 驗證，頁面顯示時間是台北時間，不是 UTC。
 
 上述 7 天保留只管得到 app 自己寫進 `logs/` 的檔案。`logger.ts` 同時用 `multistream` 把同一份 log 輸出到 `process.stdout`，這份輸出會被 Docker 的 `json-file` log driver 另外存一份，**預設沒有大小上限**，配合 `restart: unless-stopped` 長期常駐不重啟，理論上會在 host 磁碟上無限長大——尤其是在 Pi 這類儲存空間有限的機器上風險較高。`docker-compose.yml` 已加上 `logging.options`（`max-size: 10m` / `max-file: 3`，共上限約 30MB）避免這個問題，這層限制跟 app 自己的 7 天保留機制是分開的兩件事，改動其中一邊不會影響另一邊。
 

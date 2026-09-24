@@ -31,22 +31,7 @@ docker compose up -d
 
 ## 環境變數
 
-複製 `.env.example` 並填入以下值：
-
-| 變數 | 說明 |
-|------|------|
-| `LINE_CHANNEL_SECRET` | LINE channel secret |
-| `LINE_CHANNEL_ACCESS_TOKEN` | LINE channel access token |
-| `NOTION_API_KEY` | Notion Integration token |
-| `NOTION_DB_USERS` | USERS 資料庫 ID |
-| `NOTION_DB_CALENDAR` | 行事曆資料庫 ID |
-| `NOTION_DB_PEOPLE` | 人員清單資料庫 ID |
-| `NOTION_DB_SEASON` | 季租承租紀錄資料庫 ID |
-| `NOTION_DB_ANNOUNCEMENT` | 所有公告資料庫 ID |
-| `PORT` | 伺服器 port（預設 3000） |
-| `NODE_ENV` | `development` 或 `production` |
-| `DOBBY_GROUP_IDS` | 每週打球推播訊息的目標 LINE 群組 ID，選填，可用逗號分隔多個群組 ID——沒設定的話該排程會跳過並記錄一行 log |
-| `LOG_LEVEL` | pino log level（預設 `info`），臨時診斷問題可改 `debug` |
+複製 `.env.example` 為 `.env` 後填入各項值。完整清單（哪些必填、預設值與用途）統一維護在 [`docs/development.md` 的環境變數表](docs/development.md#環境變數)，這裡不重複列出，避免兩份表不同步。
 
 ## 常用指令
 

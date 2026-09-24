@@ -492,7 +492,6 @@ function groupOrigin(group: FlowGroup, kind: EventKind): string {
   }
   if (kind === 'chat') return '自動回覆（非指令）';
   if (kind === 'join') return String(group.start?.['type'] ?? 'memberJoined');
-  if (kind === 'system') return 'index.ts 錯誤處理';
   // schedule
   const msgs = new Set(flattenEntries(group).map((e) => String(e.msg ?? '')));
   for (const [marker, slug] of SCHEDULE_ORIGIN_MARKERS) {

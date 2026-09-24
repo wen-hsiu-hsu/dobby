@@ -11,7 +11,7 @@
 - **全部**：所有事件，由新到舊排列。
 - **需要注意**：只顯示狀態不是「完成」的事件（降級／警告／失敗）。
 - **訊息**：LINE 事件觸發的事件——指令、一般對話（自動回覆）、成員加入都算在內。
-- **排程**：排程觸發的事件（`weekly-push`/`display-name-update`，見下方「事件種類」）。
+- **排程**：排程觸發的事件（`weekly-push`/`display-name-update`，以及有寫出 log 的 R2 同步，見下方「事件種類」）。
 - **系統**：跟任何一次事件處理都無關的系統層級訊息（例如 webhook 簽章驗證失敗、log-cleanup 刪除舊 log 檔、背景作業 `.catch` 記下的錯誤）。
 
 搜尋框比對的是事件標題、預覽內容、`reqId`、使用者顯示名稱/userId、「來自」欄位，不是逐行比對 log 訊息文字。
@@ -27,7 +27,7 @@
 | 指令 | 有 `Processing event`（`type: 'message'`），且底下有 `Routing command` 或 `Message looks like command but failed to parse`（兩者都只會從 `isCommand(text)` 判定為真的分支發出，即使後者代表解析失敗也一樣算指令） | 訊息 |
 | 對話 | 有 `Processing event`（`type: 'message'`），但不是指令——通常是自動回覆（`services/auto-reply.ts`，靜態 JSON） | 訊息 |
 | 加入 | `Processing event` 的 `type` 是 `join` 或 `memberJoined` | 訊息 |
-| 排程 | 沒有 `Processing event`，但有 `reqId`——`weekly-push.ts`/`display-name-update.ts` 各自用 `runWithContext` 包住整次執行（見下方「排程事件的 reqId」） | 排程 |
+| 排程 | 沒有 `Processing event`，但有 `reqId`——`weekly-push.ts`/`display-name-update.ts` 各自用 `runWithContext` 包住整次執行；R2 同步的 `uploadAllLogs()`（`log-upload.ts`，含 graceful shutdown 那次）也一樣（見下方「排程事件的 reqId」） | 排程 |
 | 系統 | 完全沒有 `reqId`，且不是伺服器生命週期訊息（見下方「服務重啟分隔線」；兩個排程啟動時各記一次的 `... scheduler started` 也算生命週期訊息，不會變成卡片）。有專屬文案的有三種：LINE webhook 簽章驗證失敗（`index.ts` 的全域錯誤處理，發生在事件處理、也就是 reqId 產生之前，真正的異常）、`webhook.ts` 一次收到兩筆以上事件時的批次提示（正常、預期內的情況，不是錯誤）、`log-upload.ts` 在 R2 未設定時於啟動時記一次的提示（debug 層，非錯誤）。其他沒有 reqId 的訊息——例如 `log-cleanup.ts` 的 `Deleted old log file`、錯誤處理的 `.catch` 記下的 `Log cleanup run failed`/`R2 log sync run failed`/`R2 log sync on shutdown failed`/`Error processing events`、`index.ts` 的 `Unhandled request error`——會退回通用文案：「來自」顯示「（未知系統來源）」，「來源」顯示中性的「未知」 | 系統 |
 
 **指令 vs 對話只有在 `LOG_LEVEL=debug` 才能準確判斷**——`Routing command`/`Auto-reply lookup`/`Skipping auto-reply for admin` 全部是 debug 層。`LOG_LEVEL=info` 下這些線都不存在，程式碼退而用「這個流程有沒有 Notion API 呼叫」猜測（指令通常會查/寫 Notion，單純聊天不會），可能誤判，不是決定性的依據。
@@ -116,6 +116,8 @@ Notion API 回應 429（rate limit）時程式會自動重試，同一次呼叫�
 ## reqId 分組／排程事件的 reqId
 
 事件分組底層是 `request-context.ts` 的 `runWithContext`：同一次事件處理過程中所有 log 都會自動帶上同一個 `reqId`（見 `docs/architecture.md` 的「Request Correlation ID」小節）。`weekly-push.ts`/`display-name-update.ts` 這兩個排程也各自用 `runWithContext` 包住整次執行，所以每次排程執行也會有自己專屬的 reqId、在 `/logs` 頁面上變成一個獨立的「排程」事件，不會跟其他次執行、或其他排程的 log 混在同一組。
+
+R2 同步的 `uploadAllLogs()`（`src/utils/log-upload.ts`）也包在 `runWithContext` 裡，週期性同步跟 graceful shutdown 前多跑的那一次都一樣。只要那一輪有寫出 log——失敗時的 warn/error（例如 `Failed to upload log file to R2, skipping`、`R2 log sync failed: ...`），或 `LOG_LEVEL=debug` 下每輪都會記的 `R2 log sync complete`——就會變成一個「排程」事件：來源顯示「排程 · cron」，「來自」顯示通用的「排程作業」（`SCHEDULE_ORIGIN_MARKERS` 沒有收錄 R2 的訊息，所以認不出是 `log-upload`）。預設 `LOG_LEVEL=info` 且同步成功時這一輪不寫任何 log，不會出現卡片。
 
 完全沒有 reqId 的 log 分兩種處理：伺服器生命週期訊息（`Server started`/`Received shutdown signal, closing server`/`Server closed, exiting`/`Graceful shutdown timed out, forcing exit`/`Weekly push scheduler started`/`Display name update scheduler started`）不會列成事件，其中重啟相關的會被拼成下面說的「服務重啟」分隔線；其餘的每一筆各自獨立變成一個「系統」事件，不會因為都沒有 reqId 就被合併成同一筆——有專屬文案的是 webhook 簽章驗證失敗、webhook 一次收到多筆事件、R2 未設定的啟動提示三種，其他（log-cleanup、錯誤處理的 `.catch` 等）退回通用文案，見上方分類表。
 
