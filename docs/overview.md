@@ -72,6 +72,14 @@ docker compose down
 
 `docker-compose.dev.yml`（本地開發用）**刻意**維持 `"3000:3000"` 寫死，不吃這個機制——本地開發不需要換 port 的彈性，且裡面 ngrok tunnel 那行 `command` 也寫死指向 `app:3000`，兩處要嘛一起吃變數、要嘛都不動，目前選擇都不動，不是漏改。
 
+### 監控
+
+Pi 上另外跑了一套通用的監控 stack（跟 Cloudflare Tunnel、pi-deployer 一樣，不屬於這個 repo，是 Pi 上所有專案共用的基礎設施）：**Grafana**（UI，data source 只接了 Prometheus）+ **Prometheus**（`http://localhost:9090`，Pi 上本機存取）+ **node-exporter**（host 層級指標）+ **cAdvisor**（per-container 指標）。dobby 的 container 不需要另外設定什麼就會被 cAdvisor 自動抓到，Prometheus 對應的 job 名稱是 `cadvisor`，container 名稱是 `dobby-app-1`（沿用 docker-compose 的 project 名稱 `dobby` + service 名稱 `app`）。
+
+查 dobby 資源用量時，container 記憶體要查 `container_memory_working_set_bytes{name="dobby-app-1"}`，不要用 `container_memory_usage_bytes`——後者在 cgroup v2 下常常讀不到值。
+
+**Pi 韌體預設關閉了 memory cgroup controller，會讓 `docker stats`／cAdvisor 的記憶體用量全部顯示 `0`（2026-09-24 已修復）。** 根因是 Raspberry Pi 的 bootloader 組出最終 `/proc/cmdline` 時，會在使用者可編輯的 `/boot/firmware/cmdline.txt`（Bookworm 之後的路徑；`/boot/cmdline.txt` 只是提示已搬家的殘留檔，編輯無效）**前面**自動注入板卡專屬參數，其中包含 `cgroup_disable=memory`，導致 `/sys/fs/cgroup/cgroup.controllers` 裡沒有 `memory` 這個 controller。這跟 dobby 本身無關，是**整台 Pi 系統層級**的問題，會影響 Pi 上所有 container 的記憶體監控。修法是在 `/boot/firmware/cmdline.txt` 檔案最後面（維持整份檔案單行）加上 `cgroup_enable=memory cgroup_memory=1` 後重開機——kernel 對 cgroup 相關參數是後面設定覆蓋前面，所以即使前面已經有 `cgroup_disable=memory`，後面再補一次 `cgroup_enable=memory` 一樣會生效。如果之後系統更新後又發現記憶體全是 `0`，優先懷疑 `cmdline.txt` 被覆蓋、這個參數又不見了。
+
 ### Zeabur
 
 專案使用 Docker multi-stage build，理論上可以直接部署至 Zeabur（把 `.env` 的變數設成 Zeabur 的環境變數即可），但**目前實際上沒有這樣用**——如果之後改用 Zeabur 或其他 PaaS，切記那類平台通常沒有持久化本機磁碟，`docker-compose.yml` 宣告的 volume 不會被沿用，需要另外在平台上設定持久化儲存，否則容器重啟會讓 `logs/` 整批消失。
