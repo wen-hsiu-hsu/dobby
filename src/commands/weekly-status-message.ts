@@ -7,7 +7,7 @@ import type { EventOccupancy } from '../services/notion/event-occupancy.js';
  * just triggered differently.
  */
 export async function buildWeeklyStatusMessage(occupancy: EventOccupancy, dateStr: string): Promise<string> {
-  const { event, season, totalSlots, presentSeasonMembers } = occupancy;
+  const { event, season, courts, totalSlots, presentSeasonMembers } = occupancy;
 
   if (event.isPaused) {
     return [`${dateStr} 不能到請喊聲`, `⛔ 本週活動暫停`].join('\n');
@@ -29,7 +29,7 @@ export async function buildWeeklyStatusMessage(occupancy: EventOccupancy, dateSt
     guestLines,
     ``,
     `請假：${absenteeText}`,
-    `場地：${season.courts} 面`,
+    `場地：${courts} 面${courts !== season.courts ? '（本週調整）' : ''}`,
     `應到：${presentSeasonMembers} 人`,
   ].join('\n');
 }

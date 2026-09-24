@@ -15,6 +15,7 @@ function makeCalendarEvent(overrides: Partial<CalendarEvent> = {}): CalendarEven
     absentees: [],
     guests: [],
     isPaused: false,
+    courts: null,
     ...overrides,
   };
 }
@@ -52,6 +53,7 @@ function makeOccupancy(overrides: Partial<EventOccupancy> = {}): EventOccupancy 
   return {
     event,
     season,
+    courts: season.courts,
     totalSlots: 4,
     remainingSlots: 4,
     totalPeople: 0,
@@ -117,15 +119,30 @@ describe('buildWeeklyStatusMessage', () => {
     expect(text).toContain('3. C');
   });
 
-  it('reflects occupancy.season.courts directly in the 場地 line', async () => {
+  it('shows the court count without a hint when it matches the season default', async () => {
     const occupancy = makeOccupancy({
       season: makeSeasonRecord({ courts: 5 }),
+      courts: 5,
       totalSlots: 33,
       presentSeasonMembers: 2,
     });
 
     const text = await buildWeeklyStatusMessage(occupancy, '2026-09-26');
 
-    expect(text).toContain('場地：5 面');
+    expect(text.split('\n')).toContain('場地：5 面');
+    expect(text).not.toContain('本週調整');
+  });
+
+  it('shows occupancy.courts with a 本週調整 hint when the calendar overrides the season default', async () => {
+    const occupancy = makeOccupancy({
+      event: makeCalendarEvent({ courts: 1 }),
+      season: makeSeasonRecord({ courts: 2 }),
+      courts: 1,
+      totalSlots: 5,
+    });
+
+    const text = await buildWeeklyStatusMessage(occupancy, '2026-09-26');
+
+    expect(text.split('\n')).toContain('場地：1 面（本週調整）');
   });
 });

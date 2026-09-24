@@ -20,6 +20,10 @@
         "類型": {
           "type": "select",
           "select": null
+        },
+        "場地數": {
+          "type": "number",
+          "number": null
         }
       }
     }

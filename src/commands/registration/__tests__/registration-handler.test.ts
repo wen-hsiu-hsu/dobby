@@ -51,6 +51,7 @@ function baseCalendarEvent(overrides: Partial<Awaited<ReturnType<typeof calendar
     absentees: [],
     guests: [],
     isPaused: false,
+    courts: null,
     ...overrides,
   } as any;
 }
@@ -111,6 +112,25 @@ describe('handleRegistration', () => {
     );
     const text = replyText();
     expect(text).toContain('報名成功 ✅（名額已達上限，僅報名 6 位，您原本要求 10 位）');
+  });
+
+  it('caps +N against the calendar 場地數 when set, and shows the same total in the reply', async () => {
+    // calendar courts(1) * 7 - members(1) + absentees(0) = 6 slots;
+    // the season default (2 courts) would have allowed 13 — must not be used for the gate
+    vi.mocked(resolveTarget).mockResolvedValue({ personPageId: 'person-2', displayName: 'Bob' });
+    vi.mocked(seasonRepo.findByName).mockResolvedValue(baseSeason({ members: ['person-1'], courts: 2 }));
+    vi.mocked(calendarRepo.findByDate).mockResolvedValue(baseCalendarEvent({ courts: 1 }));
+    const event = makeEvent('@Dobby +10');
+
+    await handleRegistration(event, 10, false);
+
+    expect(calendarRepo.updateGuests).toHaveBeenCalledWith(
+      'evt-1',
+      ['Bob', 'Bob 2', 'Bob 3', 'Bob 4', 'Bob 5', 'Bob 6'],
+    );
+    const text = replyText();
+    expect(text).toContain('僅報名 6 位');
+    expect(text).toContain('零打名額 6 人');
   });
 
   it('lets an admin register on behalf of another target even though target.isSelf is false', async () => {

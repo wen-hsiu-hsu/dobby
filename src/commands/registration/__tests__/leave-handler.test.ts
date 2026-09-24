@@ -47,6 +47,7 @@ beforeEach(() => {
     absentees: [],
     guests: [],
     isPaused: false,
+    courts: null,
   });
   vi.mocked(peopleRepo.findByPageIds).mockImplementation(async (ids: string[]) =>
     ids.map((id) => ({
@@ -95,6 +96,7 @@ describe('handleLeave', () => {
       absentees: ['person-1'],
       guests: [],
       isPaused: false,
+      courts: null,
     });
 
     await handleLeave(event, true, false);
@@ -109,6 +111,25 @@ describe('handleLeave', () => {
     expect(text).toContain('零打名額 13 人');
   });
 
+  it('recomputes slots after cancelling leave with the calendar 場地數, not the season default', async () => {
+    vi.mocked(calendarRepo.findByDate).mockResolvedValue({
+      pageId: 'evt-1',
+      date: '2026-05-09',
+      absentees: ['person-1'],
+      guests: [],
+      isPaused: false,
+      courts: 1,
+    });
+
+    await handleLeave(event, true, false);
+
+    const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
+    const text = (messages[0] as { text: string }).text;
+    expect(text).toContain('銷假成功 ✅');
+    // calendar courts(1) * 7 - members(1) + absentees(0, after cancel) = 6 (season default would give 13)
+    expect(text).toContain('零打名額 6 人');
+  });
+
   it('replies with full status + reason when already on leave (no Notion write)', async () => {
     vi.mocked(calendarRepo.findByDate).mockResolvedValue({
       pageId: 'evt-1',
@@ -116,6 +137,7 @@ describe('handleLeave', () => {
       absentees: ['person-1'],
       guests: [],
       isPaused: false,
+      courts: null,
     });
 
     await handleLeave(event, false, false);
@@ -166,6 +188,7 @@ describe('handleLeave', () => {
       absentees: ['person-1'],
       guests: [],
       isPaused: false,
+      courts: null,
     });
 
     await handleLeave(event, true, false);
@@ -183,6 +206,7 @@ describe('handleLeave', () => {
       absentees: ['person-1'],
       guests: [],
       isPaused: false,
+      courts: null,
     });
 
     await handleLeave(event, false, false);

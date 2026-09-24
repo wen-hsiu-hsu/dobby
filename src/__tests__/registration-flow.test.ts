@@ -201,7 +201,7 @@ describe('calculateAddCapacity', () => {
     const { calculateAddCapacity } = await import(
       '../commands/registration/capacity-calculator.js'
     );
-    const event = { pageId: 'evt1', date: '2026-05-09', absentees: [], guests: [], isPaused: false };
+    const event = { pageId: 'evt1', date: '2026-05-09', absentees: [], guests: [], isPaused: false, courts: null };
     const season = { members: ['p1', 'p2', 'p3'], courts: 2, pageId: 's1', name: '2026-Q2', guestFee: 200 };
 
     const result = calculateAddCapacity(event, season, 'Alice', 1, false);

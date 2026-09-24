@@ -34,6 +34,7 @@ function makeCalendarEvent(overrides: Partial<CalendarEvent> = {}): CalendarEven
     absentees: [],
     guests: [],
     isPaused: false,
+    courts: null,
     ...overrides,
   };
 }

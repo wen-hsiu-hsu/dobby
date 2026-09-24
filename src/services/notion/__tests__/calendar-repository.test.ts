@@ -1,8 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { notionPost, notionPatch, notionGet, notionGetAllResults } from '../notion-fetch.js';
 import { findByDate, findByPageIds, updateAbsentees } from '../calendar-repository.js';
+import { logger } from '../../../utils/logger.js';
 
 vi.mock('../notion-fetch.js');
+vi.mock('../../../utils/logger.js', () => ({
+  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
 
 const notionPostMock = vi.mocked(notionPost);
 const notionPatchMock = vi.mocked(notionPatch);
@@ -36,6 +40,7 @@ describe('calendar-repository', () => {
     notionPatchMock.mockReset();
     notionGetMock.mockReset();
     notionGetAllResultsMock.mockReset();
+    vi.mocked(logger.warn).mockClear();
   });
 
   describe('findByDate', () => {
@@ -81,6 +86,50 @@ describe('calendar-repository', () => {
       const event = await findByDate('2026-01-01');
 
       expect(event).toBeNull();
+    });
+
+    it('reads 場地數 as the week-specific court count', async () => {
+      notionPostMock.mockResolvedValue({
+        results: [makePage(baseProps({ 場地數: { type: 'number', number: 1 } }))],
+      });
+
+      const event = await findByDate('2026-05-09');
+
+      expect(event?.courts).toBe(1);
+    });
+
+    it('returns courts=null when 場地數 is empty or the property is missing', async () => {
+      notionPostMock.mockResolvedValueOnce({
+        results: [makePage(baseProps({ 場地數: { type: 'number', number: null } }))],
+      });
+      notionPostMock.mockResolvedValueOnce({ results: [makePage(baseProps())] });
+
+      expect((await findByDate('2026-05-09'))?.courts).toBeNull();
+      expect((await findByDate('2026-05-09'))?.courts).toBeNull();
+    });
+
+    it.each([0, -1, 1.5])('treats non-positive-integer 場地數 (%s) as unset and warns', async (value) => {
+      notionPostMock.mockResolvedValue({
+        results: [makePage(baseProps({ 場地數: { type: 'number', number: value } }))],
+      });
+
+      const event = await findByDate('2026-05-09');
+
+      expect(event?.courts).toBeNull();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ calendarPageId: 'calendar-page-1', field: '場地數', value }),
+        expect.any(String),
+      );
+    });
+
+    it('does not warn when 場地數 is simply left empty', async () => {
+      notionPostMock.mockResolvedValue({
+        results: [makePage(baseProps({ 場地數: { type: 'number', number: null } }))],
+      });
+
+      await findByDate('2026-05-09');
+
+      expect(logger.warn).not.toHaveBeenCalled();
     });
   });
 

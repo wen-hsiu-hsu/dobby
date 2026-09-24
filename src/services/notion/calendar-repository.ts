@@ -3,14 +3,32 @@ import { notionPost, notionPatch, notionGet } from './notion-fetch.js';
 import {
   getDate,
   getMultiSelect,
+  getNumber,
   getSelect,
   setRelation,
   setMultiSelect,
 } from './property-helpers.js';
 import { getFullRelation } from './paginated-relation.js';
 import { withPurpose } from '../../utils/request-context.js';
+import { logger } from '../../utils/logger.js';
 import type { CalendarEvent } from '../../types/notion-models.js';
 import type { PageObjectResponse } from '@notionhq/client/build/src/api-endpoints.js';
+
+// 場地數只接受正整數；0／負數／小數視為未填（null），讓容量計算 fallback 到當季預設。
+// 「本週不打」應該用 類型=打球暫停 表示，不是場地數填 0。
+function readCourts(page: PageObjectResponse): number | null {
+  const p = page.properties;
+  const courts = getNumber(p, '場地數');
+  if (courts === null) return null;
+  if (!Number.isInteger(courts) || courts <= 0) {
+    logger.warn(
+      { calendarPageId: page.id, date: getDate(p, '時間'), field: '場地數', value: courts },
+      '行事曆場地數不是正整數，改用當季預設場地數',
+    );
+    return null;
+  }
+  return courts;
+}
 
 async function pageToEvent(page: PageObjectResponse): Promise<CalendarEvent> {
   const p = page.properties;
@@ -20,6 +38,7 @@ async function pageToEvent(page: PageObjectResponse): Promise<CalendarEvent> {
     absentees: await getFullRelation(p, '請假人', page.id),
     guests: getMultiSelect(p, '零打'),
     isPaused: getSelect(p, '類型') === '打球暫停',
+    courts: readCourts(page),
   };
 }
 

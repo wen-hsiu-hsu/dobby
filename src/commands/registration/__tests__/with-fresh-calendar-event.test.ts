@@ -16,6 +16,7 @@ const calEvent = {
   absentees: [],
   guests: [],
   isPaused: false,
+  courts: null,
 };
 
 beforeEach(() => {

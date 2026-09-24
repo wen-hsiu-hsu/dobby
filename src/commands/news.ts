@@ -43,6 +43,7 @@ function buildSeasonPlaceholders(
     PRICE_PER_PERSON_FOR_SEASON: String(pricePerPersonForSeason),
     WEEK_COUNTS: String(season.weekCounts),
     PRICE_PER_PERSON_FOR_ONCE: String(season.guestFee),
+    // 季公告：刻意用當季預設場地數，不套用行事曆單週調整（resolveCourts），見 docs/commands.md
     COURT_COUNT: String(season.courts),
     TOTAL_PRICE: String(season.totalPrice ?? 0),
     LIST_ALL_DATES: listAllDates,

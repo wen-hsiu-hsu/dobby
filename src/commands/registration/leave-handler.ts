@@ -49,7 +49,7 @@ export async function handleLeave(
     event.replyToken,
     nextSaturday,
     'Leave handler',
-    () => getEventOccupancy(nextSaturday, undefined, activeSeason),
+    () => getEventOccupancy(nextSaturday, activeSeason),
     async (occupancy) => {
       const { event: freshEvent, season: freshSeason } = occupancy;
       const isCurrentlyAbsent = freshEvent.absentees.includes(resolved.personPageId);
@@ -102,7 +102,7 @@ export async function handleLeave(
         'Leave status updated detail'
       );
 
-      const newTotalSlots = calculateTotalSlots({ absentees: newAbsentees }, freshSeason);
+      const newTotalSlots = calculateTotalSlots({ absentees: newAbsentees, courts: freshEvent.courts }, freshSeason);
       const newPresentSeasonMembers = freshSeason.members.length - newAbsentees.length;
       const replyText = await buildEventStatusMessage({
         date: nextSaturday,

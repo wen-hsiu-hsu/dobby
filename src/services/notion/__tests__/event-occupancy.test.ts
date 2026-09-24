@@ -13,6 +13,7 @@ const event = {
   absentees: ['p-absent'],
   guests: ['Guest 1'],
   isPaused: false,
+  courts: null,
 };
 
 const season = {
@@ -68,25 +69,36 @@ describe('getEventOccupancy', () => {
   });
 
   it('reuses a caller-provided season instead of re-querying Notion', async () => {
-    const occupancy = await getEventOccupancy('2026-05-09', undefined, season);
+    const occupancy = await getEventOccupancy('2026-05-09', season);
 
     expect(seasonRepo.findByName).not.toHaveBeenCalled();
     expect(occupancy?.season).toBe(season);
   });
 
   it('returns null when a caller-provided season is null, without querying Notion', async () => {
-    expect(await getEventOccupancy('2026-05-09', undefined, null)).toBeNull();
+    expect(await getEventOccupancy('2026-05-09', null)).toBeNull();
     expect(seasonRepo.findByName).not.toHaveBeenCalled();
   });
 
-  it('applies courtsOverride to slots but not attendance', async () => {
-    const occupancy = await getEventOccupancy('2026-05-09', 5);
+  it('falls back to the season court count when the calendar 場地數 is unset', async () => {
+    const occupancy = await getEventOccupancy('2026-05-09');
 
+    expect(occupancy?.courts).toBe(2);
+  });
+
+  it('uses the calendar 場地數 over the season default for slots, but not attendance', async () => {
+    vi.mocked(calendarRepo.findByDate).mockResolvedValue({ ...event, courts: 5 });
+
+    const occupancy = await getEventOccupancy('2026-05-09');
+
+    expect(occupancy?.courts).toBe(5);
     // totalSlots = 5*7 - 3 + 1 = 33
     expect(occupancy?.totalSlots).toBe(33);
     expect(occupancy?.remainingSlots).toBe(32);
     // attendance unaffected by court count
     expect(occupancy?.presentSeasonMembers).toBe(2);
     expect(occupancy?.totalPeople).toBe(3);
+    // season record itself is left untouched — the default stays visible to callers
+    expect(occupancy?.season.courts).toBe(2);
   });
 });

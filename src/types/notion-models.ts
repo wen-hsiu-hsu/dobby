@@ -15,6 +15,7 @@ export interface CalendarEvent {
   absentees: string[]; // relation pageIds of People (請假人)
   guests: string[]; // multi_select names (零打)
   isPaused: boolean; // 類型 === '打球暫停'
+  courts: number | null; // 場地數 — 本週場地數，null 表示未填（改用當季預設 SeasonRecord.courts）
 }
 
 export interface SeasonRecord {

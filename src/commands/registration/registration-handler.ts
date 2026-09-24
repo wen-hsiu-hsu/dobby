@@ -53,7 +53,7 @@ export async function handleRegistration(
     event.replyToken,
     nextSaturday,
     'Registration handler',
-    () => getEventOccupancy(nextSaturday, undefined, activeSeason),
+    () => getEventOccupancy(nextSaturday, activeSeason),
     async (occupancy) => {
       const { event: freshEvent, season: freshSeason } = occupancy;
 

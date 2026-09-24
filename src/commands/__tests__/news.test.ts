@@ -42,8 +42,8 @@ beforeEach(() => {
   ]);
   // Returned out of order on purpose — handler must sort by date before rendering.
   vi.mocked(calendarRepo.findByPageIds).mockResolvedValue([
-    { pageId: 'cal-2', date: '2026-10-03T20:00:00.000+08:00', absentees: [], guests: [], isPaused: false },
-    { pageId: 'cal-1', date: '2026-09-26T20:00:00.000+08:00', absentees: [], guests: [], isPaused: false },
+    { pageId: 'cal-2', date: '2026-10-03T20:00:00.000+08:00', absentees: [], guests: [], isPaused: false, courts: null },
+    { pageId: 'cal-1', date: '2026-09-26T20:00:00.000+08:00', absentees: [], guests: [], isPaused: false, courts: null },
   ]);
   vi.mocked(announcementRepo.getBlocks).mockResolvedValue([
     paragraphBlock('{SEASON} {FROM_TO_MONTH}'),

@@ -108,7 +108,7 @@ describe('registration concurrency (real withMutex)', () => {
         resolveFetchStarted();
         await firstFetchGate;
       }
-      return { pageId: 'evt-1', date, absentees: [], guests: snapshot, isPaused: false };
+      return { pageId: 'evt-1', date, absentees: [], guests: snapshot, isPaused: false, courts: null };
     });
 
     vi.mocked(calendarRepo.updateGuests).mockImplementation(async (_pageId: string, newGuests: string[]) => {
@@ -169,9 +169,9 @@ describe('registration concurrency (real withMutex)', () => {
       if (date === DATE_A) {
         resolveFetchStartedA();
         await gateA;
-        return { pageId: 'evt-A', date, absentees: [], guests: [], isPaused: false };
+        return { pageId: 'evt-A', date, absentees: [], guests: [], isPaused: false, courts: null };
       }
-      return { pageId: 'evt-B', date, absentees: [], guests: [], isPaused: false };
+      return { pageId: 'evt-B', date, absentees: [], guests: [], isPaused: false, courts: null };
     });
     vi.mocked(calendarRepo.updateGuests).mockResolvedValue(undefined);
 

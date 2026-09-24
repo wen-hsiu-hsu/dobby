@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { calculateAddCapacity, calculateRemoveCapacity, calculateTotalSlots } from '../registration/capacity-calculator.js';
+import { calculateAddCapacity, calculateRemoveCapacity, calculateTotalSlots, resolveCourts } from '../registration/capacity-calculator.js';
 import type { CalendarEventData, SeasonData } from '../registration/capacity-calculator.js';
 
 vi.mock('../../utils/logger.js', () => ({
@@ -17,6 +17,7 @@ const baseEvent: CalendarEventData = {
   absentees: [],
   guests: [],
   isPaused: false,
+  courts: null,
 };
 
 // courts=2, members=3 → total capacity = 2×7 = 14, available = 14 - 3 + 0 - guests
@@ -327,5 +328,32 @@ describe('calculateTotalSlots', () => {
     // 2 courts × 7 = 14, minus 3 season members, plus 1 absentee = 12
     const event: CalendarEventData = { ...baseEvent, absentees: ['p4'] };
     expect(calculateTotalSlots(event, season)).toBe(12);
+  });
+
+  it('uses the calendar court count over the season default when set', () => {
+    // 1 court (calendar) × 7 = 7, minus 3 season members, plus 1 absentee = 5
+    const event: CalendarEventData = { ...baseEvent, absentees: ['p4'], courts: 1 };
+    expect(calculateTotalSlots(event, season)).toBe(5);
+  });
+});
+
+describe('resolveCourts', () => {
+  it('prefers the calendar court count', () => {
+    expect(resolveCourts({ courts: 3 }, { courts: 2 })).toBe(3);
+  });
+
+  it('falls back to the season default when the calendar court count is unset', () => {
+    expect(resolveCourts({ courts: null }, { courts: 2 })).toBe(2);
+  });
+});
+
+describe('calculateAddCapacity with a calendar court override', () => {
+  it('caps a non-admin request against the calendar court count, not the season default', () => {
+    // 1 court (calendar) × 7 - 3 members + 0 absentees - 0 guests = 4 available
+    // (season default of 2 courts would have allowed 11)
+    const result = calculateAddCapacity({ ...baseEvent, courts: 1 }, season, 'Alice', 10, false);
+    expect(result.canAdd).toBe(true);
+    expect(result.cappedAt).toBe(4);
+    expect(result.newGuests).toHaveLength(4);
   });
 });

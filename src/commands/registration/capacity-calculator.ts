@@ -6,6 +6,7 @@ export interface CalendarEventData {
   absentees: string[];   // relation pageIds of People (請假人)
   guests: string[];      // multi_select names (零打)
   isPaused: boolean;     // 類型 === '打球暫停'
+  courts: number | null; // 場地數（本週），null 表示未填
 }
 
 export interface SeasonData {
@@ -22,9 +23,19 @@ export interface CapacityResult {
   cappedAt?: number;
 }
 
-export function calculateTotalSlots(event: Pick<CalendarEventData, 'absentees'>, seasonData: SeasonData): number {
+/**
+ * 本週實際採用的場地數：行事曆當週有填就用它，沒填才用當季預設。
+ * 所有會用到場地數的地方（名額計算、週報顯示）都必須經過這裡，不要直接讀 season.courts，
+ * 否則會出現「報名用行事曆場地數、銷假或顯示卻用季預設」的不一致。
+ * 唯一例外是 news 的 {COURT_COUNT}：那是季公告，刻意顯示當季預設。見 docs/adr/0007-calendar-courts-fallback-in-one-place.md。
+ */
+export function resolveCourts(event: Pick<CalendarEventData, 'courts'>, seasonData: Pick<SeasonData, 'courts'>): number {
+  return event.courts ?? seasonData.courts;
+}
+
+export function calculateTotalSlots(event: Pick<CalendarEventData, 'absentees' | 'courts'>, seasonData: SeasonData): number {
   const COURTS_DENSITY = 7;
-  return seasonData.courts * COURTS_DENSITY - seasonData.members.length + event.absentees.length;
+  return resolveCourts(event, seasonData) * COURTS_DENSITY - seasonData.members.length + event.absentees.length;
 }
 
 function escapeRegExp(value: string): string {
