@@ -18,6 +18,13 @@
 - Notion API 有 rate limit（~3 req/s），批次操作間要加 delay（參考 `schedulers/display-name-update.ts` 的 400ms）。
 - **不要用 `pushMessage`**，回覆一律用 `replyMessage`（含 replyToken 用盡等邊界情況也不要用 push 當 fallback）。唯一例外是既有的 `schedulers/weekly-push.ts` 週報推播，其他地方新增功能都不要引入新的 push 用法。
 
+## 開發流程
+
+- **TODO.md 項目完成後即刪除**：確認機制已落實且有對應文件記錄，直接從 `TODO.md` 移除該項目，不要留著打勾當紀錄（歷史脈絡交給 git commit / docs 保留）。
+- **功能等級變更完成後用 subagent 做 code review**：新增指令、新增/修改 repository 方法、修改報名/請假/容量計算等核心邏輯，都要透過 Agent 工具（或 `/code-review`）審查後才算完成；純文件修正、typo、單純補測試不在此限。
+- **功能確認完成後同步文件**：修正 `docs/` 對應文件（README 目錄表 + 相關 `docs/*.md`／ADR），避免產生新的文件/程式碼落差。
+- **派 subagent 前備妥背景知識**：prompt 需包含相關檔案路徑/行號、已排除的方案與原因、既有慣例限制，不要只給任務標題，避免 subagent 重新摸索或做錯方向。
+
 ## 測試
 
 用 `createTestBot`（`src/test-utils/`）一行驅動 bot 並斷言 LINE 回覆內容 + Notion 呼叫。測試檔開頭需 mock `notion-fetch.js`、`config/line.js`、`services/mutex.js`（見 `src/test-utils/README.md`）。不要用 `npm run record-fixtures` 覆蓋 `src/test-utils/fixtures/` 下手寫的合成 fixture。
