@@ -57,7 +57,7 @@ const errorHandler: express.ErrorRequestHandler = (err, req, res, next) => {
 };
 app.use(errorHandler);
 
-if (process.env['NODE_ENV'] !== 'test') {
+if (env.NODE_ENV !== 'test') {
   (async () => {
     await initLogger(LOG_DIR);
 
