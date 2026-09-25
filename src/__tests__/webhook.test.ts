@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import request from 'supertest';
 import crypto from 'crypto';
 
@@ -50,6 +50,17 @@ describe('POST /webhook', () => {
   beforeAll(async () => {
     const mod = await import('../index.js');
     app = mod.app;
+  });
+
+  // processEvents/logger mocks are module-scoped (shared across all tests in
+  // this file) — clear call history between tests so an earlier test's call
+  // doesn't leak into a later `not.toHaveBeenCalled()`/`toHaveBeenCalledWith()`
+  // assertion.
+  beforeEach(async () => {
+    const { processEvents } = await import('../handlers/event-router.js');
+    const { logger } = await import('../utils/logger.js');
+    vi.mocked(processEvents).mockClear();
+    vi.mocked(logger.warn).mockClear();
   });
 
   it('returns 200 immediately with valid payload', async () => {
