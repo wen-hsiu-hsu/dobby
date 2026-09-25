@@ -98,6 +98,8 @@ USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員�
 | `WELCOME_MESSAGE` | 機器人加入群組時發送的歡迎訊息 |
 | `INTRODUCE` | `@Dobby` 自我介紹的內容 |
 
+`getBlocks()` 會遞迴抓取 `has_children === true` 的區塊（toggle、巢狀清單等），`blocksToText()` 輸出時子區塊依巢狀深度縮排（每層 2 個空白），`bulleted_list_item` 一律補 `• ` 前綴。四個指令／訊息（`payment`、`news`、`introduce`、`WELCOME_MESSAGE`）都走這個共用實作。
+
 ### Placeholder 替換規則
 
 `WELCOME_MESSAGE` 和 `INTRODUCE` 支援以下 placeholder，系統會在發送時替換為 LINE textV2 mention：

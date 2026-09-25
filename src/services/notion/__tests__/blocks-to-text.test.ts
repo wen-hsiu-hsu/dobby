@@ -28,4 +28,31 @@ describe('blocksToText', () => {
     ] as any);
     expect(text).toBe('kept');
   });
+
+  it('indents nested children under their parent, right after the parent line', () => {
+    const toggle = {
+      type: 'toggle',
+      toggle: { rich_text: [{ plain_text: '詳細規則' }] },
+      children: [bulletedListItem('第一條'), bulletedListItem('第二條')],
+    };
+    const text = blocksToText([paragraph('公告'), toggle, paragraph('結尾')] as any);
+    expect(text).toBe('公告\n詳細規則\n  • 第一條\n  • 第二條\n結尾');
+  });
+
+  it('indents nested bulleted sub-lists two spaces deeper per level', () => {
+    const nested = bulletedListItem('外層') as any;
+    nested.children = [bulletedListItem('內層')];
+    const text = blocksToText([nested] as any);
+    expect(text).toBe('• 外層\n  • 內層');
+  });
+
+  it('still renders children even when the parent block itself has no text', () => {
+    const emptyToggle = {
+      type: 'toggle',
+      toggle: { rich_text: [] },
+      children: [bulletedListItem('子項')],
+    };
+    const text = blocksToText([emptyToggle] as any);
+    expect(text).toBe('  • 子項');
+  });
 });
