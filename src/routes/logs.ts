@@ -1352,7 +1352,7 @@ function renderHtml(entries: LogEntry[]): string {
 
     .detail-footer { border-top: 1px solid #1c1d29; padding: 10px 22px; display: flex; gap: 8px; flex: none; }
     .detail-footer button { font-size: 12px; color: #8b8fa3; background: transparent; border: 1px solid #262835; border-radius: 8px; padding: 8px 13px; }
-    .raw-json { margin: 0 22px 16px; padding: 12px 14px; background: #0e0f18; border-radius: 8px; max-height: 320px; overflow-y: auto; }
+    .raw-json { margin: 0 22px 16px; padding: 12px 14px; background: #0e0f18; border-radius: 8px; max-height: 320px; overflow-y: auto; flex: none; }
     .raw-json.hidden { display: none; }
 
     .json-tree { font: 12.5px/1.7 ui-monospace, monospace; }
