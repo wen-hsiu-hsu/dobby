@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { notionPost, notionGetAllResults } from '../notion-fetch.js';
-import { findByName, findAll } from '../season-repository.js';
+import { findByName } from '../season-repository.js';
 
 vi.mock('../notion-fetch.js');
 
@@ -102,26 +102,6 @@ describe('season-repository', () => {
       expect(season?.courts).toBe(2);
       expect(season?.guestFee).toBe(170);
       expect(season?.weekCounts).toBe(0);
-    });
-  });
-
-  describe('findAll', () => {
-    it('maps every page independently, awaiting each relation resolution', async () => {
-      notionPostMock.mockResolvedValue({
-        results: [
-          makePage(baseProps({ 報名人: membersRelation('members-prop-id', 25) }), 'season-page-1'),
-          makePage(baseProps({ 報名人: membersRelation('members-prop-id-2', 3) }), 'season-page-2'),
-        ],
-      });
-      const fullMembers = Array.from({ length: 27 }, (_, i) => ({ relation: { id: `member-${i}` } }));
-      notionGetAllResultsMock.mockResolvedValue(fullMembers);
-
-      const seasons = await findAll();
-
-      expect(seasons).toHaveLength(2);
-      expect(seasons[0]?.members).toHaveLength(27);
-      expect(seasons[1]?.members).toHaveLength(3);
-      expect(notionGetAllResultsMock).toHaveBeenCalledTimes(1);
     });
   });
 });

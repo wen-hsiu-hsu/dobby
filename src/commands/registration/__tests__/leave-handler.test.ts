@@ -65,7 +65,6 @@ describe('handleLeave', () => {
     await handleLeave(event, false, false);
 
     expect(seasonRepo.findByName).toHaveBeenCalledWith(getCurrentSeasonName());
-    expect(seasonRepo.findAll).not.toHaveBeenCalled();
   });
 
   it('wraps the read-modify-write in withMutex using the event date as key', async () => {

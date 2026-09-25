@@ -48,10 +48,3 @@ export async function findByName(name: string): Promise<SeasonRecord | null> {
     return await pageToRecord(response.results[0] as PageObjectResponse);
   });
 }
-
-export async function findAll(): Promise<SeasonRecord[]> {
-  return withPurpose('查詢全部季租紀錄', async () => {
-    const response = await notionPost(`/databases/${env.NOTION_DB_SEASON}/query`, {}) as any;
-    return Promise.all(response.results.map((r: unknown) => pageToRecord(r as PageObjectResponse)));
-  });
-}

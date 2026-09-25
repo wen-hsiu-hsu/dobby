@@ -61,7 +61,7 @@ USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員�
 | `場租總金額` | formula，本季場租總額，`news` 指令 `{TOTAL_PRICE}` |
 | `打球日` | Relation，關聯至「行事曆」，本季所有打球日，`news` 指令 `{LIST_ALL_DATES}` |
 
-`findByName(getCurrentSeasonName())` 依季度名稱查詢當季資料，不是取 `findAll()` 的第一筆。
+`findByName(getCurrentSeasonName())` 依季度名稱查詢當季資料。`season-repository.ts` 只有 `findByName`，沒有 `findAll()`——不要為了拿當季資料另外查全部再取第一筆。
 
 ---
 
