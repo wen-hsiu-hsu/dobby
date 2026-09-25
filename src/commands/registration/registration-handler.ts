@@ -23,13 +23,13 @@ export async function handleRegistration(
 ): Promise<void> {
   const target = parseRegistrationTarget(event as any);
 
-  if (!target.isSelf && !isAdmin) {
-    await replyMessage(event.replyToken, [{ type: 'text', text: '你不是管理員' }]);
+  if (target.parseError) {
+    await replyMessage(event.replyToken, [{ type: 'text', text: target.parseError }]);
     return;
   }
 
-  if (target.parseError) {
-    await replyMessage(event.replyToken, [{ type: 'text', text: target.parseError }]);
+  if (!target.isSelf && !isAdmin) {
+    await replyMessage(event.replyToken, [{ type: 'text', text: '你不是管理員' }]);
     return;
   }
 

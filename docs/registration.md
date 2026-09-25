@@ -100,7 +100,7 @@ src/services/mutex.ts
 
 「自己報名」「@mention 指定」這兩種情境查到 USERS 記錄後，顯示名稱不是直接用 `customName`：會**優先**用該 user 的 `registeredPersonPageId` 去查 People DB，若查得到就用 People DB 上的 `person.name`；只有查不到對應的 People 記錄（例如非季租成員從未在 People DB 註冊）時，才 fallback 用 USERS 資料庫的 `customName`（見 `src/commands/registration/target-resolver.ts`）。
 
-管理員才能代他人操作（非管理員發出代他人指令會被拒絕）。
+管理員才能代他人操作（非管理員發出代他人指令會被拒絕）。`handleRegistration`／`handleLeave` 檢查順序是先判斷 `target.parseError`（指定對象語法錯誤，例如漏了 `@`）、再判斷是否為管理員：語法錯誤跟權限無關，優先回報，避免一般成員打錯 `@Name` 語法時被誤導以為是權限問題（收到「你不是管理員」而非「指令格式錯誤：指定對象需使用 @Name」）。
 
 ## 跨平台 Mention 解析問題
 

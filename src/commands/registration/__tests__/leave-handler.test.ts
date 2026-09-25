@@ -197,6 +197,47 @@ describe('handleLeave', () => {
     );
   });
 
+  it('replies with the parse error (not "你不是管理員") when a non-admin sends a malformed (non-@) target', async () => {
+    // parseError is checked before the admin gate: a syntax mistake is not a permission
+    // problem. leave-handler previously skipped this check entirely (registration-handler
+    // had it, but only after the admin gate) — both must now report the same
+    // "指令格式錯誤" to a non-admin instead of the misleading "你不是管理員".
+    const malformedEvent = {
+      replyToken: 'token',
+      message: { text: '@Dobby 假 Charlie' },
+      source: { userId: 'user-alice' },
+    };
+
+    await handleLeave(malformedEvent, false, false);
+
+    const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
+    const text = (messages[0] as { text: string }).text;
+    expect(text).toBe('指令格式錯誤：指定對象需使用 @Name');
+    expect(seasonRepo.findByName).not.toHaveBeenCalled();
+    expect(calendarRepo.updateAbsentees).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-admin trying to operate leave for someone else via a valid @Name mention', async () => {
+    // Sanity check that the parseError-before-admin-gate reorder didn't break the
+    // existing admin gate for a syntactically valid @mention.
+    const mentionEvent = {
+      replyToken: 'token',
+      message: {
+        text: '@Dobby 假 @Bob',
+        mention: { mentionees: [{ type: 'user', userId: 'u-bob', index: 0, length: 4 }] },
+      },
+      source: { userId: 'user-alice' },
+    };
+
+    await handleLeave(mentionEvent, false, false);
+
+    const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
+    const text = (messages[0] as { text: string }).text;
+    expect(text).toBe('你不是管理員');
+    expect(seasonRepo.findByName).not.toHaveBeenCalled();
+    expect(calendarRepo.updateAbsentees).not.toHaveBeenCalled();
+  });
+
   it('does not log a business summary on the early-return branches (already on leave / not on leave)', async () => {
     vi.mocked(calendarRepo.findByDate).mockResolvedValue({
       pageId: 'evt-1',

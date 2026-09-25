@@ -154,10 +154,22 @@ describe('handleRegistration', () => {
   });
 
   it('replies with the target parse error for a malformed (non-@) target, without touching Notion', async () => {
-    // Only reachable once the actor passes the admin gate — parseError is checked after it.
     const event = makeEvent('@Dobby +1 Charlie');
 
     await handleRegistration(event, 1, true);
+
+    expect(replyText()).toBe('指令格式錯誤：指定對象需使用 @Name');
+    expect(seasonRepo.findByName).not.toHaveBeenCalled();
+    expect(calendarRepo.updateGuests).not.toHaveBeenCalled();
+  });
+
+  it('replies with the parse error (not "你不是管理員") when a non-admin sends a malformed (non-@) target', async () => {
+    // parseError is checked before the admin gate: a syntax mistake is not a permission
+    // problem, and a non-admin should see the same "指令格式錯誤" a would-be admin sees,
+    // not a misleading permission message.
+    const event = makeEvent('@Dobby +1 Charlie');
+
+    await handleRegistration(event, 1, false);
 
     expect(replyText()).toBe('指令格式錯誤：指定對象需使用 @Name');
     expect(seasonRepo.findByName).not.toHaveBeenCalled();

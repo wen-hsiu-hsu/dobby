@@ -23,6 +23,11 @@ export async function handleLeave(
 ): Promise<void> {
   const target = parseRegistrationTarget(event as any);
 
+  if (target.parseError) {
+    await replyMessage(event.replyToken, [{ type: 'text', text: target.parseError }]);
+    return;
+  }
+
   if (!target.isSelf && !isAdmin) {
     await replyMessage(event.replyToken, [{ type: 'text', text: '你不是管理員' }]);
     return;
