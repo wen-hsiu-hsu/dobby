@@ -64,7 +64,7 @@
 
 同一次 Notion API 呼叫底層會產生好幾行 log（輕量 info 摘要 + 完整內容的 debug payload，request 跟 response 各一組），LINE 回覆/推播也是「準備送出」跟「已送出/失敗」各一行；時間軸會把這些自動合併成一步：
 
-- **Notion API 呼叫**：步驟標題優先顯示 `withPurpose()` 設的目的（沒有的話退回「Notion API 呼叫」），旁邊顯示實際打的 `method path`跟耗時。點擊該步驟可展開看完整的 request/response 內容——顯示成可以逐層收合/展開的 JSON 樹，超過兩層巢狀預設收合。`LOG_LEVEL` 不是 `debug` 時只記錄了摘要，展開會看到提示文字（例如「開 LOG_LEVEL=debug 才能看到完整回應內容」），不會是空白。失敗時標題不變、下方會多一塊紅色的錯誤提示（含 HTTP 狀態碼）。
+- **Notion API 呼叫**：步驟標題優先顯示 `withPurpose()` 設的目的（沒有的話退回「Notion API 呼叫」），旁邊顯示實際打的 `method path`跟耗時。點擊該步驟可展開看完整的 request/response 內容——顯示成可以逐層收合/展開的 JSON 樹，超過兩層巢狀預設收合。`LOG_LEVEL` 不是 `debug` 時只記錄了摘要，展開會看到提示文字（例如「開 LOG_LEVEL=debug 才能看到完整回應內容」），不會是空白。失敗時標題不變、下方會多一塊紅色的錯誤提示（含 HTTP 狀態碼）。成功且有捕捉到請求內容（`LOG_LEVEL=debug`）時，步驟下方也會有一行「請求內容: ...」——請求 body 的 JSON 字串，截斷到 300 字元。這行不用點開就看得到，刻意只截斷請求（不含回應，回應通常只是整個頁面物件連同無關的 rollup/relation 一起回顯，才是真正占空間的來源）；`?format=text` 精簡匯出（見下方）就是靠這行才看得到「這次到底寫了什麼」，不然它會完全省略掉展開內容。
 - **LINE 回覆/推播**：標題是「LINE 回覆已送出/失敗」或「LINE 推播已送出/失敗」，旁邊顯示 `method path`。成功且抓得到訊息內容（`LOG_LEVEL=debug`）時，下方會有一個引用框顯示 Dobby 實際送出的訊息全文；失敗時引用框標題改成「這則訊息沒有送出」，上方另有一塊紅色的失敗原因。點擊步驟一樣可以展開看完整明細。
 
 配對「準備送出」跟「已送出/失敗」兩行時，底層用的是呼叫當下產生的專屬 `sendId`（不是比對 `to`/`messages` 內容），所以兩個內容完全相同但不同次的呼叫不會被誤配對成同一次。
@@ -130,3 +130,18 @@ R2 同步的 `uploadAllLogs()`（`src/utils/log-upload.ts`）也包在 `runWithC
 每個事件詳情下方有兩個按鈕：「看這筆的原始 log」展開這個事件底下所有原始 log 行（未經合併/解析的完整 JSON），「複製 JSON」把同樣的內容複製到剪貼簿。這兩個都是這個事件自己的完整原始資料，不受遮蔽 ID 開關影響（跟頁面其他地方一樣，需要 `LOGS_ACCESS_TOKEN` 才能看到）。
 
 「看這筆的原始 log」展開的內容也是可以逐層收合/展開的 JSON 樹，跟時間軸步驟裡的請求/回應內容同一套渲染方式；「複製 JSON」複製的是完整、未省略的原始文字，不受畫面上目前收合了哪些節點影響。
+
+## 精簡純文字匯出（`?format=text`）——給 Claude Code 用的兩段式查詢
+
+`GET /logs?format=text`（需要同一組 `LOGS_ACCESS_TOKEN`）回傳的不是網頁，是精簡的純文字，設計給 Claude Code 直接用 `curl` 抓，取代「把整段 log 手動複製貼上聊天視窗」這種做法：
+
+1. **不帶 `reqId`**：回傳最近（最多 50 筆，由新到舊）事件的索引，一行一筆：`reqId␉時間␉[種類/狀態]␉標題`。先看這份索引找出要查的 reqId。
+2. **帶 `?reqId=xxx`**：回傳那一筆事件的精簡詳情——標題、時間、耗時、狀態、使用者、時間軸每一步的 `title`/`path`/`duration`/`note`/回覆內容（`body`）。Notion 呼叫步驟的 `note` 含截斷過的請求內容摘要（見上方「處理過程時間軸」的「請求內容」說明），所以看得出這一步實際寫了/查了什麼，但**刻意不含**每個步驟展開後的完整 request/response JSON（也就是「看這筆的原始 log」那份內容，尤其是回應——通常整個頁面物件連同無關的 rollup/relation 都會回顯一次）——那正是讓一次除錯動輒貼出幾百行 JSON 的來源。找不到這個 reqId（可能已超過 7 天保留期或伺服器重啟過）回 404，純文字說明原因。
+
+範例：
+```
+curl -s "https://<domain>/logs?format=text&token=$LOGS_ACCESS_TOKEN"
+curl -s "https://<domain>/logs?format=text&reqId=6c27ed&token=$LOGS_ACCESS_TOKEN"
+```
+
+這個端點跟 HTML 版共用同一套分組邏輯（`buildEvents()`，`src/routes/logs.ts`），不是另外維護一套「哪些訊息該合併」的規則，只是省略了完整 payload 那一層。要看某一步的完整 Notion payload，還是得開瀏覽器用 HTML 版展開對應的時間軸步驟。

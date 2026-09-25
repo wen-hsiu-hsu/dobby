@@ -115,6 +115,23 @@ function escapeHtml(str: string): string {
     .replace(/"/g, '&quot;');
 }
 
+/**
+ * Inverse of escapeHtml(), for the plain-text `?format=text` export
+ * (`renderEventListText`/`renderEventDetailText`). TimelineStep's string
+ * fields (title/path/note/body/bodyLabel) are pre-escaped HTML per its own
+ * doc comment — the text export needs the original characters back, not
+ * HTML entities. `&amp;` is unescaped last so a literal "&lt;" in the
+ * original text (which escapeHtml turns into "&amp;lt;") round-trips
+ * correctly instead of prematurely becoming "<".
+ */
+function unescapeHtml(str: string): string {
+  return str
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&');
+}
+
 /** LOG_LEVEL 徽章——`debug` 用跟 `#mask-btn` 相同的強調色，其餘等級用 `.tl-note-warn` 那組暖色，提醒管理者「有些細節區塊需要 LOG_LEVEL=debug 才看得到」。 */
 function logLevelBadgeHtml(level: string): string {
   const isDebug = level === 'debug';
@@ -700,6 +717,8 @@ function startStepTimeline(group: FlowGroup): TimelineStep {
   };
 }
 
+const REQUEST_BODY_NOTE_MAX_LEN = 300;
+
 function notionStepTimeline(row: NotionCallRow): TimelineStep {
   const levelName = LEVEL_NAMES[row.error?.level ?? row.response?.level ?? row.request.level ?? 30] ?? 'info';
   const retrySuffix = row.attempts > 1 ? ` · 重試 ${row.attempts - 1} 次` : '';
@@ -713,6 +732,19 @@ function notionStepTimeline(row: NotionCallRow): TimelineStep {
   } else if (!row.response) {
     note = '尚無回應記錄';
     noteTone = 'warn';
+  } else {
+    // 成功的呼叫本來完全不顯示 note，逼著人一定要點開才能看到「這次到底
+    // 寫了/查了什麼內容」——而 `?format=text` 精簡匯出又刻意不含展開內容
+    // （detailText，避免重演這次改動起因的那次把整個 Notion 頁面物件貼進
+    // 對話的事故），兩者疊起來會讓精簡匯出完全看不到請求內容，診斷「寫進
+    // Notion 的到底是哪幾筆」這類 bug 時完全沒用。這裡只截斷請求 body（不
+    // 含回應），因為回應通常只是把整個頁面物件連同無關的 rollup/relation
+    // 全部回顯一次，才是原本那次事故裡佔掉幾百行的真正來源；要看回應內容
+    // 還是得展開這一步或開瀏覽器版。
+    const requestBody = row.requestPayload?.['body'];
+    if (requestBody !== undefined) {
+      note = escapeHtml(`請求內容: ${truncate(JSON.stringify(requestBody), REQUEST_BODY_NOTE_MAX_LEN)}`);
+    }
   }
   return {
     levelName,
@@ -1175,9 +1207,13 @@ function bucketRawEntries(entries: LogEntry[]): Map<string, LogEntry[]> {
   return map;
 }
 
-function renderHtml(entries: LogEntry[]): string {
-  const levelBadgeHtml = logLevelBadgeHtml(getLogLevel());
-  const r2BadgeHtml = r2SyncBadgeHtml(getR2SyncStatus());
+/**
+ * 把原始 log entries 轉成畫面（或 `?format=text` 匯出）共用的 EventView
+ * 清單，由新到舊排序——`renderHtml` 跟 `renderEventListText`/
+ * `renderEventDetailText` 都靠同一份分組/整理邏輯，避免兩邊各自維護一次
+ * 「哪些訊息該合併、哪些該獨立成系統事件」的規則而慢慢長歪。
+ */
+function buildEvents(entries: LogEntry[]): EventView[] {
   // 排程（weekly-push/display-name-update）跟 R2 同步（uploadAllLogs）各自用
   // runWithContext 包住整次執行，但仍有不少 log 完全沒有 reqId：伺服器生命
   // 週期訊息、啟動時的提示（排程的 `... scheduler started`、R2 未設定提示）、
@@ -1188,17 +1224,25 @@ function renderHtml(entries: LogEntry[]): string {
   // 相關的會配對成分隔線；其餘的每一筆各自是獨立的「系統」事件。
   const reqIdEntries = entries.filter((e) => typeof e.reqId === 'string' && e.reqId);
   const noReqIdEntries = entries.filter((e) => !(typeof e.reqId === 'string' && e.reqId));
-  const lifecycleEntries = noReqIdEntries.filter((e) => LIFECYCLE_MESSAGES.has(String(e.msg ?? '')));
   const systemEntries = noReqIdEntries.filter((e) => !LIFECYCLE_MESSAGES.has(String(e.msg ?? '')));
 
   const displayRows = groupPairedEntries(reqIdEntries);
   const groups = buildFlowGroups(displayRows);
   const rawByReqId = bucketRawEntries(reqIdEntries);
 
-  const events = [
+  return [
     ...groups.map((g) => buildEventView(g, rawByReqId.get(g.reqId) ?? [])),
     ...systemEntries.map((e, i) => buildSystemEventView(e, i)),
   ].sort((a, b) => b.timeMs - a.timeMs);
+}
+
+function renderHtml(entries: LogEntry[]): string {
+  const levelBadgeHtml = logLevelBadgeHtml(getLogLevel());
+  const r2BadgeHtml = r2SyncBadgeHtml(getR2SyncStatus());
+  const noReqIdEntries = entries.filter((e) => !(typeof e.reqId === 'string' && e.reqId));
+  const lifecycleEntries = noReqIdEntries.filter((e) => LIFECYCLE_MESSAGES.has(String(e.msg ?? '')));
+
+  const events = buildEvents(entries);
   // 由新到舊排序，跟 events 的排序方向一致，才能一起往下掃描配對。
   const boundaries = buildBoundaryMarkers(lifecycleEntries).sort((a, b) => b.timeMs - a.timeMs);
 
@@ -1456,10 +1500,90 @@ function renderHtml(entries: LogEntry[]): string {
 </html>`;
 }
 
+const TEXT_EXPORT_LIST_LIMIT = 50;
+
+/**
+ * `?format=text` 的索引檢視：每個 reqId 一行，由新到舊。刻意只給
+ * reqId/時間/kind/status/title，不含任何 Notion payload 或訊息內容本身
+ * ——目的只是讓人（或 Claude）先掃一眼有哪些 reqId，再用
+ * `?format=text&reqId=xxx` 換一次特定事件的完整精簡內容，兩段式查詢，
+ * 避免把整個 log 目錄的內容一次吐光。
+ */
+function renderEventListText(events: EventView[]): string {
+  if (events.length === 0) return '（沒有符合的事件）\n';
+  const shown = events.slice(0, TEXT_EXPORT_LIST_LIMIT);
+  const lines = shown.map(
+    (ev) => `${ev.reqId || '(無 reqId)'}\t${ev.stamp}\t[${ev.kindLabel}/${ev.statusLabel}]\t${ev.title}`
+  );
+  const omitted = events.length - shown.length;
+  if (omitted > 0) lines.push(`…還有 ${omitted} 筆較舊的事件未顯示，可加上時間範圍或直接查 reqId`);
+  return lines.join('\n') + '\n';
+}
+
+/**
+ * `?format=text&reqId=xxx` 的單筆事件精簡內容：跟 HTML 版的時間軸用同一份
+ * TimelineStep 資料，但刻意省略 detailText（每個 step 展開後的完整 Notion
+ * request/response payload）——那正是把一次 debug 灌成幾百行 JSON 的來源，
+ * 這裡只留 title/path/duration/note/body 這幾個「人在判斷發生什麼事時真正
+ * 會看」的欄位。TimelineStep 的字串欄位是預先跳脫過的 HTML（見該 interface
+ * 的註解），純文字輸出前要用 unescapeHtml() 轉回原始字元。
+ */
+function renderEventDetailText(ev: EventView): string {
+  const lines: string[] = [];
+  lines.push(`# ${ev.title}`);
+  lines.push(`reqId: ${ev.reqId || '(無 reqId)'}`);
+  lines.push(`時間: ${ev.stamp}　耗時: ${ev.durationText}　狀態: ${ev.statusLabel}　類型: ${ev.kindLabel}`);
+  if (ev.hasWho) lines.push(`使用者: ${ev.name ?? ''} (${ev.userIdRaw})`);
+  if (ev.groupIdRaw) lines.push(`群組 ID: ${ev.groupIdRaw}`);
+  lines.push(`來源: ${ev.source}　來自: ${ev.origin}`);
+  if (ev.flag) lines.push(`flag: ${ev.flag}`);
+  if (ev.degradedText) lines.push(`降級原因: ${ev.degradedText}`);
+  if (ev.batch) lines.push(`批次結果: ${ev.batch.map((b) => `${b.label}=${b.value}`).join(', ')}`);
+
+  lines.push('');
+  lines.push(`## ${ev.stepsHeading}`);
+  if (ev.steps.length === 0) {
+    lines.push('（沒有可顯示的處理步驟）');
+  } else {
+    for (const step of ev.steps) {
+      const head = [step.endpointLabel, unescapeHtml(step.title), unescapeHtml(step.path), step.duration]
+        .filter(Boolean)
+        .join('  ');
+      lines.push(`- [${step.levelName}] ${head}`);
+      if (step.note) lines.push(`  note: ${unescapeHtml(step.note)}`);
+      if (step.body) {
+        const bodyLabel = step.bodyLabel ? unescapeHtml(step.bodyLabel) + ': ' : '';
+        lines.push(`  ${bodyLabel}${unescapeHtml(step.body)}`);
+      }
+    }
+  }
+  return lines.join('\n') + '\n';
+}
+
 export function createLogsRouter(logDir: string): Router {
   const router = Router();
 
-  router.get('/', logsAuthMiddleware, async (_req: Request, res: Response) => {
+  router.get('/', logsAuthMiddleware, async (req: Request, res: Response) => {
+    const format = req.query['format'];
+    if (format === 'text') {
+      const entries = await readRecentLogs(logDir);
+      const events = buildEvents(entries);
+      const reqId = req.query['reqId'];
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+
+      if (typeof reqId !== 'string' || !reqId) {
+        res.send(renderEventListText(events));
+        return;
+      }
+      const match = events.find((ev) => ev.reqId === reqId);
+      if (!match) {
+        res.status(404).send(`找不到 reqId=${reqId} 的事件（可能已超過 7 天保留期，或伺服器已重啟過）\n`);
+        return;
+      }
+      res.send(renderEventDetailText(match));
+      return;
+    }
+
     const entries = await readRecentLogs(logDir);
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(renderHtml(entries));

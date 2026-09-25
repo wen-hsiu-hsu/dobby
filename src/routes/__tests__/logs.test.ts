@@ -96,6 +96,15 @@ async function getLogsHtml(): Promise<string> {
   return res.text;
 }
 
+async function getLogsText(extraQuery: Record<string, string> = {}): Promise<{ status: number; text: string }> {
+  const app = express();
+  app.use('/logs', createLogsRouter('/unused/because/reader/is/mocked'));
+  const res = await request(app)
+    .get('/logs')
+    .query({ token: process.env['LOGS_ACCESS_TOKEN'], format: 'text', ...extraQuery });
+  return { status: res.status, text: res.text };
+}
+
 describe('createLogsRouter', () => {
   it('renders each reqId as its own event card, in Asia/Taipei time', async () => {
     const html = await getLogsHtml();
@@ -747,6 +756,51 @@ describe('createLogsRouter', () => {
     expect(html).toContain('<span class="json-string">"page-xyz"</span>');
   });
 
+  // 回歸測試：成功的 Notion 呼叫本來完全不顯示 note（只有失敗/無回應才
+  // 有），逼著人一定要點開才看得到「這次到底寫了什麼」。`?format=text`
+  // 精簡匯出又刻意省略展開內容，兩者疊起來會讓精簡匯出對「寫進 Notion 的
+  // 到底是哪幾筆」這類 bug完全沒用——這裡驗證成功呼叫現在也會顯示一段截斷
+  // 過的請求內容摘要，HTML 版跟 text 版都要看得到。
+  it('shows a short request-body summary in the note for a successful Notion call, in both the HTML page and the ?format=text export', async () => {
+    const entries = [
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), msg: 'Notion API request', method: 'PATCH', path: '/pages/xyz', purpose: '更新繳費狀態', reqId: 'req-body' },
+      { level: 20, time: Date.UTC(2024, 0, 1, 0, 0, 1), msg: 'Notion API request payload', method: 'PATCH', path: '/pages/xyz', body: { properties: { Paid: { checkbox: true } } }, reqId: 'req-body' },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 2), msg: 'Notion API response', method: 'PATCH', path: '/pages/xyz', durationMs: 120, reqId: 'req-body' },
+    ];
+    vi.mocked(readRecentLogs).mockResolvedValueOnce(entries);
+    const html = await getLogsHtml();
+    expect(html).toContain('請求內容: {&quot;properties&quot;:{&quot;Paid&quot;:{&quot;checkbox&quot;:true}}}');
+
+    vi.mocked(readRecentLogs).mockResolvedValueOnce(entries);
+    const { text } = await getLogsText({ reqId: 'req-body' });
+    expect(text).toContain('請求內容: {"properties":{"Paid":{"checkbox":true}}}');
+  });
+
+  it('does not add a request-body note when no request payload was captured (LOG_LEVEL=info, matching existing behavior)', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), msg: 'Notion API request', method: 'PATCH', path: '/pages/xyz', purpose: '更新繳費狀態', reqId: 'req-nobody' },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 1), msg: 'Notion API response', method: 'PATCH', path: '/pages/xyz', durationMs: 120, reqId: 'req-nobody' },
+    ]);
+
+    const html = await getLogsHtml();
+    expect(html).not.toContain('請求內容:');
+  });
+
+  it('truncates a long request-body summary instead of dumping the full content into the note', async () => {
+    const longArray = Array.from({ length: 40 }, (_, i) => `Guest${i}`);
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), msg: 'Notion API request', method: 'PATCH', path: '/pages/xyz', purpose: '寫入活動的零打(guest)名單', reqId: 'req-long' },
+      { level: 20, time: Date.UTC(2024, 0, 1, 0, 0, 1), msg: 'Notion API request payload', method: 'PATCH', path: '/pages/xyz', body: { properties: { 零打: { multi_select: longArray.map((name) => ({ name })) } } }, reqId: 'req-long' },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 2), msg: 'Notion API response', method: 'PATCH', path: '/pages/xyz', durationMs: 120, reqId: 'req-long' },
+    ]);
+
+    const { text } = await getLogsText({ reqId: 'req-long' });
+    expect(text).toContain('請求內容:');
+    expect(text).toContain('…');
+    // 40 個 "GuestN" 的完整 JSON 遠超過截斷長度，Guest39 不該完整出現在輸出裡
+    expect(text).not.toContain('Guest39');
+  });
+
   it('keeps a hidden raw-json-copy-source <pre> with the full pretty-printed rawEntries JSON, unaffected by json-tree collapsing', async () => {
     const rawEntry = {
       level: 30,
@@ -822,6 +876,64 @@ describe('createLogsRouter', () => {
       expect(html).toContain('R2 備份 · 09:00:00 失敗，等待下次重試');
       expect(html).toContain('color:#d3a35c'); // STATUS_COLORS.warn
       expect(html).toContain('title="2/3 個檔案上傳失敗"');
+    });
+  });
+
+  // ?format=text：讓一份太長貼不進聊天視窗的 log 匯出成精簡純文字，兩段式
+  // 查詢（先列 reqId 索引，再用 reqId 換單筆詳情），而不是像原本的做法那樣
+  // 得把整個 log 目錄的內容手動複製貼上。
+  describe('?format=text', () => {
+    it('lists one line per reqId (index view) when no reqId is given, newest first, without any Notion payload content', async () => {
+      const { status, text } = await getLogsText();
+
+      expect(status).toBe(200);
+      const lines = text.trim().split('\n');
+      // req-1/req-2/req-5/req-6 一共 4 個事件，跟 HTML 版一致
+      expect(lines).toHaveLength(4);
+      // 由新到舊：最後一筆（req-6, 00:00:06/07）排最前面
+      expect(lines[0]).toContain('req-6');
+      expect(lines.at(-1)).toContain('req-1');
+      // 索引視圖不含任何完整的 Notion request/response payload 內容
+      expect(text).not.toContain('查詢成員姓名與繳費狀態');
+    });
+
+    it('returns a plain-text detail for a matching reqId, including the step note/body but not the full JSON payload', async () => {
+      const { status, text } = await getLogsText({ reqId: 'req-5' });
+
+      expect(status).toBe(200);
+      expect(text).toContain('reqId: req-5');
+      expect(text).toContain('測試訊息內容A');
+      expect(text).toContain('Dobby 送給使用者的訊息');
+      // 精簡輸出刻意不含每個 step 展開後的完整 request/response JSON
+      expect(text).not.toContain('json-tree');
+      expect(text).not.toContain('<div');
+    });
+
+    it('un-escapes HTML entities in the compact detail output (TimelineStep fields are pre-escaped for HTML)', async () => {
+      vi.mocked(readRecentLogs).mockResolvedValueOnce([
+        { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'message', sourceType: 'group', reqId: 'req-esc', webhookEventId: 'wh-1', msg: 'Processing event' },
+        {
+          level: 20,
+          time: Date.UTC(2024, 0, 1, 0, 0, 1),
+          reqId: 'req-esc',
+          msg: 'Processing event detail',
+          source: { type: 'group' },
+          message: { type: 'text', text: 'A & B <報名>' },
+        },
+      ]);
+
+      const { text } = await getLogsText({ reqId: 'req-esc' });
+
+      expect(text).toContain('A & B <報名>');
+      expect(text).not.toContain('&amp;');
+      expect(text).not.toContain('&lt;');
+    });
+
+    it('returns 404 with a plain-text message for an unknown reqId', async () => {
+      const { status, text } = await getLogsText({ reqId: 'no-such-reqid' });
+
+      expect(status).toBe(404);
+      expect(text).toContain('no-such-reqid');
     });
   });
 });
