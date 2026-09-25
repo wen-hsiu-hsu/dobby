@@ -70,6 +70,8 @@ weekCounts: getNumber(p, '租借次數 (2hrs)') ?? 0,
 
 ### 1.5 `incrementMessageCount` 的介面設計會誘發 race，未套用 `withMutex` 慣例（🟢 Low）
 
+> 2026-09-25 複查時發現這跟本文件下方的「5.11」小節是同一個 bug（都是 `user-management.ts` 的 `_trackUserAsync` 沒套 `withMutex`），已在 `TODO.md` 合併成同一項 `[1.5]`。這裡的內容維持原樣不改，只是提醒不要把兩節當成兩個獨立待辦。
+
 **位置**：`users-repository.ts:78-82` + `user-management.ts:47`
 
 `incrementMessageCount(pageId, currentCount)` 要呼叫端自己傳入「已讀到的」計數，而非伺服器端原子遞增。唯一呼叫處先 `findByUserId` 讀到 `existing.messageCount`，再寫回 `currentCount + 1`，中間沒有 `withMutex` 保護。同一使用者短時間內連續傳訊息可能兩次都讀到同樣的 `messageCount`，最後只 +1 而非 +2，遺失計數。影響範圍僅止於統計欄位，非報名/請假等關鍵路徑。
@@ -354,6 +356,8 @@ notionPost(`/databases/${env.NOTION_DB_USERS}/query`, {})
 多組 trigger 重複出現兩次以上（例：「朋友」、「雙胞胎」出現 3 次、「魔法」「火車」「哈利」「榮恩」「妙麗」「鄧不利多」「石內卜」「海格」「跩哥」「露娜」「天狼星」「路平」「催狂魔」「孤單」「難過」「自由」，以及多個咒語 Lumos/Nox/Accio/Alohomora/Expelliarmus/Protego/Stupefy/Expecto Patronum/Obliviate/Riddikulus/Wingardium Leviosa/Imperio/Crucio/Avada Kedavra 都出現兩次）。`findReply`（`auto-reply.ts:13-16`）用 `for...of` 找到第一個 `text.includes(rule.trigger)` 就回傳，排在後面的重複 trigger 永遠是死碼——尤其後半段那組明顯是改寫成「療癒/安慰向」語氣的版本，永遠不會被觸發到。不確定是否刻意設計，需與內容維護者確認。
 
 ### 5.11 `user-management.ts` 讀取→計算→寫回沒套 `withMutex`（🟢 Low）
+
+> 2026-09-25 複查時發現這跟本文件上方的「1.5」小節是同一個 bug，已在 `TODO.md` 合併成同一項 `[1.5]`，不是兩個獨立待辦。
 
 **位置**：`user-management.ts:16-47`
 

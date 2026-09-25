@@ -27,24 +27,23 @@
 
 ## 程式碼審查待修問題（2026-09-17 分模組審查）
 
-> 全專案依模組（Notion 資料層 / LINE 整合 / 指令系統 / 報名請假核心 / 排程與基礎設施）分開派 subagent 審查。**完整技術細節、程式碼片段、每個模組「確認沒問題」的部分見 [`docs/code-review-2026-09-17.md`](docs/code-review-2026-09-17.md)**，章節編號（如 `[4.1]`）與下方清單一一對應。已修復且有文件記錄的項目已移除，見對應 `docs/*.md`／`docs/adr/*.md`。
+> 全專案依模組（Notion 資料層 / LINE 整合 / 指令系統 / 報名請假核心 / 排程與基礎設施）分開派 subagent 審查。**完整技術細節、程式碼片段、每個模組「確認沒問題」的部分見 [`docs/code-review-2026-09-17.md`](docs/code-review-2026-09-17.md)**，章節編號（如 `[4.1]`）與下方清單一一對應，**唯一例外是 `[1.5]` 跟 `[5.11]`**：兩個模組的 subagent 各自發現了同一個 bug（`user-management.ts` 的 `_trackUserAsync` 沒套 `withMutex`），2026-09-25 複查時發現重複，已合併成下方唯一的 `[1.5]`，`docs/code-review-2026-09-17.md` 裡的 `5.11` 小節本身沒有刪除、內容仍在，但不要誤以為它是另一個待辦。已修復且有文件記錄的項目已移除，見對應 `docs/*.md`／`docs/adr/*.md`。
 
 ### 🟢 Low
 
-- [ ] **[1.5] `users-repository.ts:78-82` `incrementMessageCount` + `user-management.ts:47` 讀取→計算→寫回沒套 `withMutex`，連續訊息可能遺失計數。** 僅影響統計欄位，非報名核心邏輯，優先度低。
+- [ ] **[1.5]（原 1.5 + 5.11 合併，重複項目）`user-management.ts:16-49` `_trackUserAsync` 讀取→計算→寫回沒套 `withMutex`，呼叫的 `users-repository.ts:108-114` `incrementMessageCount` 也一樣。fire-and-forget 下同一使用者連續發訊息可能漏算訊息計數/群組清單。** 僅影響統計欄位，非報名核心邏輯，優先度低。
 - [ ] **[1.6] `blocks-to-text.ts` 不遞迴處理 `has_children` 區塊，公告若用 toggle/巢狀清單會整段被靜默丟掉。**
-- [ ] **[1.7] `season-repository.ts:32-35` `findAll()` 全專案找不到呼叫點，疑似死碼，建議清掉或補上呼叫端。**
+- [ ] **[1.7] `season-repository.ts:52-57` `findAll()` 全專案找不到呼叫點，疑似死碼，建議清掉或補上呼叫端。**
 - [ ] **[2.4] `member-joined-handler.ts:16` 來源是 `room`（非 `group`）時跳過 profile 查詢，歡迎訊息直接顯示 userId 而非暱稱，其實 `getProfile` 支援不帶 groupId 查詢。**
 - [ ] **[2.5] `webhook.ts:11` `req.body.events` 用 `as` 斷言掩蓋型別，沒有執行期防呆，欄位缺失會同步拋 TypeError。**
-- [ ] **[2.6] `index.ts:14` 直接讀 `process.env['NODE_ENV']`，沒有走 `env.ts`，違反慣例（目前無實害）。**
+- [ ] **[2.6] `index.ts:60` 直接讀 `process.env['NODE_ENV']`，沒有走 `env.ts`，違反慣例（目前無實害）。**
 - [ ] **[3.3] `command-parser.ts:37-45` mention 分支用無錨點 regex（`/[+\-]\d+/`、`/假\|銷假/`）掃整個 body，若代操作目標的暱稱含 `-1`/`+2`/「假」字可能誤判指令類型。**
-- [ ] **[4.5] `capacity-calculator.ts:46-52` 名額為負數時錯誤訊息顯示負數（如「剩餘 -3 個名額」），純顯示問題。**
-- [ ] **[4.6] `delta=0`（`+0`/`-0`）邊界情況：目標已有報名時仍會多打一次無意義的 Notion 寫入並回「取消報名成功」，但實際什麼都沒變；目標無報名時則正常回錯誤，行為不一致。**
-- [ ] **[4.7] 一般成員打錯目標語法（漏了 `@`）會收到「你不是管理員」而非「指令格式錯誤」——`handleRegistration` 的管理員檢查順序在 `parseError` 檢查之前，容易誤導使用者，非安全問題。**
-- [ ] **[5.8] `utils/logger.ts:4` 直接讀 `process.env['NODE_ENV']`，繞過 `env.ts`（目前因 import 順序無實害）。**
-- [ ] **[5.9] `env.ts:15` `PORT` 是 `z.string()` 用 `parseInt` 轉型，填非數字字串會得到 `NaN` 導致 `app.listen(NaN)` 監聽隨機 port 而非 fail-fast。建議改 `z.coerce.number().int().positive()`。**
+- [ ] **[4.5] `capacity-calculator.ts:91-97` 名額為負數時錯誤訊息顯示負數（如「剩餘 -3 個名額」），純顯示問題。**
+- [ ] **[4.6] `capacity-calculator.ts:153-178` `calculateRemoveCapacity` 的 `delta=0`（`+0`/`-0`）邊界情況：目標已有報名時仍會多打一次無意義的 Notion 寫入並回「取消報名成功」，但實際什麼都沒變；目標無報名時則正常回錯誤，行為不一致。**
+- [ ] **[4.7] `registration-parser.ts:52-56` 一般成員打錯目標語法（漏了 `@`）會收到「你不是管理員」而非「指令格式錯誤」——`registration-handler.ts` 的 `handleRegistration`（26-34 行）管理員檢查順序在 `target.parseError` 檢查之前，容易誤導使用者，非安全問題。**
+- [ ] **[5.8] `utils/logger.ts:6` 直接讀 `process.env['NODE_ENV']`，繞過 `env.ts`（目前因 import 順序無實害）。**
+- [ ] **[5.9] `env.ts:14` `PORT` 是 `z.string()` 用 `parseInt` 轉型，填非數字字串會得到 `NaN` 導致 `app.listen(NaN)` 監聽隨機 port 而非 fail-fast。建議改 `z.coerce.number().int().positive()`（同檔案的 `R2_LOG_SYNC_INTERVAL_MINUTES` 已經在用這個寫法，`PORT` 沒跟上）。**
 - [ ] **[5.10] `data/auto-reply.json` 多組 trigger 重複出現兩次以上（「朋友」「雙胞胎」及多個哈利波特咒語），後面那組（疑似改寫成療癒語氣的版本）永遠是死碼，`findReply` 抓第一個符合就回傳。需與內容維護者確認是否刻意設計。**
-- [ ] **[5.11] `user-management.ts:16-47` `_trackUserAsync` 讀取→計算→寫回沒套 `withMutex`，fire-and-forget 下同一使用者連續發訊息可能漏算訊息計數/群組清單，僅影響統計。**
 
 ---
 
