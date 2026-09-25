@@ -1,6 +1,6 @@
 import { env } from '../../config/env.js';
 import { notionGet, notionPost } from './notion-fetch.js';
-import { getTitle, getRichText, getFormulaBoolean } from './property-helpers.js';
+import { getTitle, getFormulaBoolean } from './property-helpers.js';
 import { withPurpose } from '../../utils/request-context.js';
 import type { PersonRecord } from '../../types/notion-models.js';
 import type { PageObjectResponse } from '@notionhq/client/build/src/api-endpoints.js';
@@ -11,7 +11,6 @@ function pageToRecord(page: PageObjectResponse): PersonRecord {
     pageId: page.id,
     name: getTitle(p, 'Name'),
     hasPaid: getFormulaBoolean(p, '結清'),
-    lineUserId: getRichText(p, 'Line User ID'),
   };
 }
 

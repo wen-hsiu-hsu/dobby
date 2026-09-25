@@ -11,10 +11,6 @@
         "結清": {
           "type": "formula",
           "formula": { "type": "boolean", "boolean": true }
-        },
-        "Line User ID": {
-          "type": "rich_text",
-          "rich_text": [{ "plain_text": "user-alice", "type": "text" }]
         }
       }
     },
@@ -29,10 +25,6 @@
         "結清": {
           "type": "formula",
           "formula": { "type": "boolean", "boolean": false }
-        },
-        "Line User ID": {
-          "type": "rich_text",
-          "rich_text": [{ "plain_text": "user-bob", "type": "text" }]
         }
       }
     }

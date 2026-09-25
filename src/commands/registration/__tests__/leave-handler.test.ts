@@ -54,7 +54,6 @@ beforeEach(() => {
       pageId: id,
       name: id === 'person-1' ? 'Alice' : id,
       hasPaid: true,
-      lineUserId: '',
     })),
   );
   vi.mocked(mutex.withMutex).mockImplementation(async (_pageId, fn) => fn());

@@ -37,8 +37,8 @@ beforeEach(() => {
     playDatePageIds: ['cal-2', 'cal-1'],
   });
   vi.mocked(peopleRepo.findByPageIds).mockResolvedValue([
-    { pageId: 'person-1', name: '許文修', hasPaid: true, lineUserId: '' },
-    { pageId: 'person-2', name: '陳玟育', hasPaid: true, lineUserId: '' },
+    { pageId: 'person-1', name: '許文修', hasPaid: true },
+    { pageId: 'person-2', name: '陳玟育', hasPaid: true },
   ]);
   // Returned out of order on purpose — handler must sort by date before rendering.
   vi.mocked(calendarRepo.findByPageIds).mockResolvedValue([

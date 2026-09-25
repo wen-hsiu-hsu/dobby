@@ -61,7 +61,6 @@ function makePerson(overrides: Partial<PersonRecord> = {}): PersonRecord {
     pageId: 'person-1',
     name: '某人',
     hasPaid: true,
-    lineUserId: 'line-1',
     ...overrides,
   };
 }

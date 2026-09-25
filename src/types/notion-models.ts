@@ -36,7 +36,6 @@ export interface PersonRecord {
   pageId: string;
   name: string;
   hasPaid: boolean;
-  lineUserId: string;
 }
 
 export interface AnnouncementRecord {
