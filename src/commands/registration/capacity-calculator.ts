@@ -92,7 +92,7 @@ export function calculateAddCapacity(
     if (availableSlots <= 0) {
       return {
         canAdd: false,
-        error: `名額不足，目前剩餘 ${availableSlots} 個名額`,
+        error: `名額不足，目前剩餘 ${Math.max(0, availableSlots)} 個名額`,
       };
     }
     // Partially fulfill up to the remaining capacity instead of rejecting outright.

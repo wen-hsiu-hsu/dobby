@@ -57,6 +57,19 @@ describe('calculateAddCapacity', () => {
     expect(result.error).toMatch(/名額不足/);
   });
 
+  it('shows 0 remaining slots, not a negative number, when guests already exceed total capacity', () => {
+    // 11 slots total, 15 guests already registered (e.g. after a season/court change
+    // shrank capacity) → availableSlots = 11 - 15 = -4. The message must not surface
+    // that negative number to the user.
+    const overfullEvent: CalendarEventData = {
+      ...baseEvent,
+      guests: Array.from({ length: 15 }, (_, i) => `Guest${i}`),
+    };
+    const result = calculateAddCapacity(overfullEvent, season, 'New', 1, false);
+    expect(result.canAdd).toBe(false);
+    expect(result.error).toBe('名額不足，目前剩餘 0 個名額');
+  });
+
   it('partially fulfills up to remaining capacity instead of rejecting outright (non-admin)', () => {
     // 11 slots total, 9 already taken → 2 remaining, but requesting 5
     const nearFullEvent: CalendarEventData = {
