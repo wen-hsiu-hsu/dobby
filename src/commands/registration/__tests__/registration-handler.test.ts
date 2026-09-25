@@ -107,7 +107,7 @@ describe('handleRegistration', () => {
 
     expect(calendarRepo.updateGuests).toHaveBeenCalledWith(
       'evt-1',
-      ['Bob', 'Bob 2', 'Bob 3', 'Bob 4', 'Bob 5', 'Bob 6'],
+      ['Bob', 'Bob (2)', 'Bob (3)', 'Bob (4)', 'Bob (5)', 'Bob (6)'],
     );
     const text = replyText();
     expect(text).toContain('報名成功 ✅（名額已達上限，僅報名 6 位，您原本要求 10 位）');
@@ -125,7 +125,7 @@ describe('handleRegistration', () => {
 
     expect(calendarRepo.updateGuests).toHaveBeenCalledWith(
       'evt-1',
-      ['Bob', 'Bob 2', 'Bob 3', 'Bob 4', 'Bob 5', 'Bob 6'],
+      ['Bob', 'Bob (2)', 'Bob (3)', 'Bob (4)', 'Bob (5)', 'Bob (6)'],
     );
     const text = replyText();
     expect(text).toContain('僅報名 6 位');

@@ -31,7 +31,7 @@ describe('calculateAddCapacity', () => {
     const result = calculateAddCapacity(baseEvent, season, 'Alice', 2, false);
     expect(result.canAdd).toBe(true);
     expect(result.newGuests).toContain('Alice');
-    expect(result.newGuests).toContain('Alice 2');
+    expect(result.newGuests).toContain('Alice (2)');
   });
 
   it('adds friend entries for season member', () => {
@@ -82,8 +82,8 @@ describe('calculateAddCapacity', () => {
     expect(result.cappedAt).toBe(2);
     expect(result.newGuests).toHaveLength(11);
     expect(result.newGuests).toContain('Bob的朋友');
-    expect(result.newGuests).toContain('Bob的朋友2');
-    expect(result.newGuests).not.toContain('Bob的朋友3');
+    expect(result.newGuests).toContain('Bob的朋友 (2)');
+    expect(result.newGuests).not.toContain('Bob的朋友 (3)');
   });
 
   it('admin is not capped even when the request exceeds remaining capacity', () => {
@@ -96,7 +96,7 @@ describe('calculateAddCapacity', () => {
     expect(result.canAdd).toBe(true);
     expect(result.cappedAt).toBeUndefined();
     expect(result.newGuests).toHaveLength(14);
-    expect(result.newGuests).toContain('New 5');
+    expect(result.newGuests).toContain('New (5)');
   });
 
   // Regression tests for the "Notion multi_select silently merges duplicate-name
@@ -126,7 +126,7 @@ describe('calculateAddCapacity', () => {
 
       // All four calls must have produced four distinct, non-colliding names.
       expect(new Set(producedNames).size).toBe(4);
-      expect(producedNames).toEqual(['許文修的朋友', '許文修的朋友2', '許文修的朋友3', '許文修的朋友4']);
+      expect(producedNames).toEqual(['許文修的朋友', '許文修的朋友 (2)', '許文修的朋友 (3)', '許文修的朋友 (4)']);
       expect(event.guests).toHaveLength(4);
     });
 
@@ -145,7 +145,7 @@ describe('calculateAddCapacity', () => {
       }
 
       expect(new Set(producedNames).size).toBe(3);
-      expect(producedNames).toEqual(['Alice', 'Alice 2', 'Alice 3']);
+      expect(producedNames).toEqual(['Alice', 'Alice (2)', 'Alice (3)']);
     });
 
     it('numbering for one target is not thrown off by unrelated existing guest names (season members)', () => {
@@ -161,33 +161,33 @@ describe('calculateAddCapacity', () => {
     it('a target with existing entries continues numbering correctly even with unrelated guests interleaved', () => {
       const event: CalendarEventData = {
         ...baseEvent,
-        guests: ['Alice的朋友', 'Bob的朋友', 'Alice的朋友2'],
+        guests: ['Alice的朋友', 'Bob的朋友', 'Alice的朋友 (2)'],
       };
       const result = calculateAddCapacity(event, season, 'Bob', 1, true);
 
       expect(result.canAdd).toBe(true);
-      // Bob already has one entry ("Bob的朋友"), so the new one must be "Bob的朋友2",
+      // Bob already has one entry ("Bob的朋友"), so the new one must be "Bob的朋友 (2)",
       // not another "Bob的朋友" (which would collide) and not influenced by Alice's
-      // own "2" suffix.
-      expect(result.newGuests).toEqual(['Alice的朋友', 'Bob的朋友', 'Alice的朋友2', 'Bob的朋友2']);
+      // own "(2)" suffix.
+      expect(result.newGuests).toEqual(['Alice的朋友', 'Bob的朋友', 'Alice的朋友 (2)', 'Bob的朋友 (2)']);
     });
 
     it('a non-season target with existing entries continues numbering without being thrown off by unrelated names', () => {
-      const event: CalendarEventData = { ...baseEvent, guests: ['Alice', 'Bob', 'Alice 2'] };
+      const event: CalendarEventData = { ...baseEvent, guests: ['Alice', 'Bob', 'Alice (2)'] };
       const result = calculateAddCapacity(event, season, 'Bob', 1, false);
 
       expect(result.canAdd).toBe(true);
-      expect(result.newGuests).toEqual(['Alice', 'Bob', 'Alice 2', 'Bob 2']);
+      expect(result.newGuests).toEqual(['Alice', 'Bob', 'Alice (2)', 'Bob (2)']);
     });
 
     it('picks up numbering after a gap left by a previous removal', () => {
-      // e.g. "Bob的朋友" was removed earlier via -1, leaving only "Bob的朋友2" behind;
-      // the next +1 must not reuse "Bob的朋友2" and collide.
-      const event: CalendarEventData = { ...baseEvent, guests: ['Bob的朋友2'] };
+      // e.g. "Bob的朋友" was removed earlier via -1, leaving only "Bob的朋友 (2)" behind;
+      // the next +1 must not reuse "Bob的朋友 (2)" and collide.
+      const event: CalendarEventData = { ...baseEvent, guests: ['Bob的朋友 (2)'] };
       const result = calculateAddCapacity(event, season, 'Bob', 1, true);
 
       expect(result.canAdd).toBe(true);
-      expect(result.newGuests).toEqual(['Bob的朋友2', 'Bob的朋友3']);
+      expect(result.newGuests).toEqual(['Bob的朋友 (2)', 'Bob的朋友 (3)']);
     });
 
     it('requesting multiple entries in a single call still avoids colliding with existing ones', () => {
@@ -195,7 +195,7 @@ describe('calculateAddCapacity', () => {
       const result = calculateAddCapacity(event, season, '許文修', 2, true);
 
       expect(result.canAdd).toBe(true);
-      expect(result.newGuests).toEqual(['許文修的朋友', '許文修的朋友2', '許文修的朋友3']);
+      expect(result.newGuests).toEqual(['許文修的朋友', '許文修的朋友 (2)', '許文修的朋友 (3)']);
       // No duplicate strings in the array that gets sent to Notion's multi_select.
       expect(new Set(result.newGuests)).toHaveProperty('size', result.newGuests?.length);
     });
@@ -208,28 +208,28 @@ describe('calculateAddCapacity', () => {
   // logic via repeated-call loops / interleaved guests, but these spell out the exact
   // cases called out in the TODO for clarity).
   describe('event.guests already contains this target\'s previous entries', () => {
-    it('season member: existing "Bob的朋友" leads to "Bob的朋友2", not a duplicate "Bob的朋友"', () => {
+    it('season member: existing "Bob的朋友" leads to "Bob的朋友 (2)", not a duplicate "Bob的朋友"', () => {
       const event: CalendarEventData = { ...baseEvent, guests: ['Bob的朋友'] };
       const result = calculateAddCapacity(event, season, 'Bob', 1, true);
 
       expect(result.canAdd).toBe(true);
-      expect(result.newGuests).toEqual(['Bob的朋友', 'Bob的朋友2']);
+      expect(result.newGuests).toEqual(['Bob的朋友', 'Bob的朋友 (2)']);
     });
 
-    it('non-season member: existing "Alice" leads to "Alice 2", not a duplicate "Alice"', () => {
+    it('non-season member: existing "Alice" leads to "Alice (2)", not a duplicate "Alice"', () => {
       const event: CalendarEventData = { ...baseEvent, guests: ['Alice'] };
       const result = calculateAddCapacity(event, season, 'Alice', 1, false);
 
       expect(result.canAdd).toBe(true);
-      expect(result.newGuests).toEqual(['Alice', 'Alice 2']);
+      expect(result.newGuests).toEqual(['Alice', 'Alice (2)']);
     });
 
-    it('existing "Bob的朋友" and "Bob的朋友2" leads to "Bob的朋友3" next', () => {
-      const event: CalendarEventData = { ...baseEvent, guests: ['Bob的朋友', 'Bob的朋友2'] };
+    it('existing "Bob的朋友" and "Bob的朋友 (2)" leads to "Bob的朋友 (3)" next', () => {
+      const event: CalendarEventData = { ...baseEvent, guests: ['Bob的朋友', 'Bob的朋友 (2)'] };
       const result = calculateAddCapacity(event, season, 'Bob', 1, true);
 
       expect(result.canAdd).toBe(true);
-      expect(result.newGuests).toEqual(['Bob的朋友', 'Bob的朋友2', 'Bob的朋友3']);
+      expect(result.newGuests).toEqual(['Bob的朋友', 'Bob的朋友 (2)', 'Bob的朋友 (3)']);
     });
   });
 
@@ -286,23 +286,20 @@ describe('calculateRemoveCapacity', () => {
     expect(result.error).toMatch(/找不到/);
   });
 
-  it('removes the second/third entry for a non-season member with existing numbered entries', () => {
-    const event: CalendarEventData = { ...baseEvent, guests: ['Alice', 'Alice 2', 'Alice 3', 'Bob'] };
+  it('removes the highest-numbered entry first for a non-season member with existing numbered entries', () => {
+    const event: CalendarEventData = { ...baseEvent, guests: ['Alice', 'Alice (2)', 'Alice (3)', 'Bob'] };
     const result = calculateRemoveCapacity(event, 'Alice', -1, false);
     expect(result.canAdd).toBe(true);
-    // removes the first match in list order; the important part is only one Alice entry is removed
-    expect(result.newGuests).toHaveLength(3);
-    expect(result.newGuests).toContain('Bob');
-    expect(result.newGuests?.filter((g) => g === 'Alice' || g === 'Alice 2' || g === 'Alice 3')).toHaveLength(2);
+    expect(result.newGuests).toEqual(['Alice', 'Alice (2)', 'Bob']);
   });
 
   it('does NOT match an unrelated name that is a string prefix of another guest (non-season)', () => {
     // Regression test for the "Al" vs "Alice"/"Alice 2" data-deletion bug.
-    const event: CalendarEventData = { ...baseEvent, guests: ['Alice', 'Alice 2'] };
+    const event: CalendarEventData = { ...baseEvent, guests: ['Alice', 'Alice (2)'] };
     const result = calculateRemoveCapacity(event, 'Al', -1, false);
     expect(result.canAdd).toBe(false);
     expect(result.error).toMatch(/找不到/);
-    expect(event.guests).toEqual(['Alice', 'Alice 2']);
+    expect(event.guests).toEqual(['Alice', 'Alice (2)']);
   });
 
   it('does NOT match a guest whose name merely starts with the target name (non-season)', () => {
@@ -320,19 +317,44 @@ describe('calculateRemoveCapacity', () => {
   });
 
   it('does NOT match an unrelated name that is a string prefix of a friend entry (season member)', () => {
-    // "Bo" should not accidentally match "Bob的朋友" / "Bob的朋友2".
-    const event: CalendarEventData = { ...baseEvent, guests: ['Bob的朋友', 'Bob的朋友2'] };
+    // "Bo" should not accidentally match "Bob的朋友" / "Bob的朋友 (2)".
+    const event: CalendarEventData = { ...baseEvent, guests: ['Bob的朋友', 'Bob的朋友 (2)'] };
     const result = calculateRemoveCapacity(event, 'Bo', -1, true);
     expect(result.canAdd).toBe(false);
     expect(result.error).toMatch(/找不到/);
-    expect(event.guests).toEqual(['Bob的朋友', 'Bob的朋友2']);
+    expect(event.guests).toEqual(['Bob的朋友', 'Bob的朋友 (2)']);
   });
 
   it('removes a numbered friend entry for a season member', () => {
-    const event: CalendarEventData = { ...baseEvent, guests: ['Bob的朋友', 'Bob的朋友2', 'Carol的朋友'] };
+    const event: CalendarEventData = { ...baseEvent, guests: ['Bob的朋友', 'Bob的朋友 (2)', 'Carol的朋友'] };
     const result = calculateRemoveCapacity(event, 'Bob', -2, true);
     expect(result.canAdd).toBe(true);
     expect(result.newGuests).toEqual(['Carol的朋友']);
+  });
+
+  // Regression test for a real production incident (2026-09-25): guests were
+  // ['許文修的朋友', '許文修的朋友 (2)'] and a "-1" removed '許文修的朋友' (the unsuffixed
+  // entry, which happened to appear first in event.guests) instead of '許文修的朋友 (2)'.
+  // The reply then listed only '許文修的朋友 (2)' with no '許文修的朋友' before it, which
+  // reads as if entry #1 vanished. Highest-numbered entries must be removed first, so
+  // the unsuffixed entry is only ever removed once nothing higher-numbered is left.
+  it('removes the highest-numbered friend entry first, keeping the unsuffixed entry until last', () => {
+    const event: CalendarEventData = { ...baseEvent, guests: ['許文修的朋友', '許文修的朋友 (2)'] };
+    const result = calculateRemoveCapacity(event, '許文修', -1, true);
+    expect(result.canAdd).toBe(true);
+    expect(result.newGuests).toEqual(['許文修的朋友']);
+    expect(result.removedGuests).toEqual(['許文修的朋友 (2)']);
+  });
+
+  it('removes multiple entries highest-first, leaving the unsuffixed entry when count allows', () => {
+    const event: CalendarEventData = {
+      ...baseEvent,
+      guests: ['許文修的朋友', '許文修的朋友 (2)', '許文修的朋友 (3)'],
+    };
+    const result = calculateRemoveCapacity(event, '許文修', -2, true);
+    expect(result.canAdd).toBe(true);
+    expect(result.newGuests).toEqual(['許文修的朋友']);
+    expect(result.removedGuests).toEqual(['許文修的朋友 (3)', '許文修的朋友 (2)']);
   });
 
   // Regression tests: delta=0 (e.g. a "-0"/"+0" command, which the parser's \d+ happily

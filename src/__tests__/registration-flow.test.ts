@@ -110,8 +110,8 @@ describe('Registration flow', () => {
     const msg = messages[0] as any;
     expect(msg.text).toContain('報名成功');
     expect(msg.text).toContain('名額已達上限，僅報名 5 位，您原本要求 7 位');
-    expect(msg.text).toContain('Alice的朋友5');
-    expect(msg.text).not.toContain('Alice的朋友6');
+    expect(msg.text).toContain('Alice的朋友 (5)');
+    expect(msg.text).not.toContain('Alice的朋友 (6)');
     expect(msg.text).toContain('剩餘名額：0 人');
     expect(bot.notionPatchSpy).toHaveBeenCalledTimes(1);
   });

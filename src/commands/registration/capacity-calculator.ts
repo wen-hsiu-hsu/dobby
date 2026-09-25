@@ -43,18 +43,24 @@ function escapeRegExp(value: string): string {
 }
 
 /**
+ * Numbering suffix format shared by calculateAddCapacity/calculateRemoveCapacity:
+ * "{prefix}" for the first entry (index 1), "{prefix} (2)", "{prefix} (3)", ... after
+ * that — same shape for season-member friends and non-season members alike.
+ */
+const NUMBERED_SUFFIX_PATTERN = ' \\((\\d+)\\)';
+
+/**
  * Finds the highest existing numbering already used for `prefix` inside `guests`,
  * so a new batch of entries can continue from there instead of restarting at 0.
  *
  * Matches the unsuffixed prefix itself (treated as index 1) and the numbered form
- * that calculateAddCapacity produces ("{prefix}2" for season-member friends,
- * "{prefix} 2" for non-season members). Anchored to the full string so an unrelated
- * guest that merely starts with `prefix` (e.g. "Alice" vs prefix "Al") is never
- * mistaken for one of this target's entries.
+ * that calculateAddCapacity produces ("{prefix} (2)", ...). Anchored to the full
+ * string so an unrelated guest that merely starts with `prefix` (e.g. "Alice" vs
+ * prefix "Al") is never mistaken for one of this target's entries.
  */
-function findMaxExistingIndex(guests: string[], prefix: string, numberSuffixPattern: string): number {
+function findMaxExistingIndex(guests: string[], prefix: string): number {
   const exactPattern = new RegExp(`^${escapeRegExp(prefix)}$`);
-  const numberedPattern = new RegExp(`^${escapeRegExp(prefix)}${numberSuffixPattern}$`);
+  const numberedPattern = new RegExp(`^${escapeRegExp(prefix)}${NUMBERED_SUFFIX_PATTERN}$`);
 
   let max = 0;
   for (const guest of guests) {
@@ -68,6 +74,17 @@ function findMaxExistingIndex(guests: string[], prefix: string, numberSuffixPatt
     }
   }
   return max;
+}
+
+/**
+ * Index of a single guest entry relative to `prefix`: 1 for the unsuffixed entry,
+ * N for "{prefix} (N)". Used to sort removal candidates so the highest-numbered
+ * entry is removed first — see calculateRemoveCapacity for why order matters.
+ */
+function guestIndex(guest: string, prefix: string): number {
+  if (guest === prefix) return 1;
+  const match = guest.match(new RegExp(`^${escapeRegExp(prefix)}${NUMBERED_SUFFIX_PATTERN}$`));
+  return match ? parseInt(match[1] as string, 10) : 1;
 }
 
 export function calculateAddCapacity(
@@ -109,19 +126,14 @@ export function calculateAddCapacity(
   // server-side, silently discarding one of the registrations even though this code
   // believed it wrote two.
   const prefix = isSelfSeasonMember ? `${targetName}的朋友` : targetName;
-  // Season member's friends: "{Name}的朋友" or "{Name}的朋友2", etc.
-  // Non-season members: "{Name}" or "{Name} 2", etc.
-  const numberSuffixPattern = isSelfSeasonMember ? '(\\d+)' : ' (\\d+)';
-  const startIndex = findMaxExistingIndex(event.guests, prefix, numberSuffixPattern);
+  // Season member's friends: "{Name}的朋友" or "{Name}的朋友 (2)", etc.
+  // Non-season members: "{Name}" or "{Name} (2)", etc.
+  const startIndex = findMaxExistingIndex(event.guests, prefix);
 
   const newEntries: string[] = [];
   for (let i = 0; i < actualDelta; i++) {
     const index = startIndex + i + 1;
-    if (index === 1) {
-      newEntries.push(prefix);
-    } else {
-      newEntries.push(isSelfSeasonMember ? `${prefix}${index}` : `${prefix} ${index}`);
-    }
+    newEntries.push(index === 1 ? prefix : `${prefix} (${index})`);
   }
 
   const newGuests = [...event.guests, ...newEntries];
@@ -158,12 +170,10 @@ export function calculateRemoveCapacity(
 ): CapacityResult {
   const prefix = isSelfSeasonMember ? `${targetName}的朋友` : targetName;
   // Match the prefix exactly, or the prefix followed by the numbering suffix that
-  // calculateAddCapacity actually produces ("{prefix}2" for season-member friends,
-  // "{prefix} 2" for non-season members' own entries). A plain startsWith would also
-  // match unrelated names that merely share this name as a string prefix (e.g. target
-  // "Al" would wrongly match existing guests "Alice"/"Alice 2").
-  const suffixPattern = isSelfSeasonMember ? '\\d+' : ' \\d+';
-  const exactOrNumberedPattern = new RegExp(`^${escapeRegExp(prefix)}(${suffixPattern})?$`);
+  // calculateAddCapacity actually produces ("{prefix} (2)", etc). A plain startsWith
+  // would also match unrelated names that merely share this name as a string prefix
+  // (e.g. target "Al" would wrongly match existing guests "Alice"/"Alice (2)").
+  const exactOrNumberedPattern = new RegExp(`^${escapeRegExp(prefix)}(${NUMBERED_SUFFIX_PATTERN})?$`);
   const toRemove = event.guests.filter((g) => exactOrNumberedPattern.test(g));
 
   if (toRemove.length === 0) {
@@ -178,7 +188,12 @@ export function calculateRemoveCapacity(
     // to Notion and reply "取消報名成功" despite nothing actually changing.
     return { canAdd: false, error: '取消數量需大於 0' };
   }
-  const toRemoveSlice = toRemove.slice(0, removeCount);
+  // Remove the highest-numbered entries first, leaving the unsuffixed "{prefix}"
+  // entry (index 1) for last. Filtering in event.guests order (as before) instead
+  // removed whichever entry happened to appear first in the array — often the
+  // unsuffixed one — which left gaps like "{prefix} (2)"/"{prefix} (3)" with no
+  // "{prefix}" and confused users into thinking a registration had vanished.
+  const toRemoveSlice = [...toRemove].sort((a, b) => guestIndex(b, prefix) - guestIndex(a, prefix)).slice(0, removeCount);
   const newGuests = event.guests.filter((g) => !toRemoveSlice.includes(g));
 
   return { canAdd: true, newGuests, removedGuests: toRemoveSlice };
