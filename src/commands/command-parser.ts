@@ -35,11 +35,17 @@ export function parseCommand(text: string): ParsedCommand | null {
 
   // Registration with @mention first (e.g. "@Dobby @Name +1")
   if (body.startsWith('@')) {
-    const hasReg = body.match(/[+\-]\d+/);
-    const hasLeave = /假|銷假/.test(body);
+    // Strip the mention token itself (e.g. "@小明") before scanning for a command,
+    // so a display name that happens to contain "-1"/"+2"/"假" (e.g. "@小明-1號",
+    // "@放假中") isn't mistaken for a registration/leave command. Commands are
+    // always space-separated from the mention (see docs/commands.md), so
+    // everything up to the next whitespace is the mention, not the command.
+    const afterMention = body.replace(/^@\S+/, '');
+    const hasReg = afterMention.match(/[+\-]\d+/);
+    const hasLeave = /假|銷假/.test(afterMention);
     if (hasReg) return { type: CommandType.REGISTRATION, rawText: text, delta: hasReg[0] };
     if (hasLeave) {
-      if (body.includes('銷假')) return { type: CommandType.CANCEL_LEAVE, rawText: text };
+      if (afterMention.includes('銷假')) return { type: CommandType.CANCEL_LEAVE, rawText: text };
       return { type: CommandType.LEAVE, rawText: text };
     }
   }

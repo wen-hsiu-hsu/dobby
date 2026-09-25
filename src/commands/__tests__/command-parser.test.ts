@@ -120,4 +120,40 @@ describe('parseCommand', () => {
   it('returns UNKNOWN for unrecognized command', () => {
     expect(parseCommand('@Dobby xyz')?.type).toBe(CommandType.UNKNOWN);
   });
+
+  describe('@mention target (delegated commands)', () => {
+    it('parses @Dobby @Name +1 as REGISTRATION with target', () => {
+      const cmd = parseCommand('@Dobby @小明 +1');
+      expect(cmd?.type).toBe(CommandType.REGISTRATION);
+      expect(cmd?.delta).toBe('+1');
+    });
+
+    it('parses @Dobby @Name 假 as LEAVE with target', () => {
+      expect(parseCommand('@Dobby @小明 假')?.type).toBe(CommandType.LEAVE);
+    });
+
+    it('parses @Dobby @Name 銷假 as CANCEL_LEAVE with target', () => {
+      expect(parseCommand('@Dobby @小明 銷假')?.type).toBe(CommandType.CANCEL_LEAVE);
+    });
+
+    it('does not mistake a display name containing "-1" for a REGISTRATION command when there is no actual command', () => {
+      const cmd = parseCommand('@Dobby @小明-1號');
+      expect(cmd?.type).toBe(CommandType.UNKNOWN);
+      expect(cmd?.delta).toBeUndefined();
+    });
+
+    it('does not mistake a display name containing "+2" for a REGISTRATION command when there is no actual command', () => {
+      expect(parseCommand('@Dobby @阿+2')?.type).toBe(CommandType.UNKNOWN);
+    });
+
+    it('does not mistake a display name containing "假" for a LEAVE command when there is no actual command', () => {
+      expect(parseCommand('@Dobby @放假中')?.type).toBe(CommandType.UNKNOWN);
+    });
+
+    it('still parses the real command when the display name contains a command-like substring', () => {
+      const cmd = parseCommand('@Dobby @小明-1號 +1');
+      expect(cmd?.type).toBe(CommandType.REGISTRATION);
+      expect(cmd?.delta).toBe('+1');
+    });
+  });
 });
