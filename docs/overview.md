@@ -61,7 +61,7 @@ docker compose down
 
 ### 對外曝露與自動部署
 
-正式環境跑在自架的 Raspberry Pi 上（上面的 Docker Compose 方式不變），對外曝露跟自動部署都不是這個 repo 自己管的，而是 Pi 上兩個獨立於任何專案 repo 之外的**共用基礎設施**，之後 Pi 上新增其他專案時也共用同一套，不用每個專案各自處理一份：
+正式環境跑在自架的 Raspberry Pi 上（上面的 Docker Compose 方式不變；截至 2026-09-25 Pi 上接的仍是測試 LINE channel，正式 bot 還在 n8n 上跑，切換流程見下方「從 n8n 切換為正式 bot」），對外曝露跟自動部署都不是這個 repo 自己管的，而是 Pi 上兩個獨立於任何專案 repo 之外的**共用基礎設施**，之後 Pi 上新增其他專案時也共用同一套，不用每個專案各自處理一份：
 
 - **Cloudflare Tunnel**：outbound-only 連線，Pi 不用在路由器開任何 inbound port，家用（浮動）IP 不會曝光。同一個 tunnel 下用多條 Public Hostname 規則分流到 Pi 上不同的服務，dobby 分到的 hostname 導到 `localhost:<PORT>`（實際 port 看 Pi 上那份 `.env` 的 `PORT` 值，見下方）。`/webhook`、`/health`、`/logs` 三個端點都走同一個 hostname，沒有分開設定。
 - **pi-deployer**：Pi 上自架的通用 webhook 部署服務（不是 dobby 的一部分），GitHub push 新 commit 到這個 repo 時觸發自動 `git pull` + `docker compose up -d --build`，取代手動 SSH 上去部署。
@@ -71,6 +71,55 @@ docker compose down
 `docker-compose.yml` 的 `ports: "${PORT:-3000}:${PORT:-3000}"` 是特意保留給 Pi host 上的 Cloudflare Tunnel / pi-deployer 用的，不要因為「反正走 tunnel 不需要開 port」而誤刪——host 上這兩個服務都是透過這個對外的 port mapping 打到 container 裡的 app，不是走 docker network 內部解析。這裡的 `${PORT}` 是 Compose 在解析這份 YAML 時，從專案根目錄的 `.env` 讀值替換（跟同一個 `.env` 透過 `env_file:` 注入到容器內部是兩個不同機制，只是剛好共用同一份檔案），沒設的話 fallback 回 `3000`，跟 `src/config/env.ts` 的 zod schema 預設值一致。要換 port 只需要改 `.env` 的 `PORT`，不用再動這個檔案；但如果啟動 `docker compose` 的 shell 本身也 export 了 `PORT`，會蓋過 `.env` 裡的值，要注意這個優先順序。
 
 `docker-compose.dev.yml`（本地開發用）**刻意**維持 `"3000:3000"` 寫死，不吃這個機制——本地開發不需要換 port 的彈性，且裡面 ngrok tunnel 那行 `command` 也寫死指向 `app:3000`，兩處要嘛一起吃變數、要嘛都不動，目前選擇都不動，不是漏改。
+
+### 從 n8n 切換為正式 bot
+
+**現況（2026-09-25）**：有兩個 LINE bot——正式 bot 跑在 n8n 上，Pi 上的 dobby 接的是測試 channel。兩者共用同一組 Notion 資料庫，其他部分完全無關。n8n 原本的排程 workflow（週報推播、顯示名稱更新）都已經移植進這個專案（見 `docs/schedulers.md`）。目標是讓 Pi 上的 dobby 改接正式 channel，完全停用 n8n。
+
+以下幾點已經確認過，所以切換時**不需要**處理：
+
+- **userId 不用轉換**：兩個 bot 在同一個 LINE Provider 底下，LINE 的 userId 是依 Provider 發放的，同一個人在兩個 bot 看到的 userId 相同，USERS DB 裡的資料（包括 `is_admin`）可以直接沿用。
+- **`@Dobby` 指令前綴不用改**：`command-parser.ts` 寫死比對 `@Dobby`，兩個 bot 的顯示名稱都叫 Dobby。
+- **Notion 資料不用清**：開發和測試一律直接使用正式的 Notion 資料，不另外建開發用的 DB（這是既定決定，見 `docs/development.md`「本地開發」）。
+- **USERS DB 寫法一致**：n8n 和 dobby 寫 USERS DB 的方式相同（建 row、更新 `groups`、`message_counts`）。
+- **自動部署維持原樣**：切換後 pi-deployer 一樣是 push 到 `main` 就部署。這代表每次 push 都直接上正式環境，push 前要先在本機跑過測試。
+
+**切換前準備：**
+
+- 選好切換時間，避開週日 09:00（週報推播）和週一 04:00（顯示名稱更新）附近，免得某個排程兩邊都跑或兩邊都沒跑。
+- 準備好 Pi 上新的 `.env`：
+  - `LINE_CHANNEL_SECRET`、`LINE_CHANNEL_ACCESS_TOKEN` 換成正式 channel 的值
+  - `DOBBY_GROUP_IDS` 換成正式群組的 ID（沒換的話週報會推到測試群組）
+  - `R2_LOG_PREFIX` 設成 `production` 以外的值（例如 `prod`），原因見下方
+  - `LOGS_ACCESS_TOKEN` 換一組新的（測試期間這組 token 可能已經在很多地方出現過）
+
+**切換步驟（依序）：**
+
+1. 在 n8n 停用**所有** workflow，包括排程類的。只改 webhook URL 關不掉 n8n 自己的 cron；沒停用的話週日會推兩次週報，兩邊也會同時寫 Notion。先停用不要刪，留著回滾用。
+2. 在 Pi 上重建服務，同時清掉測試期間的 log：
+   ```bash
+   docker compose down            # 移除容器，Docker json-file log 會一起消失
+   docker volume rm dobby_logs    # 清掉 /logs 頁面讀的 log volume
+   # 換上新的 .env
+   docker compose up -d --build
+   ```
+   這裡是先 `down` 停掉 process 再刪 volume，所以不會踩到下方「日誌」一節講的「刪掉 process 正在寫的檔案」那個雷。測試 log 不另外封存。
+3. 在 LINE Developers Console 把正式 channel 的 Webhook URL 從 n8n 改成 Pi 的 Cloudflare hostname 加上 `/webhook`，按 Verify 確認能通。
+4. 在 LINE Official Account Manager 確認回應設定是「Webhook 開啟、自動回應訊息關閉」，避免和 `auto-reply.json` 重複回覆。
+
+**為什麼一定要改 `R2_LOG_PREFIX`**：R2 上的物件 key 是 `logs/${R2_LOG_PREFIX || NODE_ENV}/<檔名>`（`src/utils/log-upload.ts`）。Pi 上的 `NODE_ENV=production`，所以測試期間的 log 已經存在 `logs/production/` 底下。如果不改 prefix，切換當天新產生的 `app.<同一天日期>.1.log` 會直接覆蓋 R2 上同名的測試 log，新舊資料也會混在同一個資料夾。R2 上舊的 `logs/production/` 不需要的話，可以到 R2 後台刪掉。
+
+**切換後驗證：**
+
+- 在正式群組實際跑幾個指令（`@Dobby`、`@Dobby next`、報名、請假），確認 `/logs` 出現乾淨的新事件，管理員指令也有正常辨識。
+- 第一個週日確認週報只推一次，而且推到正確的群組。
+- 第一個週一確認 `display-name-update` 的結果（`/logs` 的排程分頁）。USERS DB 的 `groups` 欄位裡會留著一些測試群組的 ID，正式 bot 不在那些群組裡，查的時候會 404，然後改試下一個群組。這只是多打幾次 API，不影響結果（見 `docs/schedulers.md`「顯示名稱批次更新」）。
+
+**回滾**：把 Webhook URL 改回 n8n，重新啟用 n8n 的 workflow，再用 `docker compose stop` 停掉 Pi 上的服務，避免它的排程也在跑。
+
+**切換後本機開發**：本機 `.env` 一律用**測試 channel 的 token 和測試群組 ID**，不要放正式 channel 的值，原因見 `docs/development.md`「本地開發」。
+
+切換完成後，把這一節開頭的「現況」和上方「對外曝露與自動部署」第一段的括號說明，改成切換完成的日期與狀態。
 
 ### 監控
 
