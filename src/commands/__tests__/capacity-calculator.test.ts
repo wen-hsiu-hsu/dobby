@@ -334,6 +334,34 @@ describe('calculateRemoveCapacity', () => {
     expect(result.canAdd).toBe(true);
     expect(result.newGuests).toEqual(['Carol的朋友']);
   });
+
+  // Regression tests: delta=0 (e.g. a "-0"/"+0" command, which the parser's \d+ happily
+  // accepts) used to report canAdd:true with newGuests identical to event.guests — the
+  // caller would then write a no-op update to Notion and reply "取消報名成功 ✅" even
+  // though nothing changed. Must behave consistently with the "no registration found"
+  // case above: no silent no-op success.
+  describe('delta=0', () => {
+    it('returns an error, not a no-op success, when the target already has a registration', () => {
+      const event: CalendarEventData = { ...baseEvent, guests: ['Alice'] };
+      const result = calculateRemoveCapacity(event, 'Alice', 0, false);
+      expect(result.canAdd).toBe(false);
+      expect(result.error).toBe('取消數量需大於 0');
+      expect(result.newGuests).toBeUndefined();
+    });
+
+    it('returns an error consistent with the "no registration found" case when the target has no registration', () => {
+      const result = calculateRemoveCapacity(baseEvent, 'Nobody', 0, false);
+      expect(result.canAdd).toBe(false);
+      expect(result.error).toMatch(/找不到/);
+    });
+
+    it('treats -0 the same as 0 (Math.abs collapses the sign)', () => {
+      const event: CalendarEventData = { ...baseEvent, guests: ['Carol的朋友'] };
+      const result = calculateRemoveCapacity(event, 'Carol', -0, true);
+      expect(result.canAdd).toBe(false);
+      expect(result.error).toBe('取消數量需大於 0');
+    });
+  });
 });
 
 describe('calculateTotalSlots', () => {

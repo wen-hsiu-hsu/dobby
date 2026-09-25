@@ -171,6 +171,13 @@ export function calculateRemoveCapacity(
   }
 
   const removeCount = Math.min(Math.abs(delta), toRemove.length);
+  if (removeCount === 0) {
+    // delta is 0 (e.g. "-0"/"+0"): there's a registration to remove, but the request
+    // asked to remove none of it. Must not report success — a 0-length removal is not
+    // a real change, and the caller would otherwise write the unchanged guest list back
+    // to Notion and reply "取消報名成功" despite nothing actually changing.
+    return { canAdd: false, error: '取消數量需大於 0' };
+  }
   const toRemoveSlice = toRemove.slice(0, removeCount);
   const newGuests = event.guests.filter((g) => !toRemoveSlice.includes(g));
 
