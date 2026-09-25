@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from 'express';
-import { readRecentLogs, type LogEntry } from '../utils/log-reader.js';
+import { readRecentLogs, MAX_WINDOW_DAYS, type LogEntry } from '../utils/log-reader.js';
 import { getLogLevel } from '../utils/logger.js';
 import { getR2SyncStatus, type R2SyncStatus } from '../utils/log-upload.js';
 import { logsAuthMiddleware } from '../middleware/logs-auth.js';
@@ -889,7 +889,13 @@ interface EventView {
   durationText: string;
   searchText: string;
   rawEntries: LogEntry[];
-  steps: TimelineStep[];
+  /**
+   * 完整時間軸（含每一步展開後的 Notion/LINE payload JSON 樹）——組裝成本
+   * 不小，7 天份量的事件裡使用者實際只會點開一兩筆，所以延遲到真的要畫
+   * 詳情頁（`eventDetailHtml`/`renderEventDetailText`）那一刻才算，並快取
+   * 結果避免同一個 EventView 被畫兩次時重算。
+   */
+  getSteps: () => TimelineStep[];
 }
 
 const STEPS_HEADING_BY_KIND: Partial<Record<EventKind, string>> = { schedule: '執行過程', system: '發生了什麼' };
@@ -909,6 +915,8 @@ function buildEventView(group: FlowGroup, rawEntries: LogEntry[]): EventView {
   const groupIdRaw = groupGroupId(group);
   const origin = groupOrigin(group, kind);
   const source = groupSource(group, kind);
+
+  let cachedSteps: TimelineStep[] | undefined;
 
   return {
     key: group.reqId || 'noreq',
@@ -938,7 +946,7 @@ function buildEventView(group: FlowGroup, rawEntries: LogEntry[]): EventView {
       .join(' ')
       .toLowerCase(),
     rawEntries,
-    steps: buildTimeline(group),
+    getSteps: () => (cachedSteps ??= buildTimeline(group)),
   };
 }
 
@@ -967,8 +975,16 @@ const SYSTEM_EVENT_INFO: Record<string, SystemEventInfo> = {
 // 以為 webhook 出了事。
 const SYSTEM_EVENT_FALLBACK: SystemEventInfo = { origin: '（未知系統來源）', source: '未知', stepsHeading: '發生了什麼' };
 
-/** 沒有配對到任何 reqId、也不是伺服器生命週期訊息的單行 log（例如 LINE 簽章驗證失敗、webhook 一次收到多筆事件）——每一筆各自變成一個獨立的「系統」事件，不跟別的無 reqId 訊息合併。 */
-function buildSystemEventView(entry: LogEntry, index: number): EventView {
+/**
+ * 沒有配對到任何 reqId、也不是伺服器生命週期訊息的單行 log（例如 LINE 簽章驗證失敗、webhook 一次收到多筆事件）——每一筆各自變成一個獨立的「系統」事件，不跟別的無 reqId 訊息合併。
+ *
+ * `dupeIndex` 只用來在極少見的「兩筆系統事件時間戳完全相同」情況下讓 key
+ * 保持唯一，不是陣列位置索引——`?detail=` 會重新讀一次 log、重新分組，
+ * 如果 key 綁陣列位置，兩次讀取之間只要多寫入一筆新的系統層級 log，既有
+ * 事件的位置全部往後挪一格，使用者點開的那一筆會靜默換成別的事件內容（不
+ * 是 404，是內容對不上），比單純顯示不出來更容易誤導人，所以改用時間戳。
+ */
+function buildSystemEventView(entry: LogEntry, dupeIndex: number): EventView {
   const levelName = levelNameOf(entry);
   const msg = String(entry.msg ?? '系統事件');
   const { origin, source, stepsHeading } = SYSTEM_EVENT_INFO[msg] ?? SYSTEM_EVENT_FALLBACK;
@@ -990,10 +1006,11 @@ function buildSystemEventView(entry: LogEntry, index: number): EventView {
     body: '',
     bodyLabel: '',
   };
+  const t = entry.time ?? 0;
   return {
-    key: `sys-${index}`,
+    key: dupeIndex > 0 ? `sys-${t}-${dupeIndex}` : `sys-${t}`,
     reqId: '',
-    timeMs: entry.time ?? 0,
+    timeMs: t,
     time: taipeiTimeOnlyFormatter.format(new Date(entry.time ?? 0)),
     stamp: formatTime(entry.time ?? 0),
     kind: 'system',
@@ -1016,7 +1033,7 @@ function buildSystemEventView(entry: LogEntry, index: number): EventView {
     durationText: '—',
     searchText: `${msg} ${noteText}`.toLowerCase(),
     rawEntries: [entry],
-    steps: [step],
+    getSteps: () => [step],
   };
 }
 
@@ -1145,8 +1162,9 @@ function eventDetailHtml(ev: EventView, active: boolean): string {
         return `<div class="batch-section"><div class="detail-section-label">批次結果</div><div class="batch-bars">${bars}</div><div class="batch-stats">${stats}</div></div>`;
       })()
     : '';
-  const stepsHtml = ev.steps.length > 0
-    ? ev.steps.map((s, i) => timelineStepHtml(s, i === ev.steps.length - 1)).join('')
+  const evSteps = ev.getSteps();
+  const stepsHtml = evSteps.length > 0
+    ? evSteps.map((s, i) => timelineStepHtml(s, i === evSteps.length - 1)).join('')
     : '<div class="tl-empty">沒有可顯示的處理步驟</div>';
   const rawJsonText = escapeHtml(JSON.stringify(ev.rawEntries, null, 2));
 
@@ -1230,13 +1248,43 @@ function buildEvents(entries: LogEntry[]): EventView[] {
   const groups = buildFlowGroups(displayRows);
   const rawByReqId = bucketRawEntries(reqIdEntries);
 
-  return [
-    ...groups.map((g) => buildEventView(g, rawByReqId.get(g.reqId) ?? [])),
-    ...systemEntries.map((e, i) => buildSystemEventView(e, i)),
-  ].sort((a, b) => b.timeMs - a.timeMs);
+  const seenSystemTimes = new Map<number, number>();
+  const systemViews = systemEntries.map((e) => {
+    const t = e.time ?? 0;
+    const dupeIndex = seenSystemTimes.get(t) ?? 0;
+    seenSystemTimes.set(t, dupeIndex + 1);
+    return buildSystemEventView(e, dupeIndex);
+  });
+
+  return [...groups.map((g) => buildEventView(g, rawByReqId.get(g.reqId) ?? [])), ...systemViews].sort(
+    (a, b) => b.timeMs - a.timeMs
+  );
 }
 
-function renderHtml(entries: LogEntry[]): string {
+const WINDOW_DAY_OPTIONS = [1, 3, MAX_WINDOW_DAYS] as const;
+
+/** 讀取範圍切換連結——用一般的 `<a href>` 換頁（不是 JS 換頁），token 照抄目前這次請求用的那一份，跟其他頁面連結一致。 */
+function daysSwitcherHtml(days: number, token: string): string {
+  const tokenQuery = token ? `&token=${encodeURIComponent(token)}` : '';
+  const links = WINDOW_DAY_OPTIONS.map((d) => {
+    const label = d === 1 ? '24 小時' : `${d} 天`;
+    const activeClass = d === days ? ' active' : '';
+    return `<a class="days-link${activeClass}" href="${escapeHtml(`?days=${d}${tokenQuery}`)}">${label}</a>`;
+  }).join('');
+  return `<div class="days-switcher">${links}</div>`;
+}
+
+/** 尚未載入完整內容的事件詳情——只留一個空殼給 `selectEvent()` 判斷「還沒 fetch 過」，點開時才用 `?detail=` 現組現拿（見 `createLogsRouter` 的說明）。 */
+function lazyDetailPlaceholderHtml(ev: EventView): string {
+  return `<div class="ev-detail" id="detail-${escapeHtml(ev.key)}"></div>`;
+}
+
+/** 安全內嵌進 `<script>` 的字串常值——JSON.stringify 本身不會跳脫 `<`，`</script>` 字面量若剛好出現在字串裡（例如惡意/巧合的 token 值）會提早關閉整個 script 標籤，換成 `<` 跳脫掉即可避免。 */
+function jsStringLiteral(value: string): string {
+  return JSON.stringify(value).replace(/</g, '\\u003C');
+}
+
+function renderHtml(entries: LogEntry[], days: number, token: string): string {
   const levelBadgeHtml = logLevelBadgeHtml(getLogLevel());
   const r2BadgeHtml = r2SyncBadgeHtml(getR2SyncStatus());
   const noReqIdEntries = entries.filter((e) => !(typeof e.reqId === 'string' && e.reqId));
@@ -1268,7 +1316,12 @@ function renderHtml(entries: LogEntry[]): string {
   const trailingBoundaryHtml = trailingBoundary
     ? `<div class="ev-boundary"><span class="ev-boundary-icon">⏻</span><span class="ev-boundary-label">${escapeHtml(trailingBoundary.label)}</span><span class="ev-boundary-meta">${escapeHtml(trailingBoundary.meta)}</span><span class="ev-boundary-time">${escapeHtml(trailingBoundary.time)}</span></div>`
     : '';
-  const detailHtml = events.map((ev, i) => eventDetailHtml(ev, i === 0)).join('');
+  // 完整明細（含展開後的 Notion/LINE payload JSON 樹）只有第一筆（最新一筆，
+  // 預設選中的那筆）在初始 HTML 就內嵌好，其餘事件先送一個空殼，使用者點開
+  // 時才由前端 JS 呼叫 `?detail=` 現組現拿——同一份 events 陣列裡，7 天份量
+  // 的事件使用者實際只會點開其中一兩筆，組完整明細（尤其是 JSON 樹）的成本
+  // 不該花在使用者永遠不會點開的事件上。
+  const detailHtml = events.map((ev, i) => (i === 0 ? eventDetailHtml(ev, true) : lazyDetailPlaceholderHtml(ev))).join('');
 
   return `<!DOCTYPE html>
 <html lang="zh-Hant">
@@ -1297,6 +1350,9 @@ function renderHtml(entries: LogEntry[]): string {
     #refresh-btn { font-size: 12px; color: #8b8fa3; background: transparent; border: 1px solid #262835; border-radius: 8px; padding: 7px 12px; }
     .level-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 500; font-family: ui-monospace, monospace; border-radius: 4px; padding: 5px 9px; flex: none; }
     .level-badge-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+    .days-switcher { display: flex; gap: 6px; flex: none; }
+    .days-link { font-size: 11.5px; text-decoration: none; background: transparent; border: 1px solid #262835; border-radius: 4px; padding: 6px 11px; color: #8b8fa3; }
+    .days-link.active { background: #b5abfc; border-color: #b5abfc; color: #14151f; font-weight: 500; }
 
     main { display: grid; grid-template-columns: 400px 1fr; flex: 1 1 auto; min-height: 0; }
 
@@ -1426,6 +1482,7 @@ function renderHtml(entries: LogEntry[]): string {
       <span class="divider"></span>
       ${levelBadgeHtml}
       ${r2BadgeHtml}
+      ${daysSwitcherHtml(days, token)}
       <span class="count" id="count-label">共 ${totalCount} 筆</span>
       <span class="count-err" id="count-err-label">${errorCount} 筆需要注意</span>
       <input type="text" id="search" placeholder="搜尋指令、回覆、reqId、使用者…" oninput="applyFilters()">
@@ -1449,6 +1506,8 @@ function renderHtml(entries: LogEntry[]): string {
   </div>
 
   <script>
+    const LOGS_TOKEN = ${jsStringLiteral(token)};
+    const LOGS_DAYS = ${days};
     let activeTab = 'all';
 
     function setTab(tab) {
@@ -1470,9 +1529,42 @@ function renderHtml(entries: LogEntry[]): string {
       document.getElementById('ev-list-empty').style.display = visible === 0 ? 'block' : 'none';
     }
 
+    function showDetail(key) {
+      document.querySelectorAll('.ev-detail').forEach((d) => d.classList.toggle('active', d.id === 'detail-' + key));
+    }
+
+    // 事件詳情（含展開後的 Notion/LINE payload JSON 樹）只有第一筆（預設選
+    // 中那筆）在頁面載入時就內嵌好，其餘事件是一個空殼 <div id="detail-KEY">
+    // ——第一次點開時才用 ?detail= 換一份完整內容塞回去，換過一次之後
+    // （children.length > 0）就直接切換顯示，不會重複打 API。
     function selectEvent(key) {
       document.querySelectorAll('.ev-item').forEach((item) => item.classList.toggle('active', item.dataset.key === key));
-      document.querySelectorAll('.ev-detail').forEach((d) => d.classList.toggle('active', d.id === 'detail-' + key));
+      const el = document.getElementById('detail-' + key);
+      if (!el || el.children.length > 0) {
+        showDetail(key);
+        return;
+      }
+      el.innerHTML = '<div class="tl-empty" style="padding:22px;">載入中…</div>';
+      const url = '?detail=' + encodeURIComponent(key) + '&days=' + LOGS_DAYS + '&token=' + encodeURIComponent(LOGS_TOKEN);
+      fetch(url)
+        // fetch() 只有網路層失敗才會 reject——4xx/5xx 一樣算「成功」，一定要
+        // 自己檢查 r.ok，不然 404/401 的錯誤訊息 HTML 會被當成正常內容塞進
+        // 頁面，變成一個不屬於 .ev-detail 家族、沒有 id 的孤兒元素，這個事件
+        // 之後再也點不開（getElementById('detail-' + key) 找不到東西）。
+        .then((r) => {
+          if (!r.ok) throw new Error('detail fetch failed: ' + r.status);
+          return r.text();
+        })
+        .then((html) => {
+          const tmp = document.createElement('div');
+          tmp.innerHTML = html;
+          const fresh = tmp.firstElementChild;
+          if (fresh) el.replaceWith(fresh);
+          showDetail(key);
+        })
+        .catch(() => {
+          el.innerHTML = '<div class="tl-empty" style="padding:22px;">載入失敗，請重新整理再試一次</div>';
+        });
     }
 
     function toggleMask() {
@@ -1542,10 +1634,11 @@ function renderEventDetailText(ev: EventView): string {
 
   lines.push('');
   lines.push(`## ${ev.stepsHeading}`);
-  if (ev.steps.length === 0) {
+  const steps = ev.getSteps();
+  if (steps.length === 0) {
     lines.push('（沒有可顯示的處理步驟）');
   } else {
-    for (const step of ev.steps) {
+    for (const step of steps) {
       const head = [step.endpointLabel, unescapeHtml(step.title), unescapeHtml(step.path), step.duration]
         .filter(Boolean)
         .join('  ');
@@ -1560,13 +1653,21 @@ function renderEventDetailText(ev: EventView): string {
   return lines.join('\n') + '\n';
 }
 
+/** `?days=` 的 clamp 邏輯跟 `readRecentLogs` 內部用的一致（[1, MAX_WINDOW_DAYS]，超出保留期讀了也沒有更多資料），這裡提前 clamp 一次純粹是為了讓頁面上的切換連結／`LOGS_DAYS` 顯示跟實際讀到的範圍對得上，不是重複的資料保護。 */
+function parseWindowDays(raw: unknown): number {
+  const n = typeof raw === 'string' ? Number(raw) : NaN;
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(Math.max(Math.trunc(n), 1), MAX_WINDOW_DAYS);
+}
+
 export function createLogsRouter(logDir: string): Router {
   const router = Router();
 
   router.get('/', logsAuthMiddleware, async (req: Request, res: Response) => {
+    const days = parseWindowDays(req.query['days']);
     const format = req.query['format'];
     if (format === 'text') {
-      const entries = await readRecentLogs(logDir);
+      const entries = await readRecentLogs(logDir, days);
       const events = buildEvents(entries);
       const reqId = req.query['reqId'];
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -1577,16 +1678,38 @@ export function createLogsRouter(logDir: string): Router {
       }
       const match = events.find((ev) => ev.reqId === reqId);
       if (!match) {
-        res.status(404).send(`找不到 reqId=${reqId} 的事件（可能已超過 7 天保留期，或伺服器已重啟過）\n`);
+        res
+          .status(404)
+          .send(`找不到 reqId=${reqId} 的事件（可能已超過保留期、伺服器已重啟過，或不在目前查詢的 ${days} 天範圍內，可加上 &days=${MAX_WINDOW_DAYS} 擴大範圍）\n`);
         return;
       }
       res.send(renderEventDetailText(match));
       return;
     }
 
-    const entries = await readRecentLogs(logDir);
+    // ?detail=<key>：單一事件的完整明細（含展開後的 Notion/LINE payload
+    // JSON 樹）——首次載入頁面時只有第一筆事件內嵌這份內容，其餘事件由
+    // 前端 selectEvent() 點開時才呼叫這裡現組現拿，見 renderHtml() 的
+    // lazyDetailPlaceholderHtml() 說明。用跟主頁一樣的 days 重新讀一次
+    // entries、重新分組，不額外維護跨請求的快取/session 狀態。
+    const detailKey = req.query['detail'];
+    if (typeof detailKey === 'string' && detailKey) {
+      const entries = await readRecentLogs(logDir, days);
+      const events = buildEvents(entries);
+      const match = events.find((ev) => ev.key === detailKey);
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      if (!match) {
+        res.status(404).send('<div class="tl-empty" style="padding:22px;">找不到這筆事件（可能剛好超過目前查詢的時間範圍，或伺服器重啟過，重新整理頁面再試一次）</div>');
+        return;
+      }
+      res.send(eventDetailHtml(match, true));
+      return;
+    }
+
+    const entries = await readRecentLogs(logDir, days);
+    const tokenParam = req.query['token'];
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(renderHtml(entries));
+    res.send(renderHtml(entries, days, typeof tokenParam === 'string' ? tokenParam : ''));
   });
 
   return router;

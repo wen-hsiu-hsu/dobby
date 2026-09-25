@@ -11,6 +11,7 @@ vi.mock('../../utils/log-upload.js', () => ({
 }));
 
 vi.mock('../../utils/log-reader.js', () => ({
+  MAX_WINDOW_DAYS: 7,
   readRecentLogs: vi.fn().mockResolvedValue([
     {
       level: 30,
@@ -96,6 +97,23 @@ async function getLogsHtml(): Promise<string> {
   return res.text;
 }
 
+// 頁面載入時只有第一筆（最新一筆）事件內嵌完整明細，其餘事件的明細要靠
+// `?detail=<key>` 現組現拿（見 `routes/logs.ts` 的 `lazyDetailPlaceholderHtml`
+// 說明）——測試某個特定 reqId/系統事件的詳情頁內容時，用這個而不是
+// `getLogsHtml()`，否則除了最新那一筆以外都只會拿到空殼。呼叫這個函式會讓
+// `readRecentLogs` 被再呼叫一次；測試如果用 `mockResolvedValueOnce` 模擬固
+// 定資料，且同一個測試需要查好幾個不同事件的詳情，要把 `mockResolvedValueOnce`
+// 疊加對應次數（一次 `getLogsHtml()`/`getEventDetailHtml()` 各算一次呼叫）。
+async function getEventDetailHtml(key: string, extraQuery: Record<string, string> = {}): Promise<string> {
+  const app = express();
+  app.use('/logs', createLogsRouter('/unused/because/reader/is/mocked'));
+  const res = await request(app)
+    .get('/logs')
+    .query({ token: process.env['LOGS_ACCESS_TOKEN'], detail: key, ...extraQuery });
+  expect(res.status).toBe(200);
+  return res.text;
+}
+
 async function getLogsText(extraQuery: Record<string, string> = {}): Promise<{ status: number; text: string }> {
   const app = express();
   app.use('/logs', createLogsRouter('/unused/because/reader/is/mocked'));
@@ -114,11 +132,12 @@ describe('createLogsRouter', () => {
     expect(itemCount).toBe(4);
 
     // 2024-01-01T00:00:00Z + 8h = 2024-01-01 08:00:00 Taipei time
-    expect(html).toContain('2024-01-01 08:00:00');
+    const detail = await getEventDetailHtml('req-1');
+    expect(detail).toContain('2024-01-01 08:00:00');
   });
 
   it('uses the Notion call purpose as the timeline step title and shows the endpoint path', async () => {
-    const html = await getLogsHtml();
+    const html = await getEventDetailHtml('req-2');
 
     expect(html).toContain('查詢成員姓名與繳費狀態');
     // GET /pages/{id} calls carry no database ID in their path, so path is
@@ -127,12 +146,12 @@ describe('createLogsRouter', () => {
   });
 
   it('shows a "尚無回應記錄" note for a Notion call with no captured response', async () => {
-    const html = await getLogsHtml();
+    const html = await getEventDetailHtml('req-2');
     expect(html).toContain('尚無回應記錄');
   });
 
   it('shows the LINE reply message content for a fully paired reply', async () => {
-    const html = await getLogsHtml();
+    const html = await getEventDetailHtml('req-5');
 
     expect(html).toContain('POST /v2/bot/message/reply');
     expect(html).toContain('測試訊息內容A');
@@ -350,7 +369,7 @@ describe('createLogsRouter', () => {
   });
 
   it('renders a footer with real "raw log" / "copy JSON" actions wired to that event\'s own raw entries', async () => {
-    const html = await getLogsHtml();
+    const html = await getEventDetailHtml('req-5');
 
     expect(html).toContain('看這筆的原始 log');
     expect(html).toContain('複製 JSON');
@@ -456,13 +475,21 @@ describe('createLogsRouter', () => {
   });
 
   it('gives each known "system" message its own accurate 來自/stepsHeading instead of a shared "index.ts 錯誤處理" label for everything', async () => {
-    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+    const entries = [
       { level: 40, time: Date.UTC(2024, 0, 1, 1, 0, 0), msg: 'LINE signature validation failed', err: { message: 'bad signature' }, path: '/webhook', method: 'POST' },
       { level: 30, time: Date.UTC(2024, 0, 1, 2, 0, 0), msg: 'Webhook received multiple events', eventCount: 2 },
       { level: 30, time: Date.UTC(2024, 0, 1, 3, 0, 0), msg: 'Some future system-level message nobody wrote a rule for yet' },
-    ]);
+    ];
+    // 「來自」欄位只在詳情頁顯示，不在清單卡片上——這裡要各自查三筆系統
+    // 事件的詳情，每查一筆都會讓 readRecentLogs 被呼叫一次，所以要疊三次
+    // mockResolvedValueOnce。系統事件的 key 是 `sys-<time>`（不是陣列位置，
+    // 見 buildSystemEventView 的說明），直接從 entries 的 time 算出來，不
+    // 要手動猜索引。
+    vi.mocked(readRecentLogs).mockResolvedValueOnce(entries).mockResolvedValueOnce(entries).mockResolvedValueOnce(entries);
 
-    const html = await getLogsHtml();
+    const html = (
+      await Promise.all(entries.map((e) => getEventDetailHtml(`sys-${e.time}`)))
+    ).join('');
 
     // 簽章驗證失敗維持原本的「index.ts 錯誤處理」文案
     expect(html).toContain('index.ts 錯誤處理');
@@ -540,7 +567,7 @@ describe('createLogsRouter', () => {
   // 進 log（見 event-router.test.ts），沒有驗證 /logs 頁面實際渲染出來的
   // HTML 裡看不看得到——這裡才是這兩個欄位真正「顯示給人看」的地方。
   it('shows webhookEventId on the 起點 step, and only shows the isRedelivery marker when it is actually true', async () => {
-    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+    const entries = [
       {
         level: 30,
         time: Date.UTC(2024, 0, 1, 0, 0, 0),
@@ -561,9 +588,11 @@ describe('createLogsRouter', () => {
         isRedelivery: false,
         msg: 'Processing event',
       },
-    ]);
+    ];
+    // 兩筆各自要查一次詳情頁，各查一次都會讓 readRecentLogs 被呼叫一次。
+    vi.mocked(readRecentLogs).mockResolvedValueOnce(entries).mockResolvedValueOnce(entries);
 
-    const html = await getLogsHtml();
+    const html = (await getEventDetailHtml('req-redelivered')) + (await getEventDetailHtml('req-normal'));
 
     expect(html).toContain('webhookEventId: 01M31BEND6EPJ7FSWMDHC7BGRQ');
     expect(html).toContain('webhookEventId: 01M31XXXXXXXXXXXXXXXXXXXXX');

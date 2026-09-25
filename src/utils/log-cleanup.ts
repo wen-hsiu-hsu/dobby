@@ -1,8 +1,7 @@
 import { readdir, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { logger } from './logger.js';
-
-const RETENTION_DAYS = 7;
+import { MAX_WINDOW_DAYS as RETENTION_DAYS } from './log-reader.js';
 
 export async function cleanOldLogs(logDir: string): Promise<void> {
   let files: string[];

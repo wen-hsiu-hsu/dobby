@@ -16,7 +16,13 @@
 
 搜尋框比對的是事件標題、預覽內容、`reqId`、使用者顯示名稱/userId、「來自」欄位，不是逐行比對 log 訊息文字。
 
-事件卡片跟時間軸的完整內容都是伺服器端一次算好、跟著頁面一起送出，切換分頁、搜尋、選擇事件都只是顯示/隱藏已經渲染好的區塊，不需要等瀏覽器重新整理或重新計算。
+事件卡片（清單這一側）都是伺服器端一次算好、跟著頁面一起送出，切換分頁、搜尋都只是顯示/隱藏已經渲染好的區塊，不需要等瀏覽器重新整理或重新計算。**完整時間軸明細**（含展開後的 Notion/LINE payload JSON 樹）則只有預設選中的第一筆（最新一筆）事件會內嵌在初始頁面裡，其餘事件第一次點開時才由前端呼叫 `?detail=<reqId>` 現組現拿、插入頁面並快取起來，之後再點回同一筆不會重複打 API——7 天份量的事件裡實際只會點開其中一兩筆，先把每一筆的 JSON 樹都組好送出去很浪費（見下方「讀取範圍與載入效能」）。
+
+## 讀取範圍與載入效能
+
+Header 上「24 小時／3 天／7 天」是讀取範圍切換（`?days=`），預設 24 小時。這是刻意的效能取捨：正式環境日誌量大時，一次讀 7 天全部日誌、把每一筆事件完整時間軸都算好送出會讓頁面載入很慢，所以預設只讀最近 24 小時；要看更舊的事件，切到「3 天」或「7 天」（保留期上限，見 `docs/overview.md`「日誌」小節）。`?format=text`／`?format=text&reqId=` 一樣吃 `?days=` 參數，預設也是 24 小時，需要更舊的 reqId 時記得加。
+
+切換讀取範圍是換頁（`<a href>`），不是前端重新整理同一份資料——因為 `LOGS_ACCESS_TOKEN` 只能用 query string 帶（見下方「精簡純文字匯出」的說明），換頁時要把 token 一起帶著走。
 
 ## 事件種類
 
@@ -136,12 +142,14 @@ R2 同步的 `uploadAllLogs()`（`src/utils/log-upload.ts`）也包在 `runWithC
 `GET /logs?format=text`（需要同一組 `LOGS_ACCESS_TOKEN`）回傳的不是網頁，是精簡的純文字，設計給 Claude Code 直接用 `curl` 抓，取代「把整段 log 手動複製貼上聊天視窗」這種做法：
 
 1. **不帶 `reqId`**：回傳最近（最多 50 筆，由新到舊）事件的索引，一行一筆：`reqId␉時間␉[種類/狀態]␉標題`。先看這份索引找出要查的 reqId。
-2. **帶 `?reqId=xxx`**：回傳那一筆事件的精簡詳情——標題、時間、耗時、狀態、使用者、時間軸每一步的 `title`/`path`/`duration`/`note`/回覆內容（`body`）。Notion 呼叫步驟的 `note` 含截斷過的請求內容摘要（見上方「處理過程時間軸」的「請求內容」說明），所以看得出這一步實際寫了/查了什麼，但**刻意不含**每個步驟展開後的完整 request/response JSON（也就是「看這筆的原始 log」那份內容，尤其是回應——通常整個頁面物件連同無關的 rollup/relation 都會回顯一次）——那正是讓一次除錯動輒貼出幾百行 JSON 的來源。找不到這個 reqId（可能已超過 7 天保留期或伺服器重啟過）回 404，純文字說明原因。
+2. **帶 `?reqId=xxx`**：回傳那一筆事件的精簡詳情——標題、時間、耗時、狀態、使用者、時間軸每一步的 `title`/`path`/`duration`/`note`/回覆內容（`body`）。Notion 呼叫步驟的 `note` 含截斷過的請求內容摘要（見上方「處理過程時間軸」的「請求內容」說明），所以看得出這一步實際寫了/查了什麼，但**刻意不含**每個步驟展開後的完整 request/response JSON（也就是「看這筆的原始 log」那份內容，尤其是回應——通常整個頁面物件連同無關的 rollup/relation 都會回顯一次）——那正是讓一次除錯動輒貼出幾百行 JSON 的來源。找不到這個 reqId（可能已超過保留期、伺服器重啟過，或不在目前查詢的 `?days=` 範圍內，預設只有 24 小時）回 404，純文字說明原因。
 
 範例：
 ```
 curl -s "https://<domain>/logs?format=text&token=$LOGS_ACCESS_TOKEN"
 curl -s "https://<domain>/logs?format=text&reqId=6c27ed&token=$LOGS_ACCESS_TOKEN"
+# 要查的 reqId 超過 24 小時、預設範圍找不到時，加 &days= 擴大範圍（最大 7）：
+curl -s "https://<domain>/logs?format=text&reqId=6c27ed&days=7&token=$LOGS_ACCESS_TOKEN"
 ```
 
 這個端點跟 HTML 版共用同一套分組邏輯（`buildEvents()`，`src/routes/logs.ts`），不是另外維護一套「哪些訊息該合併」的規則，只是省略了完整 payload 那一層。要看某一步的完整 Notion payload，還是得開瀏覽器用 HTML 版展開對應的時間軸步驟。

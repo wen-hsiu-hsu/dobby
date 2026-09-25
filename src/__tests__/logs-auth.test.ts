@@ -34,6 +34,7 @@ vi.mock('@line/bot-sdk', async (importOriginal) => {
 
 // Avoid depending on real log files on disk
 vi.mock('../utils/log-reader.js', () => ({
+  MAX_WINDOW_DAYS: 7,
   readRecentLogs: vi.fn().mockResolvedValue([]),
 }));
 
