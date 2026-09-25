@@ -51,6 +51,38 @@ describe('auto-reply', () => {
     expect(result).toBeNull();
   });
 
+  it('findReply picks randomly among multiple matching rules for the same trigger', async () => {
+    const { findReply } = await import('../services/auto-reply.js');
+    // "朋友" has two rules in the JSON (哏版 + 療癒版), verified against the file directly:
+    // [{ trigger: '朋友', reply: '多比永遠是您的朋友！' },
+    //  { trigger: '朋友', reply: '就像羅恩與妙麗陪著哈利，多比也會一直在這裡陪著您。' }]
+    const randomSpy = vi.spyOn(Math, 'random');
+
+    randomSpy.mockReturnValue(0);
+    const first = findReply('我要交朋友');
+    expect(first).toBe('多比永遠是您的朋友！');
+
+    randomSpy.mockReturnValue(0.99);
+    const second = findReply('我要交朋友');
+    expect(second).toBe('就像羅恩與妙麗陪著哈利，多比也會一直在這裡陪著您。');
+
+    expect(first).not.toBe(second);
+    randomSpy.mockRestore();
+  });
+
+  it('findReply is stable when only one rule matches, regardless of Math.random', async () => {
+    const { findReply } = await import('../services/auto-reply.js');
+    const randomSpy = vi.spyOn(Math, 'random');
+
+    randomSpy.mockReturnValue(0);
+    expect(findReply('我想請假')).toBe('喔不');
+
+    randomSpy.mockReturnValue(0.99);
+    expect(findReply('我想請假')).toBe('喔不');
+
+    randomSpy.mockRestore();
+  });
+
   it('message handler skips auto-reply for admin', async () => {
     const { handleMessage } = await import('../handlers/message-handler.js');
     const { lineClient } = await import('../config/line.js');

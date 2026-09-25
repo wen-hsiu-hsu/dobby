@@ -10,10 +10,8 @@ const dataPath = join(process.cwd(), 'src', 'data', 'auto-reply.json');
 const rules: AutoReplyRule[] = JSON.parse(readFileSync(dataPath, 'utf-8'));
 
 export function findReply(text: string): string | null {
-  for (const rule of rules) {
-    if (text.includes(rule.trigger)) {
-      return rule.reply;
-    }
-  }
-  return null;
+  const matches = rules.filter((rule) => text.includes(rule.trigger));
+  if (matches.length === 0) return null;
+  const index = Math.floor(Math.random() * matches.length);
+  return matches[index]!.reply;
 }
