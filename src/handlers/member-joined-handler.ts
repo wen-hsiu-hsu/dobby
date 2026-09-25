@@ -13,7 +13,7 @@ export async function handleMemberJoined(event: MemberJoinEvent): Promise<void> 
       if (member.type !== 'user') continue;
       const userId = member.userId;
 
-      const profile = groupId ? await getProfile(userId, groupId) : null;
+      const profile = await getProfile(userId, groupId);
       const displayName = profile?.displayName ?? userId;
 
       const message = await buildMemberJoinedWelcome(userId, displayName);
