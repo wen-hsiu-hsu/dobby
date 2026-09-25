@@ -30,6 +30,20 @@
 
 ---
 
+## 流程/顯示缺口（2026-09-26，新增 `season` 指令後使用者實測時發現，尚未處理）
+
+- [ ] **`@Dobby command` 指令輸出（`src/commands/command-list.ts`）沒有列出管理員限定指令，而且「新增指令」文件化步驟本身沒有這一步，導致每次新增管理員指令都會漏掉、也沒人做出明確決定。** 事實：`command-list.ts:4-48` 的 `COMMAND_LIST_TEXT` 沒有列出 `season`（`src/commands/season-announcement.ts`，2026-09-26 新增）。這不是單一個案——同樣是管理員限定指令的 `next`（`src/commands/next-event.ts`）也完全沒出現在這份清單裡，代表目前所有管理員限定指令都沒有出現在 `@Dobby command` 的輸出，只有一般成員可用的指令、以及附屬在一般指令下的管理員用法（`command-list.ts:41` 的「幫 @Name 代為報名（管理員限定）」）才有列出。
+  - 不是必然的 bug：`handleCommandList()`（`command-list.ts:50-66`）沒有檢查 `isAdmin`，任何人傳 `@Dobby command` 都能看到這份清單，所以「刻意不列出管理員指令」有可能是為了不對一般成員曝光管理員功能——但目前沒有任何註解或文件講清楚這是刻意設計還是純粹沒想到；兩次新增管理員指令（`next`、`season`）都沒人做出明確決定，這才是真正要處理的問題，不是「季節指令沒被列出來」這件事本身。
+  - 具體缺口：`docs/development.md:154-159`「## 新增指令」5 步驟，以及 `CLAUDE.md:13`「專案慣例」對應的同一份 5 步驟摘要，完全沒有提到 `command-list.ts`。就算未來想在新增指令時「決定」要不要列出來，也沒有一個步驟會提醒要做這個決定，所以只會一直漏下去。
+  - 如果要處理，建議方向（以下三個政策選項沒有標準答案，需要維護者決定要選哪個，不要在沒有確認的情況下逕自選一個直接實作）：(1) 先跟維護者確認政策——管理員指令要不要出現在 `@Dobby command` 的輸出（可能方向：完全不出現／獨立成一個章節但一般成員也看得到文字／依 `isAdmin` 動態顯示不同內容，三者各有取捨，動態顯示會讓 `handleCommandList()` 多一個參數跟兩套文案要維護）；(2) 依維護者的決定補齊 `next`、`season` 目前已經漏掉的部分；(3) 在 `docs/development.md` 的「新增指令」5 步驟跟 `CLAUDE.md` 對應摘要各加一步，明確要求「決定要不要更新 `command-list.ts`」，避免以後新增指令時又漏掉一次同樣的決定。
+
+- [ ] **`/logs` 頁面看不出一次 LINE 回覆其實是好幾則獨立訊息，卡片預覽和展開後的時間軸明細都把多則訊息用 `\n` 接成一串，跟「一則很長的多行訊息」在畫面上無法分辨；`?format=text` 文字匯出繼承同一個根因。** 事實：`src/routes/logs.ts:562-565` 的 `lineMessagesOf()` 從 log payload 的 `messages` 陣列取出一次 LINE reply/push 實際送出的每一則訊息內容（對應 `reply-service.ts` 記下的 `messageContents`；一次 reply 可能包含多則訊息，例如 `season` 指令一次最多回 3 則）。這個陣列在四個地方被直接 `.join('\n')` 成單一字串，完全沒有標示原本是幾則訊息：`groupPreview()`（`logs.ts:573`、`583`，事件卡片的預覽文字）跟 `lineStepTimeline()`（`logs.ts:783`、`788`，展開後時間軸明細的 body）。
+  - `?format=text&reqId=xxx` 的 `renderEventDetailText()`（`logs.ts:1653-1684`）沒有另外處理這個問題，是因為它直接複用 `lineStepTimeline()` 算出來的同一份 `TimelineStep.body`/`bodyLabel`——HTML 頁面跟文字匯出共享同一個根因，不是兩個獨立的 bug，改一處應該兩邊都會修好。
+  - 風險：目前看起來像「一則很長、有很多行的訊息」，跟「LINE 端實際上收到 N 則獨立訊息」在畫面上完全無法分辨。多則訊息的指令（目前只有 `season`）在 `/logs` 上會被誤讀成單一訊息，除錯時容易誤判 LINE reply 在對方手機上實際的外觀（以為是一則很長的訊息，但其實是三個分開的訊息泡泡）。不影響 bot 實際送出的內容（LINE 端沒問題，這純粹是 `/logs` 這個除錯頁面本身的顯示缺口）。
+  - 如果要處理，建議方向：在 `groupPreview()`/`lineStepTimeline()` 組字串前，若 `messages.length > 1`，加上類似「（共 N 則訊息）」的標示，或用比單一 `\n` 更明顯的分隔（例如訊息之間加一條分隔線）區隔每則訊息。因為 `format=text` 複用同一份 `TimelineStep`，改這兩個函式應該會同時修好 HTML 頁面跟文字匯出，不需要在 `renderEventDetailText()` 另外處理。
+
+---
+
 ## 程式碼清理觀察（2026-09-26，新增 `season` 指令的 code review 中發現，尚未處理）
 
 - [ ] **`src/config/constants.ts` 有兩個沒人用的死碼常數（`COURTS_DENSITY`、`MAX_GUESTS_PER_MEMBER`），其中 `COURTS_DENSITY`（每面場地容納人數上限 = 7）又在另外兩處被獨立重新定義。** 三處分別是：(1) `src/config/constants.ts:1`——整份檔案（`COURTS_DENSITY` 和 `MAX_GUESTS_PER_MEMBER` 兩個常數）目前沒有任何檔案 import，用 `grep -rn "constants.js\|constants.ts" src` 確認過（`__tests__` 也沒有），是純死碼；(2) `src/commands/registration/capacity-calculator.ts:37`——`calculateTotalSlots()` 函式內的區域變數；(3) `src/commands/season-announcement.ts:13`——這次新增 `season` 指令時獨立宣告的模組層級常數（已加註解說明跟 capacity-calculator.ts 語意相同但故意不共用，因為算的是「當季預設、零請假」的公告用 baseline，不是即時報名名額，兩處吃的資料形狀不同）。`MAX_GUESTS_PER_MEMBER` 跟 `COURTS_DENSITY` 三處重複定義是不同性質的問題（單純沒人用，不是被重複定義），一併列在這裡是因為都在同一份死碼檔案裡。
