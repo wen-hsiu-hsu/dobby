@@ -65,7 +65,7 @@ npm run dev:docker
 | `NOTION_DB_SEASON` | ✅ | 季租承租紀錄資料庫 ID |
 | `NOTION_DB_ANNOUNCEMENT` | ✅ | 所有公告資料庫 ID |
 | `LOGS_ACCESS_TOKEN` | ✅ | `/logs` 存取用的共享密鑰，需帶 `Authorization: Bearer <token>` 或 `?token=` query string 才能查看 |
-| `PORT` | ❌ | 伺服器 port（預設 `3000`） |
+| `PORT` | ❌ | 伺服器 port（預設 `3000`，須為正整數，非數字字串會讓服務啟動失敗） |
 | `NODE_ENV` | ❌ | `development` 或 `production` |
 | `DOBBY_GROUP_IDS` | ❌ | 每週打球推播訊息的目標 LINE 群組 ID，可用逗號分隔多個群組 ID，見 `docs/schedulers.md`。沒設定的話該排程會記一行 error log 並跳過，不會讓 app 啟動失敗 |
 | `LOG_LEVEL` | ❌ | pino log level（`trace`/`debug`/`info`/`warn`/`error`/`fatal`，預設 `info`）。要臨時診斷正式環境問題（例如看 Notion API 完整 request/response）時，把 Zeabur 上的這個變數改成 `debug` 並重啟服務即可，不用改程式碼重新部署；診斷完記得改回 `info`，否則 debug log 會把 Notion 回傳的完整資料（含姓名、LINE user_id 等）持續寫進 `/logs` 可查到的檔案。 |

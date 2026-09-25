@@ -67,9 +67,8 @@ if (env.NODE_ENV !== 'test') {
     const { startLogUpload, uploadAllLogs } = await import('./utils/log-upload.js');
     startLogUpload(LOG_DIR);
 
-    const port = parseInt(env.PORT, 10);
-    const server = app.listen(port, () => {
-      logger.info({ port }, 'Server started');
+    const server = app.listen(env.PORT, () => {
+      logger.info({ port: env.PORT }, 'Server started');
     });
 
     const gracefulShutdown = (signal: string): void => {
