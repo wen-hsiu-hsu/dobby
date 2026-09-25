@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { getReqId, getPurpose } from './request-context.js';
 import { env } from '../config/env.js';
 
-const isDev = process.env['NODE_ENV'] !== 'production';
+const isDev = env.NODE_ENV !== 'production';
 
 let base: pino.Logger = pino({
   level: isDev ? 'debug' : env.LOG_LEVEL,
