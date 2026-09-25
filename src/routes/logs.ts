@@ -1348,6 +1348,7 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
     button { cursor: pointer; font-family: inherit; }
     #mask-btn { font-size: 12px; font-weight: 500; border-radius: 8px; padding: 7px 12px; color: #d2cefd; border: 1px solid #5d5294; background: #201c33; }
     #refresh-btn { font-size: 12px; color: #8b8fa3; background: transparent; border: 1px solid #262835; border-radius: 8px; padding: 7px 12px; }
+    #refresh-btn.has-new { color: #d2cefd; border-color: #5d5294; background: #201c33; font-weight: 500; }
     .level-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 500; font-family: ui-monospace, monospace; border-radius: 4px; padding: 5px 9px; flex: none; }
     .level-badge-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
     .days-switcher { display: flex; gap: 6px; flex: none; }
@@ -1570,6 +1571,42 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
     function toggleMask() {
       document.body.classList.toggle('masked');
     }
+
+    const NEW_LOG_CHECK_INTERVAL_MS = 20000;
+    let latestSeenFingerprint = null;
+
+    // 用既有的 ?format=text 索引檢視當輪詢用的輕量端點（本來就只回傳前
+    // ${TEXT_EXPORT_LIST_LIMIT} 筆的 reqId/時間/標題，不含展開內容），不用另開
+    // API。拿第一行（最新一筆事件）當 fingerprint，跟頁面載入當下的第一次
+    // 輪詢結果比對；有落差就把按鈕標成「有新 log」，但不自動重新整理——
+    // 使用者要看新內容還是得自己按按鈕，只是現在按之前就知道按了有沒有用。
+    function checkForNewLogs() {
+      if (document.hidden) return;
+      const url = '?format=text&days=' + LOGS_DAYS + '&token=' + encodeURIComponent(LOGS_TOKEN);
+      fetch(url)
+        .then((r) => {
+          if (!r.ok) throw new Error('poll failed: ' + r.status);
+          return r.text();
+        })
+        .then((text) => {
+          const firstLine = text.split('\\n')[0] || '';
+          if (latestSeenFingerprint === null) {
+            latestSeenFingerprint = firstLine;
+            return;
+          }
+          if (firstLine !== latestSeenFingerprint) {
+            const btn = document.getElementById('refresh-btn');
+            btn.classList.add('has-new');
+            btn.textContent = '↻ 重新整理（有新 log）';
+          }
+        })
+        .catch(() => {
+          // 輪詢失敗不影響既有畫面，靜默略過，下次排程再試。
+        });
+    }
+
+    checkForNewLogs();
+    setInterval(checkForNewLogs, NEW_LOG_CHECK_INTERVAL_MS);
 
     function copyRawJson(key, btn) {
       const el = document.getElementById('raw-' + key);
