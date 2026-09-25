@@ -131,7 +131,7 @@ docker run -p 3000:3000 --env-file .env dobby
 
 使用 multi-stage build：
 1. **builder**：安裝所有依賴、編譯 TypeScript
-2. **runtime**：複製 `dist/` 跟 `src/data`（靜態自動回覆用，見 CLAUDE.md 的文件/程式碼落差說明）、自己獨立 `npm ci --omit=dev` 安裝 production 依賴
+2. **runtime**：複製 `dist/` 跟 `src/data`（靜態自動回覆用，見 `architecture.md` 的「自動回覆」）、自己獨立 `npm ci --omit=dev` 安裝 production 依賴
 
 `runtime` 特意不用 `COPY --from=builder` 複製 builder 的 `node_modules`，而是自己獨立跑 `npm ci --omit=dev`——這樣 BuildKit 才能把 `runtime` 的安裝跟 `builder` 的編譯平行執行，而不是序列等 builder 全部跑完。實測過在 Pi 上改成「builder prune 完再讓 runtime 複製」反而更慢：一來失去了平行執行的空間，二來 `COPY --from=builder` 本身在慢儲存（SD 卡/eMMC）上複製上百個小檔案也不便宜。
 
