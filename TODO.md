@@ -27,3 +27,11 @@
 ## 效能觀察（2026-09-21，從真實 log 分析發現，尚未處理）
 
 - [ ] **`people-repository.ts:40-44` `findAllUnpaid()` 用 `結清` 這個 formula 欄位當篩選條件，比篩一般欄位慢一個檔次。** 真實環境的 log 顯示這個查詢（`owe` 指令用到）耗時落在 715ms～3540ms，而其他篩一般欄位的查詢中位數只要 400～600ms——Notion 官方文件跟社群經驗都指出篩 formula/rollup 欄位沒辦法用索引、每次都要即時算。不是這個查詢寫錯，是 formula 欄位篩選本來就有這個代價；如果之後 `owe` 指令的回應速度變成明顯困擾，可以考慮的方向是另外維護一個非 formula 的「是否結清」欄位讓 Notion 自動同步，或是接受這個延遲。
+
+---
+
+## 程式碼清理觀察（2026-09-26，新增 `season` 指令的 code review 中發現，尚未處理）
+
+- [ ] **`src/config/constants.ts` 有兩個沒人用的死碼常數（`COURTS_DENSITY`、`MAX_GUESTS_PER_MEMBER`），其中 `COURTS_DENSITY`（每面場地容納人數上限 = 7）又在另外兩處被獨立重新定義。** 三處分別是：(1) `src/config/constants.ts:1`——整份檔案（`COURTS_DENSITY` 和 `MAX_GUESTS_PER_MEMBER` 兩個常數）目前沒有任何檔案 import，用 `grep -rn "constants.js\|constants.ts" src` 確認過（`__tests__` 也沒有），是純死碼；(2) `src/commands/registration/capacity-calculator.ts:37`——`calculateTotalSlots()` 函式內的區域變數；(3) `src/commands/season-announcement.ts:13`——這次新增 `season` 指令時獨立宣告的模組層級常數（已加註解說明跟 capacity-calculator.ts 語意相同但故意不共用，因為算的是「當季預設、零請假」的公告用 baseline，不是即時報名名額，兩處吃的資料形狀不同）。`MAX_GUESTS_PER_MEMBER` 跟 `COURTS_DENSITY` 三處重複定義是不同性質的問題（單純沒人用，不是被重複定義），一併列在這裡是因為都在同一份死碼檔案裡。
+  - 現狀不是這次改動造成的 bug，是既有問題，這次只是又多了一份重複定義；三處數值目前一致（都是 7），沒有不一致風險，暫時不影響正確性。但如果之後場地密度假設要調整，容易忘記同步改到三處而悄悄產生不一致——不會報錯，只會讓公告數字跟實際報名邏輯的名額計算脫鉤，不容易發現。
+  - 如果要處理，建議方向：先確認 `src/config/constants.ts` 除了這兩個常數外有沒有其他用途，若沒有近期會用到的需求就直接刪掉，避免死碼一直留著；否則補上實際的 import 讓它不再是死碼。再評估 `capacity-calculator.ts` 跟 `season-announcement.ts` 的兩個定義能不能合併成一個共用常數（但要注意兩處吃的參數形狀不同，硬要共用可能需要重新設計介面，不是單純 import 一個數字就好）。

@@ -11,6 +11,7 @@ const NUMBER_DEFAULTS = {
   '場地數': 2,
   '零打費用': 170,
   '租借次數 (2hrs)': 0,
+  '每場/小時 定價': 450,
 } as const;
 
 function getNumberWithDefault(p: PageObjectResponse['properties'], pageId: string, key: keyof typeof NUMBER_DEFAULTS): number {
@@ -32,6 +33,7 @@ async function pageToRecord(page: PageObjectResponse): Promise<SeasonRecord> {
     guestFee: getNumberWithDefault(p, page.id, '零打費用'),
     location: getRichText(p, '地點'),
     weekCounts: getNumberWithDefault(p, page.id, '租借次數 (2hrs)'),
+    courtPricePerHour: getNumberWithDefault(p, page.id, '每場/小時 定價'),
     pricePerPersonForSeason: getFormulaNumber(p, '每人平均場租'),
     pricePerPersonOverride: getNumber(p, '每人平均場租（特殊狀況）'),
     totalPrice: getFormulaNumber(p, '場租總金額'),

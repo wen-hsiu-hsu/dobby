@@ -9,6 +9,7 @@ export enum CommandType {
   NEXT_EVENT = 'next_event',       // @Dobby next (admin only)
   NEWS = 'news',                   // @Dobby news / announcement / 公告
   PAYMENT = 'payment',             // @Dobby payment / 付款
+  SEASON_ANNOUNCEMENT = 'season_announcement', // @Dobby season 2026Q2（管理員限定）
   UNKNOWN = 'unknown',
 }
 
@@ -17,6 +18,8 @@ export interface ParsedCommand {
   rawText: string;
   /** For registration: +N or -N (e.g. "+1", "-2") */
   delta?: string;
+  /** For season_announcement: the raw season code as typed (e.g. "2026Q2", "2026-q2") */
+  seasonArg?: string;
 }
 
 export interface RegistrationTarget {

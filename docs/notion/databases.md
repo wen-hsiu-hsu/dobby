@@ -59,7 +59,8 @@ USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員�
 | `每人平均場租` | formula，本季每人應繳場租，`news` 指令 `{PRICE_PER_PERSON_FOR_SEASON}` 的預設來源 |
 | `每人平均場租（特殊狀況）` | 手動覆寫值，設定後 `news` 指令 `{PRICE_PER_PERSON_FOR_SEASON}` 改顯示這個值，不再用上面的 formula 值（`src/commands/news.ts` 的 `pricePerPersonOverride ?? pricePerPersonForSeason`） |
 | `場租總金額` | formula，本季場租總額，`news` 指令 `{TOTAL_PRICE}` |
-| `打球日` | Relation，關聯至「行事曆」，本季所有打球日，`news` 指令 `{LIST_ALL_DATES}` |
+| `每場/小時 定價` | 場地每小時定價，`season` 指令 `{COURT_PRICE}` |
+| `打球日` | Relation，關聯至「行事曆」，本季所有打球日，`news` 指令 `{LIST_ALL_DATES}`／`season` 指令 `{PLAY_DATES}` |
 
 `findByName(getCurrentSeasonName())` 依季度名稱查詢當季資料。`season-repository.ts` 只有 `findByName`，沒有 `findAll()`——不要為了拿當季資料另外查全部再取第一筆。
 
@@ -97,8 +98,9 @@ USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員�
 | `PAYMENT` | `@Dobby payment` 指令顯示的內容（支援 bulleted list） |
 | `WELCOME_MESSAGE` | 機器人加入群組時發送的歡迎訊息 |
 | `INTRODUCE` | `@Dobby` 自我介紹的內容 |
+| `NEW_SEASON` | `@Dobby season <季度>` 指令產生下一季公告草稿的模板，見 [commands.md](../commands.md#產生新一季公告草稿) |
 
-`getBlocks()` 會遞迴抓取 `has_children === true` 的區塊（toggle、巢狀清單等），`blocksToText()` 輸出時子區塊依巢狀深度縮排（每層 2 個空白），`bulleted_list_item` 一律補 `• ` 前綴。四個指令／訊息（`payment`、`news`、`introduce`、`WELCOME_MESSAGE`）都走這個共用實作。
+`getBlocks()` 會遞迴抓取 `has_children === true` 的區塊（toggle、巢狀清單等），`blocksToText()` 輸出時子區塊依巢狀深度縮排（每層 2 個空白），`bulleted_list_item` 一律補 `• ` 前綴。`payment`、`news`、`introduce`、`WELCOME_MESSAGE`、`season` 都走這個共用實作。
 
 ### Placeholder 替換規則
 

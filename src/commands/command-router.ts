@@ -7,6 +7,7 @@ import { handleParticipants } from './participants.js';
 import { handleNextEvent } from './next-event.js';
 import { handleNews } from './news.js';
 import { handlePayment } from './payment.js';
+import { handleSeasonAnnouncement } from './season-announcement.js';
 import { handleRegistration } from './registration/registration-handler.js';
 import { handleLeave } from './registration/leave-handler.js';
 
@@ -42,6 +43,9 @@ export async function routeCommand(
       break;
     case CommandType.PAYMENT:
       await handlePayment(event.replyToken);
+      break;
+    case CommandType.SEASON_ANNOUNCEMENT:
+      await handleSeasonAnnouncement(event.replyToken, isAdmin, command.seasonArg);
       break;
     case CommandType.REGISTRATION: {
       const delta = parseInt(command.delta ?? '+1', 10);

@@ -8,7 +8,8 @@
     "NEWS_TEMPLATE": "@Dobby news 指令顯示的公告內容",
     "PAYMENT": "@Dobby payment 指令顯示的付款說明（支援 bulleted list）",
     "WELCOME_MESSAGE": "機器人加入群組時發送的歡迎訊息，支援 {NEW_FRIEND}、{MANAGER} placeholder",
-    "INTRODUCE": "@Dobby 自我介紹內容，支援 {USER}、{MANAGER} placeholder"
+    "INTRODUCE": "@Dobby 自我介紹內容，支援 {USER}、{MANAGER} placeholder",
+    "NEW_SEASON": "@Dobby season <季度> 指令產生下一季公告草稿的模板（管理員限定），見 docs/commands.md"
   },
   "properties": {
     "Name": {

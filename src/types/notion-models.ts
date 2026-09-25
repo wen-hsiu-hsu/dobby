@@ -26,6 +26,7 @@ export interface SeasonRecord {
   guestFee: number; // 零打費用
   location: string; // 地點
   weekCounts: number; // 租借次數 (2hrs) — 本季總租借次數
+  courtPricePerHour: number; // 每場/小時 定價 — 場租說明用（season 公告）
   pricePerPersonForSeason: number | null; // 每人平均場租（formula）
   pricePerPersonOverride: number | null; // 每人平均場租（特殊狀況）— 設定時取代 formula 值
   totalPrice: number | null; // 場租總金額（formula）

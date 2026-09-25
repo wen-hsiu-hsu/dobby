@@ -80,6 +80,12 @@ export function parseCommand(text: string): ParsedCommand | null {
     return { type: CommandType.PAYMENT, rawText: text };
   }
 
+  // Season announcement (admin): "@Dobby season 2026Q2"
+  const seasonMatch = body.match(/^season (\S+)$/);
+  if (seasonMatch) {
+    return { type: CommandType.SEASON_ANNOUNCEMENT, rawText: text, seasonArg: seasonMatch[1] };
+  }
+
   return { type: CommandType.UNKNOWN, rawText: text };
 }
 

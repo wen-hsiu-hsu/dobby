@@ -65,6 +65,51 @@ export function getSeasonMonthRange(seasonName: string): string {
 }
 
 /**
+ * Parses a user-typed season code into the canonical "YYYY-QN" form used elsewhere
+ * (season-repository's `季租時段`). Accepts an optional hyphen and lower/upper-case
+ * "q": "2026Q2", "2026-Q2", "2026q2" all normalize to "2026-Q2". Returns null for
+ * anything else (wrong year length, quarter outside 1-4, extra characters, ...).
+ */
+export function parseSeasonInput(input: string): string | null {
+  const match = input.trim().match(/^(\d{4})-?[Qq]([1-4])$/);
+  if (!match) return null;
+  return `${match[1]}-Q${match[2]}`;
+}
+
+/**
+ * Returns the quarter number (1-4) encoded in a season name (canonical "YYYY-QN" form).
+ * e.g. "2026-Q3" → 3.
+ */
+export function getSeasonQuarter(seasonName: string): number {
+  const match = seasonName.match(/^(\d{4})-Q([1-4])$/);
+  if (!match) throw new Error(`Invalid season name: ${seasonName}`);
+  return Number(match[2]);
+}
+
+/**
+ * Returns the season name immediately before `seasonName` (canonical "YYYY-QN" form).
+ * Wraps across year boundaries: the season before "YYYY-Q1" is "(YYYY-1)-Q4".
+ */
+export function getPreviousSeasonName(seasonName: string): string {
+  const match = seasonName.match(/^(\d{4})-Q([1-4])$/);
+  if (!match) throw new Error(`Invalid season name: ${seasonName}`);
+  const year = Number(match[1]);
+  const quarter = Number(match[2]);
+  return quarter === 1 ? `${year - 1}-Q4` : `${year}-Q${quarter - 1}`;
+}
+
+/**
+ * Formats a season name for display in the season announcement template.
+ * "2026-Q2" → "2026 Q2 (4~6月)" (default), or "2026 Q2" when `withMonthRange` is false.
+ */
+export function formatSeasonTitle(seasonName: string, withMonthRange = true): string {
+  const match = seasonName.match(/^(\d{4})-Q([1-4])$/);
+  if (!match) return seasonName;
+  const base = `${match[1]} Q${match[2]}`;
+  return withMonthRange ? `${base} (${getSeasonMonthRange(seasonName)})` : base;
+}
+
+/**
  * Groups ISO dates (or "YYYY-MM-DD" prefixes) by month, formats each as "M/DD" (no leading
  * zero on month), joins same-month dates with ", " and separates months with a newline.
  * e.g. ["2026-07-04", "2026-07-11", "2026-08-01"] → "7/04, 7/11\n8/01"

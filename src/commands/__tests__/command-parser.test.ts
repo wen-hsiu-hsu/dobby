@@ -117,6 +117,22 @@ describe('parseCommand', () => {
     expect(parseCommand('@Dobby 付款')?.type).toBe(CommandType.PAYMENT);
   });
 
+  it('parses @Dobby season 2026Q2 as SEASON_ANNOUNCEMENT with the raw season arg', () => {
+    const cmd = parseCommand('@Dobby season 2026Q2');
+    expect(cmd?.type).toBe(CommandType.SEASON_ANNOUNCEMENT);
+    expect(cmd?.seasonArg).toBe('2026Q2');
+  });
+
+  it('parses @Dobby season 2026-q2 as SEASON_ANNOUNCEMENT, keeping the raw casing/hyphen as typed', () => {
+    const cmd = parseCommand('@Dobby season 2026-q2');
+    expect(cmd?.type).toBe(CommandType.SEASON_ANNOUNCEMENT);
+    expect(cmd?.seasonArg).toBe('2026-q2');
+  });
+
+  it('returns UNKNOWN for "season" with no argument', () => {
+    expect(parseCommand('@Dobby season')?.type).toBe(CommandType.UNKNOWN);
+  });
+
   it('returns UNKNOWN for unrecognized command', () => {
     expect(parseCommand('@Dobby xyz')?.type).toBe(CommandType.UNKNOWN);
   });

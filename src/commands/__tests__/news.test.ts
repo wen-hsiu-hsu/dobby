@@ -31,6 +31,7 @@ beforeEach(() => {
     guestFee: 170,
     location: '中華科大',
     weekCounts: 13,
+    courtPricePerHour: 450,
     pricePerPersonForSeason: 2127.2727272727273,
     pricePerPersonOverride: null,
     totalPrice: 23400,

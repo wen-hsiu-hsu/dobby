@@ -135,6 +135,39 @@ Notion 內容裡的 `bulleted_list_item`（項目符號清單）在輸出時會�
 ```
 管理員可查看下次打球的完整資訊。回覆內容跟每週打球資訊推播（`docs/schedulers.md`）完全同一套訊息格式，由 `src/commands/weekly-status-message.ts` 的 `buildWeeklyStatusMessage()` 共用產生 —— `next` 只是手動查看目前狀態的方式，不是另一種摘要格式。
 
+### 產生新一季公告草稿
+```
+@Dobby season 2026Q2
+```
+依指定季度（`YYYY` + `Q1`~`Q4`，接受無 hyphen／小寫 q，如 `2026Q2`、`2026-Q2`、`2026q2`）產生下一季公告草稿，套用 Notion「所有公告」資料庫中 `NEW_SEASON` 頁面的模板，回傳後由管理員自行潤飾再手動發布——不會自動發到群組。
+
+模板內容裡的 `{PLACEHOLDER}` 會被即時抓取的資料取代：
+
+| 變數 | 內容 |
+|------|------|
+| `{SEASON_TITLE}` | 季度標題，如 `2026 Q2 (4~6月)` |
+| `{SEASON_SHORT}` | 季度標題（不含月份範圍），如 `2026 Q2` |
+| `{TOTAL_PEOPLE}` | 指定季報名人數 |
+| `{ALL_MEMBERS_MENTIONS}` | 指定季報名人 mention 清單，空格分隔（`@Alice @Bob ...`） |
+| `{WEEK_COUNTS}` | 指定季租借次數（`租借次數 (2hrs)`） |
+| `{GUEST_FEE}` | 指定季零打費用 |
+| `{PAYMENT_INFO}` | `PAYMENT` 公告內容（跟 `payment` 指令同一份資料） |
+| `{COURT_PRICE}` | 每場/小時定價 |
+| `{COURT_COUNT}` | 指定季場地數 |
+| `{TOTAL_PRICE}` | 指定季場租總金額 |
+| `{PLAY_DATES}` | 指定季所有打球日期，依月份分行（同 `news` 的 `{LIST_ALL_DATES}`） |
+| `{GUEST_SLOTS_BASELINE}` | 零打名額 baseline：`場地數 * 7 - 報名人數`（無人請假時的名額數） |
+| `{CONTINUING_MEMBERS_MENTIONS}` | 續打名單：指定季有報名、上一季也有報名的人 |
+| `{NEW_MEMBERS_MENTIONS}` | 新朋友名單：指定季有報名、上一季沒有報名的人 |
+| `{REFUND_MEMBERS_MENTIONS}` | 退費名單：指定季沒報名、上一季有報名的人 |
+| `{PREV_QUARTER}` | 上一季的季度數字（如指定 `2026-Q2` → 上一季 `2026-Q1` → 顯示 `1`）。跨年時上一季會回推到前一年 Q4（如 `2027-Q1` 的上一季是 `2026-Q4`） |
+
+Mention 名單一律用「Custom Name」（LINE 顯示名稱）+ `@` 前綴，不是真正會通知對方的 LINE mention，僅供貼上群組前手動編輯。找不到對應 USERS 記錄時 fallback 用人員清單的 `Name`。
+
+模板裡所有 `$xxx` 都是字面文字，不做任何運算替換，由管理員產生草稿後自行填入金額。
+
+模板用 8 個連續 `—`（`————————`）分隔三則子公告，bot 會依此切成最多 3 則 LINE 訊息回覆；模板內部段落間的單一 `—` 只是斷行用，不會被當作分隔點。LINE reply 一次最多允許 5 則訊息，若改模板時不小心讓分隔線切出超過 5 段，bot 不會硬送、而是回一則錯誤訊息提醒檢查模板。
+
 ---
 
 ## 自動回覆

@@ -1,5 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import { getNextSaturday, getQuarter, formatDate, getNextSaturdayDateText, getSeasonMonthRange, groupDatesByMonth } from '../date-utils.js';
+import {
+  getNextSaturday,
+  getQuarter,
+  formatDate,
+  getNextSaturdayDateText,
+  getSeasonMonthRange,
+  groupDatesByMonth,
+  parseSeasonInput,
+  getSeasonQuarter,
+  getPreviousSeasonName,
+  formatSeasonTitle,
+} from '../date-utils.js';
 
 describe('getNextSaturday', () => {
   it('returns same day if today is Saturday', () => {
@@ -100,5 +111,64 @@ describe('groupDatesByMonth', () => {
 
   it('returns empty string for no dates', () => {
     expect(groupDatesByMonth([])).toBe('');
+  });
+});
+
+describe('parseSeasonInput', () => {
+  it('accepts the canonical hyphenated form', () => {
+    expect(parseSeasonInput('2026-Q2')).toBe('2026-Q2');
+  });
+
+  it('accepts no hyphen', () => {
+    expect(parseSeasonInput('2026Q2')).toBe('2026-Q2');
+  });
+
+  it('accepts a lowercase q, with or without a hyphen', () => {
+    expect(parseSeasonInput('2026q2')).toBe('2026-Q2');
+    expect(parseSeasonInput('2026-q2')).toBe('2026-Q2');
+  });
+
+  it('returns null for a quarter outside 1-4', () => {
+    expect(parseSeasonInput('2026Q5')).toBeNull();
+  });
+
+  it('returns null for malformed input', () => {
+    expect(parseSeasonInput('not-a-season')).toBeNull();
+    expect(parseSeasonInput('26Q2')).toBeNull();
+    expect(parseSeasonInput('2026Q2x')).toBeNull();
+  });
+});
+
+describe('getSeasonQuarter', () => {
+  it('returns the quarter number encoded in the season name', () => {
+    expect(getSeasonQuarter('2026-Q3')).toBe(3);
+  });
+
+  it('throws for an invalid season name', () => {
+    expect(() => getSeasonQuarter('not-a-season')).toThrow();
+  });
+});
+
+describe('getPreviousSeasonName', () => {
+  it('returns the prior quarter within the same year', () => {
+    expect(getPreviousSeasonName('2026-Q2')).toBe('2026-Q1');
+  });
+
+  it('wraps to Q4 of the prior year when crossing a year boundary', () => {
+    expect(getPreviousSeasonName('2027-Q1')).toBe('2026-Q4');
+  });
+
+  it('throws for an invalid season name', () => {
+    expect(() => getPreviousSeasonName('not-a-season')).toThrow();
+  });
+});
+
+describe('formatSeasonTitle', () => {
+  it('includes the month range by default', () => {
+    expect(formatSeasonTitle('2026-Q2')).toBe('2026 Q2 (4~6月)');
+  });
+
+  it('omits the month range when withMonthRange is false', () => {
+    expect(formatSeasonTitle('2026-Q2', false)).toBe('2026 Q2');
   });
 });

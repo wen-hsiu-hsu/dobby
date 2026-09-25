@@ -48,6 +48,7 @@ function makeSeasonRecord(overrides: Partial<SeasonRecord> = {}): SeasonRecord {
     guestFee: 170,
     location: '某體育館',
     weekCounts: 12,
+    courtPricePerHour: 450,
     pricePerPersonForSeason: 1000,
     pricePerPersonOverride: null,
     totalPrice: 12000,

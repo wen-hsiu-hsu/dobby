@@ -36,6 +36,7 @@ beforeEach(() => {
     guestFee: 200,
     location: '',
     weekCounts: 0,
+    courtPricePerHour: 450,
     pricePerPersonForSeason: null,
     pricePerPersonOverride: null,
     totalPrice: null,

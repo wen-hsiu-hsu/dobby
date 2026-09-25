@@ -29,6 +29,7 @@ function baseProps(overrides: Record<string, unknown> = {}) {
     每人平均場租: { type: 'formula', formula: { type: 'number', number: 500 } },
     '每人平均場租（特殊狀況）': { type: 'number', number: null },
     場租總金額: { type: 'formula', formula: { type: 'number', number: 5000 } },
+    '每場/小時 定價': { type: 'number', number: 450 },
     打球日: { type: 'relation', relation: [] },
     ...overrides,
   };
@@ -93,6 +94,8 @@ describe('season-repository', () => {
       delete props['零打費用'];
       // @ts-expect-error same as above
       delete props['租借次數 (2hrs)'];
+      // @ts-expect-error same as above
+      delete props['每場/小時 定價'];
       notionPostMock.mockResolvedValue({
         results: [makePage(props, 'season-page-1')],
       });
@@ -102,6 +105,7 @@ describe('season-repository', () => {
       expect(season?.courts).toBe(2);
       expect(season?.guestFee).toBe(170);
       expect(season?.weekCounts).toBe(0);
+      expect(season?.courtPricePerHour).toBe(450);
     });
   });
 });
