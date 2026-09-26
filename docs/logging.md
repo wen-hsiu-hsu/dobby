@@ -157,3 +157,5 @@ curl -s "https://<domain>/logs?format=text&reqId=6c27ed&days=7&token=$LOGS_ACCES
 ```
 
 這個端點跟 HTML 版共用同一套分組邏輯（`buildEvents()`，`src/routes/logs.ts`），不是另外維護一套「哪些訊息該合併」的規則，只是省略了完整 payload 那一層。要看某一步的完整 Notion payload，還是得開瀏覽器用 HTML 版展開對應的時間軸步驟。
+
+事件詳情頁的 reqId 旁邊有一個「⧉」按鈕，點了會用目前頁面的 `token`／`days` 開新視窗直接進 `?format=text&reqId=`（等同上面第 2 種查詢），不用手動組網址、複製 token。這個 reqId 目前落在 HTML 版顯示的 `?days=` 範圍內，所以文字版一定找得到，不會 404。

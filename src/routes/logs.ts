@@ -1197,6 +1197,7 @@ function eventDetailHtml(ev: EventView, active: boolean): string {
         <span class="detail-title">${escapeHtml(ev.title)}</span>
         <span class="detail-status" style="color:${STATUS_COLORS[ev.status]};border-color:${STATUS_COLORS[ev.status]}">${escapeHtml(ev.statusLabel)}</span>
         <span class="detail-reqid">${escapeHtml(ev.reqId || '（無 reqId）')}</span>
+        ${ev.reqId ? `<button class="reqid-text-btn" title="用純文字格式開新視窗查看這筆事件" onclick="openReqIdText('${escapeHtml(ev.reqId)}')">⧉</button>` : ''}
       </div>
       ${degradedHtml}
       <div class="detail-fields-rows">
@@ -1423,6 +1424,8 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
     .detail-title { font-size: 17px; font-weight: 500; }
     .detail-status { font-size: 11px; font-weight: 500; border-radius: 4px; padding: 5px 9px; border: 1px solid; }
     .detail-reqid { margin-left: auto; font: 11.5px ui-monospace, monospace; color: #8b8fa3; }
+    .reqid-text-btn { font-size: 12px; line-height: 1; background: transparent; border: 1px solid #262835; border-radius: 6px; padding: 3px 6px; color: #8b8fa3; cursor: pointer; }
+    .reqid-text-btn:hover { color: #d2cefd; border-color: #3a3c4d; }
     .degraded-banner { margin-bottom: 13px; display: flex; align-items: flex-start; gap: 9px; background: #2c2519; border: 1px solid #5c4c2c; border-radius: 8px; padding: 10px 13px; }
     .degraded-banner-label { font-size: 11px; font-weight: 500; color: #d3a35c; flex: none; }
     .degraded-banner-text { font-size: 12px; color: #c6c9d6; line-height: 1.5; }
@@ -1628,6 +1631,11 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
 
     checkForNewLogs();
     setInterval(checkForNewLogs, NEW_LOG_CHECK_INTERVAL_MS);
+
+    function openReqIdText(reqId) {
+      const url = '?format=text&reqId=' + encodeURIComponent(reqId) + '&days=' + LOGS_DAYS + '&token=' + encodeURIComponent(LOGS_TOKEN);
+      window.open(url, '_blank');
+    }
 
     function copyRawJson(key, btn) {
       const el = document.getElementById('raw-' + key);
