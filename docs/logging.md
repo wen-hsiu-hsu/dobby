@@ -24,9 +24,9 @@
 
 ## 讀取範圍與載入效能
 
-Header 上「24 小時／3 天／7 天」是讀取範圍切換（`?days=`），預設 24 小時。這是刻意的效能取捨：正式環境日誌量大時，一次讀 7 天全部日誌、把每一筆事件完整時間軸都算好送出會讓頁面載入很慢，所以預設只讀最近 24 小時；要看更舊的事件，切到「3 天」或「7 天」（保留期上限，見 `docs/overview.md`「日誌」小節）。`?format=text`／`?format=text&reqId=` 一樣吃 `?days=` 參數，預設也是 24 小時，需要更舊的 reqId 時記得加。
+事件列表上方的「24 小時／3 天／7 天」下拉選單是讀取範圍切換（`?days=`），預設 24 小時。這是刻意的效能取捨：正式環境日誌量大時，一次讀 7 天全部日誌、把每一筆事件完整時間軸都算好送出會讓頁面載入很慢，所以預設只讀最近 24 小時；要看更舊的事件，切到「3 天」或「7 天」（保留期上限，見 `docs/overview.md`「日誌」小節）。`?format=text`／`?format=text&reqId=` 一樣吃 `?days=` 參數，預設也是 24 小時，需要更舊的 reqId 時記得加。
 
-切換讀取範圍是換頁（`<a href>`），不是前端重新整理同一份資料——因為 `LOGS_ACCESS_TOKEN` 只能用 query string 帶（見下方「精簡純文字匯出」的說明），換頁時要把 token 一起帶著走。
+切換讀取範圍是換頁（下拉選單 `onchange` 直接 `location.href` 跳轉，每個選項本身就是一個完整網址），不是前端重新整理同一份資料——因為 `LOGS_ACCESS_TOKEN` 只能用 query string 帶（見下方「精簡純文字匯出」的說明），換頁時要把 token 一起帶著走。
 
 ## 事件種類
 
@@ -103,7 +103,7 @@ Header 上「24 小時／3 天／7 天」是讀取範圍切換（`?days=`），�
 
 ## 訊息內容跟身分識別資訊只在 debug 層
 
-頁面標題列（「Dobby Logs」文字旁邊）有一個 LOG_LEVEL 徽章，顯示目前**實際生效**的等級——不是 `.env` 裡 `LOG_LEVEL` 設定值本身，本機開發環境不管設定值是什麼，實際生效的都會是 `debug`。等於 `debug` 時徽章用強調色，其他等級（`info`/`warn`/`error` 等）用警示色，提醒你這節講的這些內容現在看不看得到。
+頁面底部 footer 有一個徽章，顯示目前**實際生效**的等級（例如 `debug`）——不是 `.env` 裡 `LOG_LEVEL` 設定值本身，本機開發環境不管設定值是什麼，實際生效的都會是 `debug`。徽章文字只顯示等級值本身，完整的 `LOG_LEVEL` 標籤收在滑鼠 hover 才看得到的 title 提示。等於 `debug` 時徽章用強調色，其他等級（`info`/`warn`/`error` 等）用警示色，提醒你這節講的這些內容現在看不看得到。
 
 LINE 回覆/推播的訊息全文，以及 userId 這類身分識別資訊，比照 Notion API 的 body 一樣搬到 `debug` 層記錄。預設 `LOG_LEVEL=info` 下，時間軸只會看到 method/path 跟「開 `LOG_LEVEL=debug` 才能看到訊息內容」的提示，看不到訊息原文——**這是刻意的設計，不是 bug**。要看訊息實際內容（除錯用），把環境變數 `LOG_LEVEL` 設成 `debug` 再重啟服務即可。
 
@@ -111,7 +111,7 @@ LINE 回覆/推播的訊息全文，以及 userId 這類身分識別資訊，比
 
 ## R2 同步狀態徽章
 
-Header 的 LOG_LEVEL 徽章旁邊還有一個「R2 備份」徽章，顯示 log 檔案同步到 Cloudflare R2 的狀態（背景說明見 `docs/overview.md`「日誌」小節、`docs/adr/0006-log-r2-sync-is-periodic-full-directory-not-rotation-hook.md`）。三種語意：
+Footer 的 LOG_LEVEL 徽章旁邊還有一個「R2 備份」徽章，顯示 log 檔案同步到 Cloudflare R2 的狀態（背景說明見 `docs/overview.md`「日誌」小節、`docs/adr/0006-log-r2-sync-is-periodic-full-directory-not-rotation-hook.md`）。三種語意：
 
 - 灰色「R2 備份：未啟用」或「R2 備份：尚未同步」——功能沒開，或開了但還沒跑過第一次。沒開時完全不排程同步，只在啟動時記一行 debug `R2 not configured, log sync disabled`（沒有 reqId，所以在事件列表是一筆「系統」事件，「來自」顯示 `log-upload.ts`、「來源」顯示「啟動 · log-upload.ts」，非錯誤）。因為是 debug 層，只有正式環境＋`LOG_LEVEL=debug` 時才會出現在 /logs；預設 `LOG_LEVEL=info` 或本機開發環境（不寫 log 檔）都看不到這筆事件。
 - 綠色「R2 備份 · `<時間>` 成功」——最近一次同步成功。同步只會上傳有變動的檔案，一整輪所有檔案都沒變動、實際沒傳任何檔案也算成功，所以閒置時時間仍會持續更新。
