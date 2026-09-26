@@ -1379,7 +1379,7 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
 
     #ev-list-pane { border-right: 1px solid #262835; display: flex; flex-direction: column; min-height: 0; }
     .tabs { display: flex; gap: 6px; padding: 8px 24px; border-bottom: 1px solid #1c1d29; flex: none; }
-    .list-toolbar-row { padding: 8px 24px; border-bottom: 1px solid #1c1d29; flex: none; }
+    .list-toolbar-row { display: flex; align-items: center; gap: 10px; padding: 8px 24px; border-bottom: 1px solid #1c1d29; flex: none; }
     .tab-btn { font-size: 11.5px; background: transparent; border: 1px solid #262835; border-radius: 4px; padding: 6px 11px; color: #8b8fa3; }
     .tab-btn.active { background: #b5abfc; border-color: #b5abfc; color: #14151f; font-weight: 500; }
 
@@ -1506,8 +1506,6 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
       <span class="divider"></span>
       ${levelBadgeHtml}
       ${r2BadgeHtml}
-      <span class="count" id="count-label">共 ${totalCount} 筆</span>
-      <span class="count-err" id="count-err-label">${errorCount} 筆需要注意</span>
       <input type="text" id="search" placeholder="搜尋指令、回覆、reqId、使用者…" oninput="applyFilters()">
       <button id="mask-btn" onclick="toggleMask()"><span class="id-masked">遮蔽 ID ●</span><span class="id-plain">顯示 ID ○</span></button>
       <button id="refresh-btn" onclick="document.location.reload()">↻ 重新整理</button>
@@ -1523,6 +1521,10 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
           <button class="tab-btn" data-tab="sys" onclick="setTab('sys')">系統</button>
         </div>
         <div class="list-toolbar-row">${daysSwitcherHtml(days, token)}</div>
+        <div class="list-toolbar-row">
+          <span class="count" id="count-label">共 ${totalCount} 筆</span>
+          <span class="count-err" id="count-err-label">${errorCount} 筆需要注意</span>
+        </div>
         <div id="ev-list">${listHtml}${trailingBoundaryHtml}<div id="ev-list-empty">沒有符合的事件</div></div>
       </div>
       <div id="detail-pane">${detailHtml || '<div id="no-events">目前沒有日誌記錄</div>'}</div>
