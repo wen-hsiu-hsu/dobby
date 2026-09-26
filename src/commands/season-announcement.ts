@@ -7,10 +7,11 @@ import { blocksToText } from '../services/notion/blocks-to-text.js';
 import { replyMessage } from '../services/line/reply-service.js';
 import { parseSeasonInput, getPreviousSeasonName, formatSeasonTitle, getSeasonQuarter, groupDatesByMonth } from '../utils/date-utils.js';
 import { logger } from '../utils/logger.js';
+import { COURTS_DENSITY } from './registration/capacity-calculator.js';
 
-// 每面場地可容納的人數上限，跟 capacity-calculator.ts 的 COURTS_DENSITY 意義相同——
-// 這裡算的是「本次無人請假」時的零打名額 baseline（公告用途，非即時報名名額）。
-const COURTS_DENSITY = 7;
+// COURTS_DENSITY 從 capacity-calculator.ts 共用（每面場地可容納的人數上限）。這裡算的是
+// 「當季預設、零請假」的零打名額 baseline（公告用途，非即時報名名額），公式跟
+// calculateTotalSlots() 不同，但「每面場地幾人」這個數字本身共用同一來源。
 
 // 三則公告之間的分隔線（NEW_SEASON 模板專用），bot 依此切成多則 LINE 訊息回覆。
 // 跟區塊內部用來斷行的單一 "—" 不同，不要搞混。

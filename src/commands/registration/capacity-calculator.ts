@@ -33,8 +33,16 @@ export function resolveCourts(event: Pick<CalendarEventData, 'courts'>, seasonDa
   return event.courts ?? seasonData.courts;
 }
 
+/**
+ * 每面場地可容納的人數上限。season-announcement.ts 的公告 baseline 計算也用同一個數字
+ * （語意相同：每面場地固定容納這麼多人），故從這裡 export 共用，避免兩處各自定義後
+ * 悄悄失去同步。兩處的計算公式本身不同——這裡另外套用 resolveCourts()（行事曆場地數優先
+ * 於當季預設）並扣掉請假人數，season-announcement.ts 算的是「當季預設、零請假」的
+ * 公告用 baseline——但「每面場地幾人」這個數字本身沒有理由不同。
+ */
+export const COURTS_DENSITY = 7;
+
 export function calculateTotalSlots(event: Pick<CalendarEventData, 'absentees' | 'courts'>, seasonData: SeasonData): number {
-  const COURTS_DENSITY = 7;
   return resolveCourts(event, seasonData) * COURTS_DENSITY - seasonData.members.length + event.absentees.length;
 }
 
