@@ -13,6 +13,10 @@ export function parseCommand(text: string): ParsedCommand | null {
 
   const normalized = normalizeFullWidth(text);
   const body = normalized.replace(/^@Dobby\s*/, '').trim().replace(/\s+/g, ' ');
+  // English command keywords are case-insensitive; Chinese keywords and the
+  // @Dobby prefix itself are unaffected (prefix case-sensitivity is by design,
+  // see command-parser.test.ts).
+  const bodyLower = body.toLowerCase();
 
   // Exact @Dobby → introduce
   if (body === '') {
@@ -51,37 +55,39 @@ export function parseCommand(text: string): ParsedCommand | null {
   }
 
   // Owe
-  if (body === '欠' || body === 'owe') {
+  if (body === '欠' || bodyLower === 'owe') {
     return { type: CommandType.OWE, rawText: text };
   }
 
   // Command list
-  if (body === 'command' || body === '指令') {
+  if (bodyLower === 'command' || body === '指令') {
     return { type: CommandType.COMMAND_LIST, rawText: text };
   }
 
   // Participants
-  if (body === 'participants' || body === 'people' || body === '報名人') {
+  if (bodyLower === 'participants' || bodyLower === 'people' || body === '報名人') {
     return { type: CommandType.PARTICIPANTS, rawText: text };
   }
 
   // Next event (admin): "@Dobby next"
-  if (body === 'next') {
+  if (bodyLower === 'next') {
     return { type: CommandType.NEXT_EVENT, rawText: text };
   }
 
   // News / announcement
-  if (body === 'news' || body === 'announcement' || body === '公告') {
+  if (bodyLower === 'news' || bodyLower === 'announcement' || body === '公告') {
     return { type: CommandType.NEWS, rawText: text };
   }
 
   // Payment
-  if (body === 'payment' || body === '付款') {
+  if (bodyLower === 'payment' || body === '付款') {
     return { type: CommandType.PAYMENT, rawText: text };
   }
 
-  // Season announcement (admin): "@Dobby season 2026Q2"
-  const seasonMatch = body.match(/^season (\S+)$/);
+  // Season announcement (admin): "@Dobby season 2026Q2" — "season" keyword is
+  // case-insensitive, but the season arg itself keeps its original casing
+  // (it's a data value, e.g. "2026Q2" vs "2026-q2", not a command keyword).
+  const seasonMatch = body.match(/^season (\S+)$/i);
   if (seasonMatch) {
     return { type: CommandType.SEASON_ANNOUNCEMENT, rawText: text, seasonArg: seasonMatch[1] };
   }

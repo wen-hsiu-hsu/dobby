@@ -1,6 +1,8 @@
 # 指令說明
 
-所有指令以 `@Dobby` 開頭（全形 `＠Ｄｏｂｂｙ` 不支援，但 `＋`/`－` 可以用全形）。
+所有指令以 `@Dobby` 開頭（全形 `＠Ｄｏｂｂｙ` 不支援，但 `＋`/`－` 可以用全形；`@Dobby` 前綴本身大小寫敏感，例如 `@dobby` 不會被辨識為指令）。
+
+英文指令關鍵字（`owe`／`command`／`participants`／`people`／`next`／`news`／`announcement`／`payment`／`season`）不分大小寫，例如 `@Dobby NEWS`、`@Dobby News` 都等同 `@Dobby news`。`season` 後面接的季度代碼（如 `2026Q2`）不受影響，維持照打字原樣（見 `src/commands/season-announcement.ts` 對代碼格式的解析）。中文指令關鍵字（`假`／`銷假`／`指令`／`報名人`／`公告`／`付款`／`欠`）不受此規則影響。
 
 ## 一般指令
 

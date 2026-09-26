@@ -137,6 +137,41 @@ describe('parseCommand', () => {
     expect(parseCommand('@Dobby xyz')?.type).toBe(CommandType.UNKNOWN);
   });
 
+  describe('English command keywords are case-insensitive', () => {
+    it('parses @Dobby OWE / Owe as OWE', () => {
+      expect(parseCommand('@Dobby OWE')?.type).toBe(CommandType.OWE);
+      expect(parseCommand('@Dobby Owe')?.type).toBe(CommandType.OWE);
+    });
+
+    it('parses @Dobby COMMAND as COMMAND_LIST', () => {
+      expect(parseCommand('@Dobby COMMAND')?.type).toBe(CommandType.COMMAND_LIST);
+    });
+
+    it('parses @Dobby PARTICIPANTS / People as PARTICIPANTS', () => {
+      expect(parseCommand('@Dobby PARTICIPANTS')?.type).toBe(CommandType.PARTICIPANTS);
+      expect(parseCommand('@Dobby People')?.type).toBe(CommandType.PARTICIPANTS);
+    });
+
+    it('parses @Dobby NEXT as NEXT_EVENT', () => {
+      expect(parseCommand('@Dobby NEXT')?.type).toBe(CommandType.NEXT_EVENT);
+    });
+
+    it('parses @Dobby NEWS / Announcement as NEWS', () => {
+      expect(parseCommand('@Dobby NEWS')?.type).toBe(CommandType.NEWS);
+      expect(parseCommand('@Dobby Announcement')?.type).toBe(CommandType.NEWS);
+    });
+
+    it('parses @Dobby PAYMENT as PAYMENT', () => {
+      expect(parseCommand('@Dobby PAYMENT')?.type).toBe(CommandType.PAYMENT);
+    });
+
+    it('parses @Dobby SEASON 2026Q2 as SEASON_ANNOUNCEMENT, keeping the arg casing as typed', () => {
+      const cmd = parseCommand('@Dobby SEASON 2026q2');
+      expect(cmd?.type).toBe(CommandType.SEASON_ANNOUNCEMENT);
+      expect(cmd?.seasonArg).toBe('2026q2');
+    });
+  });
+
   describe('@mention target (delegated commands)', () => {
     it('parses @Dobby @Name +1 as REGISTRATION with target', () => {
       const cmd = parseCommand('@Dobby @小明 +1');
