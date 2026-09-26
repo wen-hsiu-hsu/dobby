@@ -1322,7 +1322,25 @@ function daysSwitcherHtml(days: number, token: string): string {
     const selectedAttr = d === days ? ' selected' : '';
     return `<option value="${escapeHtml(`?days=${d}${tokenQuery}`)}"${selectedAttr}>${label}</option>`;
   }).join('');
-  return `<select class="days-switcher" onchange="location.href=this.value">${options}</select>`;
+  return `<select id="days-select" class="days-switcher" onchange="location.href=this.value">${options}</select>`;
+}
+
+type TabCounts = { all: number; att: number } & Record<EventBucket, number>;
+
+const TAB_DEFS: { tab: keyof TabCounts; label: string }[] = [
+  { tab: 'all', label: '全部' },
+  { tab: 'att', label: '需要注意' },
+  { tab: 'msg', label: '訊息' },
+  { tab: 'cron', label: '排程' },
+  { tab: 'sys', label: '系統' },
+];
+
+/** 分頁標籤——每個標籤內建自己範圍內的筆數（`tab-count` 徽章），取代原本另外一整列的「共 N 筆／N 筆需要注意」文字。跟 `.count`/`.count-err` 一樣，這些數字是目前 `days` 視窗的統計，不會隨搜尋框輸入即時更新（搜尋只在前端 `applyFilters()` 隱藏/顯示卡片，不重新計算這裡）。 */
+function tabsHtml(counts: TabCounts): string {
+  return TAB_DEFS.map(({ tab, label }, i) => {
+    const activeClass = i === 0 ? ' active' : '';
+    return `<button class="tab-btn${activeClass}" data-tab="${tab}" onclick="setTab('${tab}')">${label}<span class="tab-count">${counts[tab]}</span></button>`;
+  }).join('');
 }
 
 /** 尚未載入完整內容的事件詳情——只留一個空殼給 `selectEvent()` 判斷「還沒 fetch 過」，點開時才用 `?detail=` 現組現拿（見 `createLogsRouter` 的說明）。 */
@@ -1351,6 +1369,8 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
 
   const totalCount = events.length;
   const errorCount = events.filter((e) => e.status !== 'ok').length;
+  const tabCounts: TabCounts = { all: totalCount, att: errorCount, msg: 0, cron: 0, sys: 0 };
+  for (const ev of events) tabCounts[KIND_META[ev.kind].bucket]++;
 
   // 分隔線依時間插在正確位置——比它晚的事件顯示在它上面，第一個比它舊的
   // 事件顯示在它下面。同一個空隙裡有兩個以上分隔線只顯示最新的一個（連續
@@ -1395,8 +1415,6 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
 
     header { display: flex; align-items: center; gap: 14px; padding: 12px 24px; border-bottom: 1px solid #262835; flex: none; }
     header h1 { font-size: 14px; font-weight: 500; }
-    .count { font-size: 12px; color: #8b8fa3; }
-    .count-err { font-size: 12px; font-weight: 500; color: #e0807f; }
     #search { margin-left: auto; background: #0e0f18; border: 1px solid #262835; border-radius: 8px; color: #e7e7ee; font-size: 12px; padding: 7px 11px; width: 250px; outline: none; }
     #search:focus { border-color: #7c72c4; }
     button { cursor: pointer; font-family: inherit; }
@@ -1405,7 +1423,6 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
     #refresh-btn.has-new { color: #d2cefd; border-color: #5d5294; background: #201c33; font-weight: 500; }
     .level-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 500; font-family: ui-monospace, monospace; border-radius: 4px; padding: 5px 9px; flex: none; }
     .level-badge-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
-    .days-switcher { font-size: 11.5px; font-family: inherit; background: #0e0f18; color: #8b8fa3; border: 1px solid #262835; border-radius: 4px; padding: 6px 11px; }
 
     main { display: grid; grid-template-columns: 400px 1fr; flex: 1 1 auto; min-height: 0; }
 
@@ -1415,10 +1432,15 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
     .uptime { margin-left: auto; font-size: 11.5px; color: #595d6c; font-variant-numeric: tabular-nums; }
 
     #ev-list-pane { border-right: 1px solid #262835; display: flex; flex-direction: column; min-height: 0; }
-    .tabs { display: flex; gap: 6px; padding: 8px 24px; border-bottom: 1px solid #1c1d29; flex: none; }
-    .list-toolbar-row { display: flex; align-items: center; gap: 10px; padding: 8px 24px; border-bottom: 1px solid #1c1d29; flex: none; }
-    .tab-btn { font-size: 11.5px; background: transparent; border: 1px solid #262835; border-radius: 4px; padding: 6px 11px; color: #8b8fa3; }
-    .tab-btn.active { background: #b5abfc; border-color: #b5abfc; color: #14151f; font-weight: 500; }
+    .tabs { display: flex; gap: 18px; padding: 11px 24px 0; border-bottom: 1px solid #1c1d29; flex: none; }
+    .tab-btn { position: relative; font-size: 12px; font-family: inherit; background: transparent; border: none; padding: 0 0 10px; color: #8b8fa3; display: flex; align-items: center; gap: 6px; }
+    .tab-btn.active { color: #e7e7ee; font-weight: 500; }
+    .tab-btn.active::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: #b5abfc; border-radius: 2px; }
+    .tab-count { font-size: 10.5px; font-variant-numeric: tabular-nums; color: #595d6c; background: #1c1d29; border-radius: 10px; padding: 1px 6px; }
+    .tab-btn.active .tab-count { color: #b5abfc; background: #201c33; }
+    .list-toolbar-row { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 6px 24px; border-bottom: 1px solid #1c1d29; flex: none; }
+    .range-label { font-size: 11px; color: #595d6c; }
+    .days-switcher { font-size: 11.5px; font-family: inherit; background: transparent; color: #8b8fa3; border: 1px solid #262835; border-radius: 4px; padding: 4px 9px; }
 
     #ev-list { overflow-y: auto; flex: 1 1 auto; min-height: 0; }
     .ev-item { cursor: pointer; padding: 13px 16px; border-bottom: 1px solid #1c1d29; border-left: 3px solid transparent; }
@@ -1547,17 +1569,10 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
 
     <main>
       <div id="ev-list-pane">
-        <div class="tabs">
-          <button class="tab-btn active" data-tab="all" onclick="setTab('all')">全部</button>
-          <button class="tab-btn" data-tab="att" onclick="setTab('att')">需要注意</button>
-          <button class="tab-btn" data-tab="msg" onclick="setTab('msg')">訊息</button>
-          <button class="tab-btn" data-tab="cron" onclick="setTab('cron')">排程</button>
-          <button class="tab-btn" data-tab="sys" onclick="setTab('sys')">系統</button>
-        </div>
-        <div class="list-toolbar-row">${daysSwitcherHtml(days, token)}</div>
+        <div class="tabs">${tabsHtml(tabCounts)}</div>
         <div class="list-toolbar-row">
-          <span class="count" id="count-label">共 ${totalCount} 筆</span>
-          <span class="count-err" id="count-err-label">${errorCount} 筆需要注意</span>
+          <label class="range-label" for="days-select">範圍</label>
+          ${daysSwitcherHtml(days, token)}
         </div>
         <div id="ev-list">${listHtml}${trailingBoundaryHtml}<div id="ev-list-empty">沒有符合的事件</div></div>
       </div>

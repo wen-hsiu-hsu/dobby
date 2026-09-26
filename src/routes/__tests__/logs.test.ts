@@ -389,6 +389,32 @@ describe('createLogsRouter', () => {
     expect(html).toContain('系統');
   });
 
+  it('shows each tab\'s own event count as a badge (全部/需要注意 plus per-bucket 訊息/排程/系統), not a separate "共 N 筆" line', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      // 訊息 bucket ×2（各自獨立 reqId，各算一筆事件；要有 `Processing event`
+      // 開頭才會被歸類成訊息而不是排程，見下面「classifies a command-shaped
+      // message」測試同樣的寫法）
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'message', sourceType: 'group', reqId: 'req-a', msg: 'Processing event' },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 1), type: 'message', sourceType: 'group', reqId: 'req-b', msg: 'Processing event' },
+      // 排程 bucket ×1
+      { level: 30, time: Date.UTC(2024, 0, 1, 4, 0, 0), msg: 'Starting display name batch update', reqId: 'sched-1' },
+      { level: 30, time: Date.UTC(2024, 0, 1, 4, 0, 5), msg: 'Display name update complete', updated: 2, reqId: 'sched-1' },
+      // 系統 bucket ×2（一筆正常、一筆 error，用來驗證「需要注意」跟著算對）
+      { level: 30, time: Date.UTC(2024, 0, 1, 5, 0, 0), msg: 'Some background job finished' },
+      { level: 50, time: Date.UTC(2024, 0, 1, 5, 0, 1), msg: 'Some background job failed', err: 'boom' },
+    ]);
+
+    const html = await getLogsHtml();
+
+    expect(html).toContain('全部<span class="tab-count">5</span>');
+    expect(html).toContain('需要注意<span class="tab-count">1</span>');
+    expect(html).toContain('訊息<span class="tab-count">2</span>');
+    expect(html).toContain('排程<span class="tab-count">1</span>');
+    expect(html).toContain('系統<span class="tab-count">2</span>');
+    expect(html).not.toContain('共 5 筆');
+    expect(html).not.toContain('1 筆需要注意');
+  });
+
   it('classifies a command-shaped message (Routing command) as kind=command, and a non-command message as kind=chat', async () => {
     vi.mocked(readRecentLogs).mockResolvedValueOnce([
       { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'message', sourceType: 'group', reqId: 'req-cmd', msg: 'Processing event' },
@@ -533,7 +559,8 @@ describe('createLogsRouter', () => {
     expect(html).not.toContain('class="ev-item"');
     expect(html).not.toContain('data-bucket="sys"');
     expect(html).not.toContain('scheduler started');
-    expect(html).toContain('共 0 筆');
+    // 「共 N 筆」已經搬進「全部」標籤上的徽章（tab-count），不再是獨立文字
+    expect(html).toContain('全部<span class="tab-count">0</span>');
     // 分隔線照常只有一條，而且 scheduler started 夾在關閉訊號跟 Server
     // started 之間，不會打斷兩者的配對
     expect((html.match(/class="ev-boundary"/g) ?? []).length).toBe(1);
