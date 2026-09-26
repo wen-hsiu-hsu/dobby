@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { sendWeeklyPush } from '../weekly-push.js';
 import * as calendarRepo from '../../services/notion/calendar-repository.js';
 import * as seasonRepo from '../../services/notion/season-repository.js';
@@ -6,7 +6,13 @@ import * as peopleRepo from '../../services/notion/people-repository.js';
 import { pushMessage } from '../../services/line/push-service.js';
 import { logger } from '../../utils/logger.js';
 import { env } from '../../config/env.js';
+import { formatDate, getNextSaturday } from '../../utils/date-utils.js';
 import type { CalendarEvent, SeasonRecord, PersonRecord } from '../../types/notion-models.js';
+
+// Fixed so `getNextSaturday()` inside weekly-push.ts always resolves the same way,
+// regardless of what day it is when the suite actually runs (see TODO.md 測試技術債
+// 2026-09-27: hardcoded date strings previously expired as real time passed).
+const FAKE_NOW = new Date('2026-01-14T12:00:00+08:00'); // Wednesday
 
 vi.mock('../../services/notion/calendar-repository.js');
 vi.mock('../../services/notion/season-repository.js');
@@ -72,13 +78,23 @@ function pushedText(): string {
 }
 
 describe('sendWeeklyPush', () => {
+  let nextSaturday: string;
+
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FAKE_NOW);
+    nextSaturday = formatDate(getNextSaturday());
+
     vi.resetAllMocks();
     env.DOBBY_GROUP_IDS = ['group-test-1'];
     findByDateMock.mockResolvedValue(makeCalendarEvent());
     findByNameMock.mockResolvedValue(makeSeasonRecord());
     findByPageIdsMock.mockResolvedValue([]);
     pushMessageMock.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('pushes the weekly message to the single configured group when data loads normally', async () => {
@@ -111,19 +127,19 @@ describe('sendWeeklyPush', () => {
   });
 
   it('shows a paused message instead of attendance count when the event is paused', async () => {
-    findByDateMock.mockResolvedValue(makeCalendarEvent({ date: '2026-09-26', isPaused: true }));
+    findByDateMock.mockResolvedValue(makeCalendarEvent({ date: nextSaturday, isPaused: true }));
 
     await sendWeeklyPush();
 
     const text = pushedText();
-    expect(text).toContain('2026-09-26 不能到請喊聲');
+    expect(text).toContain(`${nextSaturday} 不能到請喊聲`);
     expect(text).toContain('⛔ 本週活動暫停');
     expect(text).not.toContain('應到');
   });
 
   it('builds a numbered guest list with filled and empty slots, and reports courts/fee/attendance', async () => {
     findByDateMock.mockResolvedValue(
-      makeCalendarEvent({ date: '2026-09-26', guests: ['小明', '小華'] })
+      makeCalendarEvent({ date: nextSaturday, guests: ['小明', '小華'] })
     );
     // courts=1 -> totalSlots = 1*7 - members.length(3) + absentees.length(0) = 4
     findByNameMock.mockResolvedValue(makeSeasonRecord({ courts: 1, guestFee: 200, members: ['p1', 'p2', 'p3'] }));
@@ -131,7 +147,7 @@ describe('sendWeeklyPush', () => {
     await sendWeeklyPush();
 
     const text = pushedText();
-    expect(text).toContain('2026-09-26 不能到請喊聲');
+    expect(text).toContain(`${nextSaturday} 不能到請喊聲`);
     expect(text).toContain('零打名額：4人 $200/人');
     expect(text).toContain('1. 小明');
     expect(text).toContain('2. 小華');
