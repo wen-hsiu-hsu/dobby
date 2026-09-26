@@ -1285,15 +1285,15 @@ function buildEvents(entries: LogEntry[]): EventView[] {
 
 const WINDOW_DAY_OPTIONS = [1, 3, MAX_WINDOW_DAYS] as const;
 
-/** 讀取範圍切換連結——用一般的 `<a href>` 換頁（不是 JS 換頁），token 照抄目前這次請求用的那一份，跟其他頁面連結一致。 */
+/** 讀取範圍切換下拉選單——選項本身是完整換頁用的 `?days=` 網址（含 token），`onchange` 直接 `location.href = this.value` 換頁，跟原本的 `<a href>` 一樣是純連結換頁，不是 JS fetch。 */
 function daysSwitcherHtml(days: number, token: string): string {
   const tokenQuery = token ? `&token=${encodeURIComponent(token)}` : '';
-  const links = WINDOW_DAY_OPTIONS.map((d) => {
+  const options = WINDOW_DAY_OPTIONS.map((d) => {
     const label = d === 1 ? '24 小時' : `${d} 天`;
-    const activeClass = d === days ? ' active' : '';
-    return `<a class="days-link${activeClass}" href="${escapeHtml(`?days=${d}${tokenQuery}`)}">${label}</a>`;
+    const selectedAttr = d === days ? ' selected' : '';
+    return `<option value="${escapeHtml(`?days=${d}${tokenQuery}`)}"${selectedAttr}>${label}</option>`;
   }).join('');
-  return `<div class="days-switcher">${links}</div>`;
+  return `<select class="days-switcher" onchange="location.href=this.value">${options}</select>`;
 }
 
 /** 尚未載入完整內容的事件詳情——只留一個空殼給 `selectEvent()` 判斷「還沒 fetch 過」，點開時才用 `?detail=` 現組現拿（見 `createLogsRouter` 的說明）。 */
@@ -1373,14 +1373,13 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
     #refresh-btn.has-new { color: #d2cefd; border-color: #5d5294; background: #201c33; font-weight: 500; }
     .level-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 500; font-family: ui-monospace, monospace; border-radius: 4px; padding: 5px 9px; flex: none; }
     .level-badge-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
-    .days-switcher { display: flex; gap: 6px; flex: none; }
-    .days-link { font-size: 11.5px; text-decoration: none; background: transparent; border: 1px solid #262835; border-radius: 4px; padding: 6px 11px; color: #8b8fa3; }
-    .days-link.active { background: #b5abfc; border-color: #b5abfc; color: #14151f; font-weight: 500; }
+    .days-switcher { font-size: 11.5px; font-family: inherit; background: #0e0f18; color: #8b8fa3; border: 1px solid #262835; border-radius: 4px; padding: 6px 11px; }
 
     main { display: grid; grid-template-columns: 400px 1fr; flex: 1 1 auto; min-height: 0; }
 
     #ev-list-pane { border-right: 1px solid #262835; display: flex; flex-direction: column; min-height: 0; }
     .tabs { display: flex; gap: 6px; padding: 8px 24px; border-bottom: 1px solid #1c1d29; flex: none; }
+    .list-toolbar-row { padding: 8px 24px; border-bottom: 1px solid #1c1d29; flex: none; }
     .tab-btn { font-size: 11.5px; background: transparent; border: 1px solid #262835; border-radius: 4px; padding: 6px 11px; color: #8b8fa3; }
     .tab-btn.active { background: #b5abfc; border-color: #b5abfc; color: #14151f; font-weight: 500; }
 
@@ -1507,7 +1506,6 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
       <span class="divider"></span>
       ${levelBadgeHtml}
       ${r2BadgeHtml}
-      ${daysSwitcherHtml(days, token)}
       <span class="count" id="count-label">共 ${totalCount} 筆</span>
       <span class="count-err" id="count-err-label">${errorCount} 筆需要注意</span>
       <input type="text" id="search" placeholder="搜尋指令、回覆、reqId、使用者…" oninput="applyFilters()">
@@ -1524,6 +1522,7 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
           <button class="tab-btn" data-tab="cron" onclick="setTab('cron')">排程</button>
           <button class="tab-btn" data-tab="sys" onclick="setTab('sys')">系統</button>
         </div>
+        <div class="list-toolbar-row">${daysSwitcherHtml(days, token)}</div>
         <div id="ev-list">${listHtml}${trailingBoundaryHtml}<div id="ev-list-empty">沒有符合的事件</div></div>
       </div>
       <div id="detail-pane">${detailHtml || '<div id="no-events">目前沒有日誌記錄</div>'}</div>
