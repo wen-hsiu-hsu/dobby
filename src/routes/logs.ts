@@ -235,6 +235,19 @@ function formatDuration(ms: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${Math.round(ms)}ms`;
 }
 
+/** footer「運行時間」用——`process.uptime()` 現算，重啟即歸零，不持久化。只取到分鐘，秒數對這個用途沒意義。 */
+function formatUptime(seconds: number): string {
+  const totalMinutes = Math.floor(seconds / 60);
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days} 天`);
+  if (days > 0 || hours > 0) parts.push(`${hours} 小時`);
+  parts.push(`${minutes} 分`);
+  return parts.join(' ');
+}
+
 function levelNameOf(entry: LogEntry): string {
   return LEVEL_NAMES[entry.level ?? 30] ?? String(entry.level ?? 30);
 }
@@ -1285,6 +1298,12 @@ function buildEvents(entries: LogEntry[]): EventView[] {
 
 const WINDOW_DAY_OPTIONS = [1, 3, MAX_WINDOW_DAYS] as const;
 
+// footer 外部連結：帳號 ID 不是密鑰（見 TODO 討論），且這兩個連結只是給管
+// 理者手動點開跳轉用的固定書籤，不隨環境變數變動，直接寫死在原始碼裡，不
+// 走 `src/config/env.ts`。
+const LINE_DEVELOPERS_URL = 'https://developers.line.biz/console/provider/2001269260';
+const R2_DASHBOARD_URL = 'https://dash.cloudflare.com/884a172dfef572f9db1948fda63ffe76/r2/default/buckets/dobby-logs';
+
 /** 讀取範圍切換下拉選單——選項本身是完整換頁用的 `?days=` 網址（含 token），`onchange` 直接 `location.href = this.value` 換頁，跟原本的 `<a href>` 一樣是純連結換頁，不是 JS fetch。 */
 function daysSwitcherHtml(days: number, token: string): string {
   const tokenQuery = token ? `&token=${encodeURIComponent(token)}` : '';
@@ -1362,7 +1381,6 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
 
     header { display: flex; align-items: center; gap: 14px; padding: 12px 24px; border-bottom: 1px solid #262835; flex: none; }
     header h1 { font-size: 14px; font-weight: 500; }
-    .divider { width: 1px; height: 16px; background: #262835; }
     .count { font-size: 12px; color: #8b8fa3; }
     .count-err { font-size: 12px; font-weight: 500; color: #e0807f; }
     #search { margin-left: auto; background: #0e0f18; border: 1px solid #262835; border-radius: 8px; color: #e7e7ee; font-size: 12px; padding: 7px 11px; width: 250px; outline: none; }
@@ -1376,6 +1394,11 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
     .days-switcher { font-size: 11.5px; font-family: inherit; background: #0e0f18; color: #8b8fa3; border: 1px solid #262835; border-radius: 4px; padding: 6px 11px; }
 
     main { display: grid; grid-template-columns: 400px 1fr; flex: 1 1 auto; min-height: 0; }
+
+    footer { display: flex; align-items: center; gap: 14px; padding: 10px 24px; border-top: 1px solid #262835; flex: none; }
+    .footer-link { font-size: 11.5px; color: #8b8fa3; text-decoration: none; }
+    .footer-link:hover { color: #d2cefd; }
+    .uptime { margin-left: auto; font-size: 11.5px; color: #595d6c; font-variant-numeric: tabular-nums; }
 
     #ev-list-pane { border-right: 1px solid #262835; display: flex; flex-direction: column; min-height: 0; }
     .tabs { display: flex; gap: 6px; padding: 8px 24px; border-bottom: 1px solid #1c1d29; flex: none; }
@@ -1503,9 +1526,6 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
   <div id="app">
     <header>
       <h1>🐶 Dobby Logs</h1>
-      <span class="divider"></span>
-      ${levelBadgeHtml}
-      ${r2BadgeHtml}
       <input type="text" id="search" placeholder="搜尋指令、回覆、reqId、使用者…" oninput="applyFilters()">
       <button id="mask-btn" onclick="toggleMask()"><span class="id-masked">遮蔽 ID ●</span><span class="id-plain">顯示 ID ○</span></button>
       <button id="refresh-btn" onclick="document.location.reload()">↻ 重新整理</button>
@@ -1529,6 +1549,14 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
       </div>
       <div id="detail-pane">${detailHtml || '<div id="no-events">目前沒有日誌記錄</div>'}</div>
     </main>
+
+    <footer>
+      ${levelBadgeHtml}
+      ${r2BadgeHtml}
+      <a class="footer-link" href="${LINE_DEVELOPERS_URL}" target="_blank" rel="noopener">LINE Developers ↗</a>
+      <a class="footer-link" href="${R2_DASHBOARD_URL}" target="_blank" rel="noopener">R2 Dashboard ↗</a>
+      <span class="uptime">運行時間 ${escapeHtml(formatUptime(process.uptime()))}</span>
+    </footer>
   </div>
 
   <script>
