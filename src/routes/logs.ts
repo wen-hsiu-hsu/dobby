@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from 'express';
+import { env } from '../config/env.js';
 import { readRecentLogs, MAX_WINDOW_DAYS, type LogEntry } from '../utils/log-reader.js';
 import { getLogLevel } from '../utils/logger.js';
 import { getR2SyncStatus, type R2SyncStatus } from '../utils/log-upload.js';
@@ -1298,11 +1299,20 @@ function buildEvents(entries: LogEntry[]): EventView[] {
 
 const WINDOW_DAY_OPTIONS = [1, 3, MAX_WINDOW_DAYS] as const;
 
-// footer 外部連結：帳號 ID 不是密鑰（見 TODO 討論），且這兩個連結只是給管
-// 理者手動點開跳轉用的固定書籤，不隨環境變數變動，直接寫死在原始碼裡，不
-// 走 `src/config/env.ts`。
+// LINE Developers 連結是固定的 provider 頁面，跟環境無關，直接寫死。
 const LINE_DEVELOPERS_URL = 'https://developers.line.biz/console/provider/2001269260';
-const R2_DASHBOARD_URL = 'https://dash.cloudflare.com/884a172dfef572f9db1948fda63ffe76/r2/default/buckets/dobby-logs';
+
+/**
+ * R2 dashboard 連結——帳號 ID、bucket 名稱借用 `env.ts` 既有的 `R2_ACCOUNT_ID`/
+ * `R2_BUCKET_NAME`（`R2_CORE_VARS` 保證這兩個要嘛都有值要嘛都沒有，見
+ * `env.ts`），不在這裡另外寫死一份，避免帳號/bucket 換掉時這裡沒跟著更新。
+ * 沒設定 R2（例如本機開發環境）就沒有帳號 ID 可組網址，回傳 `null`，footer
+ * 不顯示這個連結。
+ */
+function r2DashboardUrl(): string | null {
+  if (!env.R2_ACCOUNT_ID || !env.R2_BUCKET_NAME) return null;
+  return `https://dash.cloudflare.com/${env.R2_ACCOUNT_ID}/r2/default/buckets/${env.R2_BUCKET_NAME}`;
+}
 
 /** 讀取範圍切換下拉選單——選項本身是完整換頁用的 `?days=` 網址（含 token），`onchange` 直接 `location.href = this.value` 換頁，跟原本的 `<a href>` 一樣是純連結換頁，不是 JS fetch。 */
 function daysSwitcherHtml(days: number, token: string): string {
@@ -1328,6 +1338,10 @@ function jsStringLiteral(value: string): string {
 function renderHtml(entries: LogEntry[], days: number, token: string): string {
   const levelBadgeHtml = logLevelBadgeHtml(getLogLevel());
   const r2BadgeHtml = r2SyncBadgeHtml(getR2SyncStatus());
+  const r2DashboardHref = r2DashboardUrl();
+  const r2DashboardLinkHtml = r2DashboardHref
+    ? `<a class="footer-link" href="${r2DashboardHref}" target="_blank" rel="noopener">R2 Dashboard ↗</a>`
+    : '';
   const noReqIdEntries = entries.filter((e) => !(typeof e.reqId === 'string' && e.reqId));
   const lifecycleEntries = noReqIdEntries.filter((e) => LIFECYCLE_MESSAGES.has(String(e.msg ?? '')));
 
@@ -1554,7 +1568,7 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
       ${levelBadgeHtml}
       ${r2BadgeHtml}
       <a class="footer-link" href="${LINE_DEVELOPERS_URL}" target="_blank" rel="noopener">LINE Developers ↗</a>
-      <a class="footer-link" href="${R2_DASHBOARD_URL}" target="_blank" rel="noopener">R2 Dashboard ↗</a>
+      ${r2DashboardLinkHtml}
       <span class="uptime">運行時間 ${escapeHtml(formatUptime(process.uptime()))}</span>
     </footer>
   </div>
