@@ -1432,8 +1432,17 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
     .uptime { margin-left: auto; font-size: 11.5px; color: #595d6c; font-variant-numeric: tabular-nums; }
 
     #ev-list-pane { border-right: 1px solid #262835; display: flex; flex-direction: column; min-height: 0; }
-    .tabs { display: flex; gap: 18px; padding: 11px 24px 0; border-bottom: 1px solid #1c1d29; flex: none; }
-    .tab-btn { position: relative; font-size: 12px; font-family: inherit; background: transparent; border: none; padding: 0 0 10px; color: #8b8fa3; display: flex; align-items: center; gap: 6px; }
+    .tabs-wrap { position: relative; flex: none; }
+    .tabs { display: flex; gap: 16px; padding: 11px 24px 0; border-bottom: 1px solid #1c1d29; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+    .tabs::-webkit-scrollbar { height: 4px; }
+    .tabs::-webkit-scrollbar-thumb { background: #262835; border-radius: 2px; }
+    /* 標籤數字很大（例如單週活動量爆量）時 .tabs 會超出 400px 側欄寬度而
+       需要橫向捲動——這個淡出遮罩是「還有更多標籤」的視覺提示，預設透明，
+       只有下面 initTabsScroll() 判斷真的捲得動時才淡入，避免內容明明沒被
+       擋住卻一直蓋著一層暗角。 */
+    .tabs-fade { position: absolute; top: 0; right: 0; bottom: 1px; width: 28px; background: linear-gradient(to right, transparent, #14151f); pointer-events: none; opacity: 0; transition: opacity .15s; }
+    .tabs-wrap.is-scrollable .tabs-fade { opacity: 1; }
+    .tab-btn { position: relative; flex: none; white-space: nowrap; font-size: 12px; font-family: inherit; background: transparent; border: none; padding: 0 0 10px; color: #8b8fa3; display: flex; align-items: center; gap: 6px; }
     .tab-btn.active { color: #e7e7ee; font-weight: 500; }
     .tab-btn.active::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: #b5abfc; border-radius: 2px; }
     .tab-count { font-size: 10.5px; font-variant-numeric: tabular-nums; color: #595d6c; background: #1c1d29; border-radius: 10px; padding: 1px 6px; }
@@ -1569,7 +1578,10 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
 
     <main>
       <div id="ev-list-pane">
-        <div class="tabs">${tabsHtml(tabCounts)}</div>
+        <div class="tabs-wrap">
+          <div class="tabs">${tabsHtml(tabCounts)}</div>
+          <div class="tabs-fade" aria-hidden="true"></div>
+        </div>
         <div class="list-toolbar-row">
           <label class="range-label" for="days-select">範圍</label>
           ${daysSwitcherHtml(days, token)}
@@ -1710,6 +1722,23 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
     (function initSelection() {
       const first = document.querySelector('.ev-item');
       if (first) first.classList.add('active');
+    })();
+
+    // 標籤數字很大時 .tabs 會需要橫向捲動（見同名 CSS 註解），這裡判斷
+    // 「捲得動、而且還沒捲到底」才亮出右側淡出遮罩，避免使用者以為系統／
+    // 排程標籤被截斷了卻不知道可以往右滑。
+    (function initTabsScroll() {
+      const wrap = document.querySelector('.tabs-wrap');
+      const tabs = document.querySelector('.tabs');
+      if (!wrap || !tabs) return;
+      function update() {
+        const atEnd = tabs.scrollLeft + tabs.clientWidth >= tabs.scrollWidth - 1;
+        const overflowing = tabs.scrollWidth > tabs.clientWidth + 1;
+        wrap.classList.toggle('is-scrollable', overflowing && !atEnd);
+      }
+      update();
+      tabs.addEventListener('scroll', update);
+      window.addEventListener('resize', update);
     })();
   </script>
 </body>
