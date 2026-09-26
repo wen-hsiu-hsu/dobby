@@ -78,11 +78,19 @@ describe('routeCommand dispatch', () => {
     expectOnlyCalled(handleOwe);
   });
 
-  it('dispatches COMMAND_LIST to handleCommandList with replyToken', async () => {
+  it('dispatches COMMAND_LIST to handleCommandList with replyToken and isAdmin=false', async () => {
     const event = makeEvent({ replyToken: 'rt-3' });
     await routeCommand(makeCommand(CommandType.COMMAND_LIST), event, false);
 
-    expect(handleCommandList).toHaveBeenCalledWith('rt-3');
+    expect(handleCommandList).toHaveBeenCalledWith('rt-3', false);
+    expectOnlyCalled(handleCommandList);
+  });
+
+  it('dispatches COMMAND_LIST to handleCommandList with replyToken and isAdmin=true', async () => {
+    const event = makeEvent({ replyToken: 'rt-3' });
+    await routeCommand(makeCommand(CommandType.COMMAND_LIST), event, true);
+
+    expect(handleCommandList).toHaveBeenCalledWith('rt-3', true);
     expectOnlyCalled(handleCommandList);
   });
 

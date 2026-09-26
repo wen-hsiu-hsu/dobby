@@ -38,20 +38,31 @@ const COMMAND_LIST_TEXT = `🛠️ 指令列表
 取消報名 N 位
 @Dobby -N
 
-幫 @Name 代為報名（管理員限定）
-@Dobby +N @Name
-
 請假（季租成員限定）
 @Dobby 假
 
 銷假（季租成員限定）
 @Dobby 銷假`;
 
-export async function handleCommandList(replyToken: string): Promise<void> {
+// 只有 isAdmin === true 才會接在 COMMAND_LIST_TEXT 後面回傳；一般成員完全看不到這個章節存在。
+const ADMIN_COMMAND_LIST_TEXT = `
+
+【管理員專用】
+幫 @Name 代為報名
+@Dobby +N @Name
+
+查看本週打球資訊
+@Dobby next
+
+產生新一季公告草稿
+@Dobby season 2026Q2`;
+
+export async function handleCommandList(replyToken: string, isAdmin: boolean): Promise<void> {
+  const text = isAdmin ? COMMAND_LIST_TEXT + ADMIN_COMMAND_LIST_TEXT : COMMAND_LIST_TEXT;
   const messages: messagingApi.Message[] = [
     {
       type: 'text',
-      text: COMMAND_LIST_TEXT,
+      text,
       quickReply: {
         items: [
           { type: 'action', action: { type: 'message', label: '報名人', text: '@Dobby 報名人' } },

@@ -17,6 +17,7 @@ Dobby 會介紹自己並 @mention 觸發者和管理員。
 @Dobby command
 @Dobby 指令
 ```
+回覆內容依觸發者身分不同：一般成員只看得到本節（一般指令）跟下面「報名或請假類」；管理員額外多一個「管理員專用」章節（`next`、`season`、代他人報名），一般成員完全看不到這個章節存在（見 `src/commands/command-list.ts`）。
 
 ---
 

@@ -10,7 +10,7 @@
 
 ## 專案慣例
 
-- **新增指令**：`types/commands.ts` 加枚舉 → `command-parser.ts` 解析 → `commands/` 建 handler → `command-router.ts` 掛路由 → 更新 `docs/commands.md`（5 步驟，見 `docs/development.md`）。
+- **新增指令**：`types/commands.ts` 加枚舉 → `command-parser.ts` 解析 → `commands/` 建 handler → `command-router.ts` 掛路由 → 決定是否列進 `command-list.ts`（若列出，是否為管理員限定）→ 更新 `docs/commands.md`（6 步驟，見 `docs/development.md`）。
 - **Notion 存取一律走 repository**（`src/services/notion/*-repository.ts`），不要在 handler 裡直接呼叫 Notion SDK。
 - **新增 repository 的 export 入口函式**（會被 command handler 直接呼叫的那個，不是內部 helper）要用 `withPurpose('...')`（`src/utils/request-context.ts`）包住函式本體，`/logs` 頁面的事件時間軸才看得到這次 Notion 呼叫的目的。不用改函式簽名、不用改呼叫端。理由見 `docs/adr/0005-purpose-context-layered-on-reqid.md`。
 - **讀取 → 計算 → 寫回的操作用 `withMutex`**（`src/services/mutex.ts`），key 用活動日期字串（例如 `2026-05-09`），不用 Notion 頁面 ID（避免多一次查詢才能知道 lock key）。報名、請假都遵循此模式。
