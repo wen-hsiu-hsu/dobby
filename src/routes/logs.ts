@@ -139,7 +139,7 @@ function logLevelBadgeHtml(level: string): string {
     ? 'color:#d2cefd;background:#201c33;border:1px solid #5d5294'
     : 'color:#d3a35c;background:#2c2519;border:1px solid #5c4c2c';
   const dotColor = isDebug ? '#d2cefd' : '#d3a35c';
-  return `<span class="level-badge" style="${css}"><span class="level-badge-dot" style="background:${dotColor}"></span>LOG_LEVEL=${escapeHtml(level)}</span>`;
+  return `<span class="level-badge" style="${css}" title="LOG_LEVEL"><span class="level-badge-dot" style="background:${dotColor}"></span>${escapeHtml(level)}</span>`;
 }
 
 /**

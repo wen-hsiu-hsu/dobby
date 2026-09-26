@@ -724,14 +724,18 @@ describe('createLogsRouter', () => {
     expect(html).not.toContain('class="ev-item"'); // 沒有其他真正的事件，只有分隔線
   });
 
-  it('shows the effective LOG_LEVEL as a badge in the header', async () => {
+  it('shows the effective LOG_LEVEL as a badge, with the LOG_LEVEL label only in the title attribute', async () => {
     const html = await getLogsHtml();
 
     // NODE_ENV 在測試環境不是 'production'，logger.ts 的 isDev 為 true，建構
     // pino 時傳的是寫死的 'debug'，跟 env.LOG_LEVEL 設定值無關——所以這裡斷
-    // 言的是「實際生效」的等級。
-    expect(html).toContain('LOG_LEVEL=debug');
+    // 言的是「實際生效」的等級。徽章文字本身只顯示等級值，完整的
+    // `LOG_LEVEL` 標籤收在 title attribute，滑鼠 hover 才看得到。
+    expect(html).toContain('title="LOG_LEVEL"');
     expect(html).toContain('level-badge');
+    // 徽章本身只顯示等級值，不再帶 `LOG_LEVEL=` 前綴（其他跟除錯提示相關
+    // 的文字，例如「開 LOG_LEVEL=debug 才能看到訊息內容」，不在此限）。
+    expect(html).not.toContain('>LOG_LEVEL=debug</span>');
   });
 
   it('renders JSON request/response payload content as a collapsible json-tree instead of one pretty-printed block', async () => {
