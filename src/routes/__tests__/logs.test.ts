@@ -965,4 +965,65 @@ describe('createLogsRouter', () => {
       expect(text).toContain('no-such-reqid');
     });
   });
+
+  // 回歸測試：一次 LINE reply 可能包含好幾則獨立訊息（例如 `season` 指令一次
+  // 最多回 3 則）。之前 lineMessagesOf() 取出的陣列直接 join('\n')，跟「一則
+  // 有很多行的長訊息」在畫面上完全無法分辨——這裡驗證卡片預覽、展開後時間軸
+  // 明細、`?format=text` 匯出三處都能看出「這是 N 則獨立訊息」，不只是一則
+  // 長訊息。見 TODO.md 移除前的「/logs 頁面看不出一次 LINE 回覆其實是好幾則
+  // 獨立訊息」項目。
+  describe('multi-message LINE reply (e.g. season 指令一次回 3 則)', () => {
+    const multiMessageEntries = [
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), msg: 'LINE reply', method: 'POST', path: '/v2/bot/message/reply', sendId: 's-multi', reqId: 'req-multi' },
+      {
+        level: 20,
+        time: Date.UTC(2024, 0, 1, 0, 0, 1),
+        msg: 'LINE reply payload',
+        sendId: 's-multi',
+        messages: ['第一則訊息', '第二則訊息', '第三則訊息'],
+        reqId: 'req-multi',
+      },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 2), msg: 'LINE reply sent', sendId: 's-multi', reqId: 'req-multi' },
+    ];
+
+    it('marks each message with an [i/N] ordinal and a "共 N 則" count in the timeline body/label, in the expanded HTML timeline', async () => {
+      vi.mocked(readRecentLogs).mockResolvedValueOnce(multiMessageEntries);
+
+      const html = await getEventDetailHtml('req-multi');
+
+      expect(html).toContain('Dobby 送給使用者的訊息（共 3 則）');
+      expect(html).toContain('[1/3] 第一則訊息');
+      expect(html).toContain('[2/3] 第二則訊息');
+      expect(html).toContain('[3/3] 第三則訊息');
+    });
+
+    it('shows a "（共 N 則訊息）" marker in the card preview line so it is not mistaken for one long message', async () => {
+      vi.mocked(readRecentLogs).mockResolvedValueOnce(multiMessageEntries);
+
+      const html = await getLogsHtml();
+
+      // 卡片預覽會把 preview 字串用 '\n' 切開再用 ' · ' 接回一行，所以標示
+      // 跟三則訊息會一起出現在同一行 ev-preview 裡。
+      expect(html).toMatch(/ev-preview[^>]*>[^<]*（共 3 則訊息）[^<]*·[^<]*\[1\/3\] 第一則訊息/);
+    });
+
+    it('keeps the [i/N] ordinals and count marker in the ?format=text export (shares the same TimelineStep as the HTML timeline)', async () => {
+      vi.mocked(readRecentLogs).mockResolvedValueOnce(multiMessageEntries);
+
+      const { text } = await getLogsText({ reqId: 'req-multi' });
+
+      expect(text).toContain('Dobby 送給使用者的訊息（共 3 則）');
+      expect(text).toContain('[1/3] 第一則訊息');
+      expect(text).toContain('[2/3] 第二則訊息');
+      expect(text).toContain('[3/3] 第三則訊息');
+    });
+
+    it('does not add any [i/N] ordinal or count marker for a single-message reply (req-5, existing fixture)', async () => {
+      const html = await getEventDetailHtml('req-5');
+
+      expect(html).toContain('Dobby 送給使用者的訊息');
+      expect(html).not.toContain('Dobby 送給使用者的訊息（共');
+      expect(html).not.toContain('[1/1]');
+    });
+  });
 });

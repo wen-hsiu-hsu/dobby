@@ -564,13 +564,33 @@ function lineMessagesOf(entry: LogEntry | undefined): string[] | null {
   return Array.isArray(messages) ? messages.map(String) : null;
 }
 
+/**
+ * 一次 LINE reply/push 可能包含好幾則獨立訊息（例如 `season` 指令一次最多
+ * 回 3 則）。單純用 `\n` 把 `messages` 接成一串，會跟「一則有很多行的長
+ * 訊息」在畫面上完全無法分辨——`messages.length > 1` 時幫每則加上 `[i/N]`
+ * 序號區隔，`groupPreview()`（卡片預覽）跟 `lineStepTimeline()`（展開後的
+ * 時間軸明細）共用這個函式，確保兩處呈現方式一致。`?format=text` 匯出
+ * （`renderEventDetailText()`）直接複用 `lineStepTimeline()` 算出的
+ * `TimelineStep.body`，不需要另外處理。見 TODO.md「/logs 頁面看不出一次
+ * LINE 回覆其實是好幾則獨立訊息」。
+ */
+function annotateMultiMessage(messages: string[]): string[] {
+  return messages.length > 1 ? messages.map((m, i) => `[${i + 1}/${messages.length}] ${m}`) : messages;
+}
+
+/** 卡片預覽（`groupPreview()`）用：多則訊息時在最前面加一行「（共 N 則訊息）」總覽，方便在被壓成一行、以 `·` 分隔的預覽列裡也能一眼看出則數。 */
+function formatMessagesForPreview(messages: string[]): string {
+  const annotated = annotateMultiMessage(messages);
+  return messages.length > 1 ? `（共 ${messages.length} 則訊息）\n${annotated.join('\n')}` : annotated.join('\n');
+}
+
 function groupPreview(group: FlowGroup): string {
   if (group.end) {
     if (group.end.failure) {
       return `回覆失敗\n${errorMessageOf(group.end.failure) ?? String(group.end.failure.msg ?? '傳送失敗')}`;
     }
     const messages = lineMessagesOf(group.end.payload);
-    if (messages) return messages.join('\n');
+    if (messages) return formatMessagesForPreview(messages);
     if (group.end.sent) return '回覆已送出（開 LOG_LEVEL=debug 才能看到訊息內容）';
     return '尚無回覆結果記錄';
   }
@@ -580,7 +600,7 @@ function groupPreview(group: FlowGroup): string {
       return `推播失敗\n${errorMessageOf(push.failure) ?? String(push.failure.msg ?? '傳送失敗')}`;
     }
     const messages = lineMessagesOf(push.payload);
-    if (messages) return messages.join('\n');
+    if (messages) return formatMessagesForPreview(messages);
     if (push.sent) return '推播已送出（開 LOG_LEVEL=debug 才能看到訊息內容）';
   }
   // 沒有 LINE 回覆/推播可用時，用這個流程裡最後一筆通用單行 log（例如排程
@@ -779,13 +799,14 @@ function lineStepTimeline(row: LineSendRow, isEndpoint: boolean): TimelineStep {
     title = `${kindLabel}失敗`;
     note = errorMessageOf(row.failure) ?? String(row.failure['msg'] ?? '傳送失敗');
     noteTone = 'error';
-    bodyLabel = '這則訊息沒有送出';
-    if (messages) body = messages.join('\n');
+    bodyLabel = '這則訊息沒有送出' + (messages && messages.length > 1 ? `（共 ${messages.length} 則）` : '');
+    if (messages) body = annotateMultiMessage(messages).join('\n');
   } else if (row.sent) {
     title = `${kindLabel}已送出`;
     if (messages) {
-      bodyLabel = row.kind === 'line-reply' ? 'Dobby 送給使用者的訊息' : 'Dobby 推播的訊息';
-      body = messages.join('\n');
+      const countSuffix = messages.length > 1 ? `（共 ${messages.length} 則）` : '';
+      bodyLabel = (row.kind === 'line-reply' ? 'Dobby 送給使用者的訊息' : 'Dobby 推播的訊息') + countSuffix;
+      body = annotateMultiMessage(messages).join('\n');
     } else {
       note = '開 LOG_LEVEL=debug 才能看到訊息內容';
     }
