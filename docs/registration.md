@@ -21,6 +21,8 @@ Target Resolver
     ▼
 獲取 Mutex 鎖（key = 下一個週六的日期字串，同 key FIFO 排隊，見下方「Mutex 保護」）
     │
+    ├── 排隊＋執行超過 10 秒 → 回「這次操作可能已經完成，請勿重複操作」，讀寫仍在背景完成
+    │
     ├── 鎖內查詢最新 Calendar 事件（避免 race condition；查無此活動 → 回「找不到活動」，不視為系統錯誤）
     │
     ▼
@@ -37,7 +39,7 @@ Capacity Calculator
 回覆 LINE：新名單 + 剩餘名額 + 請假名單
 ```
 
-失敗或邊界情況（名額不足、重複請假、未請假卻銷假等）也會回覆同一種「完整名額狀態」格式，只是第一行換成對應的說明，而不是只回一句話（`src/commands/registration/event-status-message.ts`）。例外情況見下方「請假邏輯」一節。
+失敗或邊界情況（名額不足、重複請假、未請假卻銷假等）也會回覆同一種「完整名額狀態」格式，只是第一行換成對應的說明，而不是只回一句話（`src/commands/registration/event-status-message.ts`）。從取鎖開始的流程中，只有 `withFreshCalendarEvent` 統一處理的三種情況只回一句話：找不到活動、mutex 逾時（見下方「Mutex 保護」）、其他非預期錯誤（「系統錯誤，請稍後再試」）。例外情況見下方「請假邏輯」一節。
 
 季度是用**活動日**判斷，不是用今天：季末最後一週報名時，下週六可能已經屬於下一季，要用下一季的季租名單判斷身分與名額。原因與事故背景見 [ADR 0008](adr/0008-season-derived-from-event-date.md)。
 
