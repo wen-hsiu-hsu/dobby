@@ -73,7 +73,7 @@ USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員�
 | `每場/小時 定價` | 場地每小時定價，`season` 指令 `{COURT_PRICE}` |
 | `打球日` | Relation，關聯至「行事曆」，本季所有打球日，`news` 指令 `{LIST_ALL_DATES}`／`season` 指令 `{PLAY_DATES}` |
 
-`findByName(getCurrentSeasonName())` 依季度名稱查詢當季資料。`season-repository.ts` 只有 `findByName`，沒有 `findAll()`——不要為了拿當季資料另外查全部再取第一筆。
+`findByName(季度名稱)` 依季度名稱查詢。跟某場活動有關的查詢（報名、請假、名額計算、週報、`next`）用 `getSeasonNameForDate(活動日)`；`participants`／`news` 講「這一季」，用 `getCurrentSeasonName()`。不能混用，見 [ADR 0008](../adr/0008-season-derived-from-event-date.md)。`season-repository.ts` 只有 `findByName`，沒有 `findAll()`——不要為了拿當季資料另外查全部再取第一筆。
 
 ---
 

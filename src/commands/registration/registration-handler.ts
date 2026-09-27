@@ -8,7 +8,7 @@ import { resolveTarget } from './target-resolver.js';
 import { calculateAddCapacity, calculateRemoveCapacity } from './capacity-calculator.js';
 import { parseRegistrationTarget } from './registration-parser.js';
 import { buildEventStatusMessage } from './event-status-message.js';
-import { formatDate, getNextSaturday, getCurrentSeasonName } from '../../utils/date-utils.js';
+import { formatDate, getNextSaturday, getSeasonNameForDate } from '../../utils/date-utils.js';
 
 interface MessageEvent {
   replyToken: string;
@@ -39,15 +39,17 @@ export async function handleRegistration(
     return;
   }
 
-  // Get current season by name (e.g. "2026-Q1"), not by array index
-  const activeSeason = await seasonRepo.findByName(getCurrentSeasonName());
+  const nextSaturday = formatDate(getNextSaturday());
+
+  // Season of the event date (e.g. "2026-Q4"), not today's — see getSeasonNameForDate
+  const seasonName = getSeasonNameForDate(nextSaturday);
+  const activeSeason = await seasonRepo.findByName(seasonName);
   if (!activeSeason) {
-    await replyMessage(event.replyToken, [{ type: 'text', text: `找不到 ${getCurrentSeasonName()} 季租資料` }]);
+    await replyMessage(event.replyToken, [{ type: 'text', text: `找不到 ${seasonName} 季租資料` }]);
     return;
   }
 
   const isSelfSeasonMember = activeSeason.members.includes(resolved.personPageId);
-  const nextSaturday = formatDate(getNextSaturday());
 
   await withFreshCalendarEvent(
     event.replyToken,

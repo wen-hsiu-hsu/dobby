@@ -54,6 +54,21 @@ export function getCurrentSeasonName(): string {
 }
 
 /**
+ * Returns the season name ("YYYY-QN") that an event on `date` ("YYYY-MM-DD") belongs to.
+ *
+ * 跟某一場活動有關的季度判斷（報名、請假、名額計算）都要用這個，不能用 getCurrentSeasonName()：
+ * 季末最後一週（例如 9/27 週日）的「下週六」已經是下一季（10/03 → Q4），用今天判斷會拿上一季的
+ * 季租名單去算，把已經不是季租成員的人當成季租成員（2026-09-27 正式環境實際發生過）。
+ * 日期字串本身就是台北時間的日曆日，直接解析，不經過 Date 避免時區換算。
+ */
+export function getSeasonNameForDate(date: string): string {
+  const match = date.match(/^(\d{4})-(0[1-9]|1[0-2])-\d{2}$/);
+  if (!match) throw new Error(`Invalid date: ${date}`);
+  const quarter = Math.floor((Number(match[2]) - 1) / 3) + 1;
+  return `${match[1]}-Q${quarter}`;
+}
+
+/**
  * Returns the month range text for a season name in "YYYY-QN" format, e.g. "2026-Q3" → "7~9月".
  */
 export function getSeasonMonthRange(seasonName: string): string {

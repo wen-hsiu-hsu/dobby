@@ -1,7 +1,7 @@
 import * as calendarRepo from './calendar-repository.js';
 import * as seasonRepo from './season-repository.js';
 import { calculateTotalSlots, resolveCourts } from '../../commands/registration/capacity-calculator.js';
-import { getCurrentSeasonName } from '../../utils/date-utils.js';
+import { getSeasonNameForDate } from '../../utils/date-utils.js';
 import type { CalendarEvent, SeasonRecord } from '../../types/notion-models.js';
 
 export interface EventOccupancy {
@@ -20,9 +20,10 @@ export async function getEventOccupancy(
   knownSeason?: SeasonRecord | null
 ): Promise<EventOccupancy | null> {
   const event = await calendarRepo.findByDate(date);
-  // Caller may already have the current season (e.g. for a member-check before
+  // Caller may already have the event's season (e.g. for a member-check before
   // locking) — reuse it instead of re-querying the same rarely-changing record.
-  const season = knownSeason !== undefined ? knownSeason : await seasonRepo.findByName(getCurrentSeasonName());
+  // Season is derived from the event date, not today — see getSeasonNameForDate.
+  const season = knownSeason !== undefined ? knownSeason : await seasonRepo.findByName(getSeasonNameForDate(date));
   if (!event || !season) return null;
 
   const courts = resolveCourts(event, season);

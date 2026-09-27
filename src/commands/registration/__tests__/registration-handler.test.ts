@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { handleRegistration } from '../registration-handler.js';
 import * as calendarRepo from '../../../services/notion/calendar-repository.js';
 import * as seasonRepo from '../../../services/notion/season-repository.js';
@@ -7,7 +7,7 @@ import * as mutex from '../../../services/mutex.js';
 import { resolveTarget } from '../target-resolver.js';
 import { replyMessage } from '../../../services/line/reply-service.js';
 import { logger } from '../../../utils/logger.js';
-import { getCurrentSeasonName } from '../../../utils/date-utils.js';
+import { getCurrentSeasonName, getSeasonNameForDate, formatDate, getNextSaturday } from '../../../utils/date-utils.js';
 
 vi.mock('../../../services/notion/calendar-repository.js');
 vi.mock('../../../services/notion/season-repository.js');
@@ -187,14 +187,53 @@ describe('handleRegistration', () => {
     expect(calendarRepo.updateGuests).not.toHaveBeenCalled();
   });
 
-  it('replies when the current season cannot be found, without touching the calendar', async () => {
+  it('replies when the event season cannot be found, without touching the calendar', async () => {
     vi.mocked(seasonRepo.findByName).mockResolvedValue(null);
     const event = makeEvent('@Dobby +1');
 
     await handleRegistration(event, 1, false);
 
-    expect(replyText()).toBe(`找不到 ${getCurrentSeasonName()} 季租資料`);
+    expect(replyText()).toBe(`找不到 ${getSeasonNameForDate(formatDate(getNextSaturday()))} 季租資料`);
     expect(calendarRepo.findByDate).not.toHaveBeenCalled();
+  });
+
+  describe('in the last days of a quarter, when next Saturday is already in the next season', () => {
+    beforeEach(() => {
+      // 2026-09-27 (Sun) 13:00 Asia/Taipei → next Saturday is 2026-10-03 (Q4)
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-09-27T05:00:00Z'));
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("looks up the event date's season (Q4), not today's (Q3)", async () => {
+      await handleRegistration(makeEvent('@Dobby +1'), 1, false);
+
+      expect(seasonRepo.findByName).toHaveBeenCalledWith('2026-Q4');
+      expect(seasonRepo.findByName).not.toHaveBeenCalledWith('2026-Q3');
+      expect(calendarRepo.findByDate).toHaveBeenCalledWith('2026-10-03');
+    });
+
+    it("registers a last-season member who isn't in the event season as 零打 themself, without 的朋友", async () => {
+      // 官穗妙 case: person-1 was a Q3 member but is not in Q4's members
+      vi.mocked(seasonRepo.findByName).mockImplementation(async (name: string) =>
+        name === '2026-Q4' ? baseSeason({ name, members: ['person-9'] }) : baseSeason({ name, members: ['person-1'] }),
+      );
+
+      await handleRegistration(makeEvent('@Dobby +1'), 1, false);
+
+      expect(calendarRepo.updateGuests).toHaveBeenCalledWith('evt-1', ['Alice']);
+    });
+
+    it('replies with the event season name when that season has not been created yet', async () => {
+      vi.mocked(seasonRepo.findByName).mockResolvedValue(null);
+
+      await handleRegistration(makeEvent('@Dobby +1'), 1, false);
+
+      expect(replyText()).toBe('找不到 2026-Q4 季租資料');
+    });
   });
 
   it('removes a guest entry on -1 and replies with the cancellation headline', async () => {

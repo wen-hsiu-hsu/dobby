@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { handleLeave } from '../leave-handler.js';
 import * as calendarRepo from '../../../services/notion/calendar-repository.js';
 import * as seasonRepo from '../../../services/notion/season-repository.js';
@@ -7,7 +7,7 @@ import * as mutex from '../../../services/mutex.js';
 import { resolveTarget } from '../target-resolver.js';
 import { replyMessage } from '../../../services/line/reply-service.js';
 import { logger } from '../../../utils/logger.js';
-import { getCurrentSeasonName } from '../../../utils/date-utils.js';
+import { getCurrentSeasonName, getSeasonNameForDate, formatDate, getNextSaturday } from '../../../utils/date-utils.js';
 
 vi.mock('../../../services/notion/calendar-repository.js');
 vi.mock('../../../services/notion/season-repository.js');
@@ -25,23 +25,25 @@ const event = {
   source: { userId: 'user-alice' },
 };
 
+const baseSeason = {
+  pageId: 'season-1',
+  name: getCurrentSeasonName(),
+  members: ['person-1'],
+  courts: 2,
+  guestFee: 200,
+  location: '',
+  weekCounts: 0,
+  courtPricePerHour: 450,
+  pricePerPersonForSeason: null,
+  pricePerPersonOverride: null,
+  totalPrice: null,
+  playDatePageIds: [],
+};
+
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(resolveTarget).mockResolvedValue({ personPageId: 'person-1', displayName: 'Alice' });
-  vi.mocked(seasonRepo.findByName).mockResolvedValue({
-    pageId: 'season-1',
-    name: getCurrentSeasonName(),
-    members: ['person-1'],
-    courts: 2,
-    guestFee: 200,
-    location: '',
-    weekCounts: 0,
-    courtPricePerHour: 450,
-    pricePerPersonForSeason: null,
-    pricePerPersonOverride: null,
-    totalPrice: null,
-    playDatePageIds: [],
-  });
+  vi.mocked(seasonRepo.findByName).mockResolvedValue(baseSeason);
   vi.mocked(calendarRepo.findByDate).mockResolvedValue({
     pageId: 'evt-1',
     date: '2026-05-09',
@@ -61,10 +63,53 @@ beforeEach(() => {
 });
 
 describe('handleLeave', () => {
-  it('looks up the current season by name, not just the first season record', async () => {
+  it("looks up the event date's season by name, not just the first season record", async () => {
     await handleLeave(event, false, false);
 
-    expect(seasonRepo.findByName).toHaveBeenCalledWith(getCurrentSeasonName());
+    expect(seasonRepo.findByName).toHaveBeenCalledWith(getSeasonNameForDate(formatDate(getNextSaturday())));
+  });
+
+  describe('in the last days of a quarter, when next Saturday is already in the next season', () => {
+    beforeEach(() => {
+      // 2026-09-27 (Sun) 13:00 Asia/Taipei → next Saturday is 2026-10-03 (Q4)
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-09-27T05:00:00Z'));
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("looks up the event date's season (Q4), not today's (Q3)", async () => {
+      await handleLeave(event, false, false);
+
+      expect(seasonRepo.findByName).toHaveBeenCalledWith('2026-Q4');
+      expect(seasonRepo.findByName).not.toHaveBeenCalledWith('2026-Q3');
+      expect(calendarRepo.findByDate).toHaveBeenCalledWith('2026-10-03');
+    });
+
+    it("rejects leave from a last-season member who isn't in the event season", async () => {
+      // person-1 was a Q3 member but is not in Q4's members
+      vi.mocked(seasonRepo.findByName).mockImplementation(async (name: string) =>
+        name === '2026-Q4' ? { ...baseSeason, name, members: ['person-9'] } : { ...baseSeason, name, members: ['person-1'] },
+      );
+
+      await handleLeave(event, false, false);
+
+      const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
+      expect((messages[0] as { text: string }).text).toBe('請假/銷假功能僅限季租成員使用');
+      expect(calendarRepo.updateAbsentees).not.toHaveBeenCalled();
+    });
+
+    it('replies with the event season name (not "僅限季租成員") when that season has not been created yet', async () => {
+      vi.mocked(seasonRepo.findByName).mockResolvedValue(null);
+
+      await handleLeave(event, false, false);
+
+      const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
+      expect((messages[0] as { text: string }).text).toBe('找不到 2026-Q4 季租資料');
+      expect(calendarRepo.findByDate).not.toHaveBeenCalled();
+    });
   });
 
   it('wraps the read-modify-write in withMutex using the event date as key', async () => {

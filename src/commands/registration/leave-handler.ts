@@ -7,7 +7,7 @@ import { calculateTotalSlots } from './capacity-calculator.js';
 import { resolveTarget } from './target-resolver.js';
 import { parseRegistrationTarget } from './registration-parser.js';
 import { buildEventStatusMessage } from './event-status-message.js';
-import { formatDate, getNextSaturday, getCurrentSeasonName } from '../../utils/date-utils.js';
+import { formatDate, getNextSaturday, getSeasonNameForDate } from '../../utils/date-utils.js';
 import { withFreshCalendarEvent } from './with-fresh-calendar-event.js';
 
 interface MessageEvent {
@@ -40,15 +40,23 @@ export async function handleLeave(
     return;
   }
 
-  const activeSeason = await seasonRepo.findByName(getCurrentSeasonName());
-  if (!activeSeason || !activeSeason.members.includes(resolved.personPageId)) {
+  const nextSaturday = formatDate(getNextSaturday());
+
+  // Season of the event date, not today's — see getSeasonNameForDate
+  const seasonName = getSeasonNameForDate(nextSaturday);
+  const activeSeason = await seasonRepo.findByName(seasonName);
+  if (!activeSeason) {
+    // Checked separately from membership: in the last week of a quarter the next season's
+    // record may not exist yet, and "僅限季租成員" would wrongly tell a real member they aren't one.
+    await replyMessage(event.replyToken, [{ type: 'text', text: `找不到 ${seasonName} 季租資料` }]);
+    return;
+  }
+  if (!activeSeason.members.includes(resolved.personPageId)) {
     // Target isn't a season member — no calendar event fetched yet, and no meaningful
     // "occupancy" to show for someone who has no leave concept to begin with.
     await replyMessage(event.replyToken, [{ type: 'text', text: '請假/銷假功能僅限季租成員使用' }]);
     return;
   }
-
-  const nextSaturday = formatDate(getNextSaturday());
 
   await withFreshCalendarEvent(
     event.replyToken,

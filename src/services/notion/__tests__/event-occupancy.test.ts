@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getEventOccupancy } from '../event-occupancy.js';
 import * as calendarRepo from '../calendar-repository.js';
 import * as seasonRepo from '../season-repository.js';
-import { getCurrentSeasonName } from '../../../utils/date-utils.js';
 
 vi.mock('../calendar-repository.js');
 vi.mock('../season-repository.js');
@@ -18,7 +17,7 @@ const event = {
 
 const season = {
   pageId: 'season-1',
-  name: getCurrentSeasonName(),
+  name: '2026-Q2',
   members: ['p1', 'p2', 'p3'],
   courts: 2,
   guestFee: 200,
@@ -38,10 +37,17 @@ beforeEach(() => {
 });
 
 describe('getEventOccupancy', () => {
-  it('looks up the current season by name, not the first record', async () => {
+  it("looks up the event date's season by name, not the first record", async () => {
     await getEventOccupancy('2026-05-09');
 
-    expect(seasonRepo.findByName).toHaveBeenCalledWith(getCurrentSeasonName());
+    expect(seasonRepo.findByName).toHaveBeenCalledWith('2026-Q2');
+  });
+
+  it("uses the event date's season, not today's, when the date is already in the next quarter", async () => {
+    // 季末最後一週查下週六（已跨到下一季），不能拿今天所在的季度去算名額
+    await getEventOccupancy('2026-10-03');
+
+    expect(seasonRepo.findByName).toHaveBeenCalledWith('2026-Q4');
   });
 
   it('computes slots and attendance from event + season', async () => {

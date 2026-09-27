@@ -8,6 +8,7 @@ import {
   groupDatesByMonth,
   parseSeasonInput,
   getSeasonQuarter,
+  getSeasonNameForDate,
   getPreviousSeasonName,
   formatSeasonTitle,
 } from '../date-utils.js';
@@ -136,6 +137,31 @@ describe('parseSeasonInput', () => {
     expect(parseSeasonInput('not-a-season')).toBeNull();
     expect(parseSeasonInput('26Q2')).toBeNull();
     expect(parseSeasonInput('2026Q2x')).toBeNull();
+  });
+});
+
+describe('getSeasonNameForDate', () => {
+  it('returns the season the event date itself falls in', () => {
+    expect(getSeasonNameForDate('2026-07-04')).toBe('2026-Q3');
+    expect(getSeasonNameForDate('2026-09-26')).toBe('2026-Q3');
+  });
+
+  it('returns the next season for a date just past a quarter boundary', () => {
+    // 2026-09-27 (Sun) 報名的下週六是 2026-10-03，屬於 Q4，不是「今天」所在的 Q3
+    expect(getSeasonNameForDate('2026-10-03')).toBe('2026-Q4');
+  });
+
+  it('rolls into Q1 of the event year across a year boundary', () => {
+    expect(getSeasonNameForDate('2027-01-02')).toBe('2027-Q1');
+  });
+
+  it('throws for a date that is not in YYYY-MM-DD form', () => {
+    expect(() => getSeasonNameForDate('2026/10/03')).toThrow();
+  });
+
+  it('throws for an out-of-range month instead of producing Q0/Q5', () => {
+    expect(() => getSeasonNameForDate('2026-00-01')).toThrow();
+    expect(() => getSeasonNameForDate('2026-13-01')).toThrow();
   });
 });
 
