@@ -59,7 +59,10 @@ async function _trackUserAsync(
   // it (two quick messages from the same person, each fire-and-forget). Checked here,
   // synchronously and before withMutex marks this call as pending below, so it only
   // ever reflects an *other*, already in-flight call — never this one.
-  const trustKnownUser = knownUser !== undefined && !isLocked(key);
+  // A null snapshot is never trusted: another call (e.g. a memberJoined write) may have
+  // created the page and released the lock while the caller's lookup was in flight,
+  // and trusting "doesn't exist" would create a duplicate page.
+  const trustKnownUser = knownUser != null && !isLocked(key);
 
   await withMutex(key, async () => {
     const existing = trustKnownUser ? knownUser : await usersRepo.findByUserId(userId);

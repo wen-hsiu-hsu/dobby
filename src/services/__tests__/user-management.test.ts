@@ -98,6 +98,18 @@ describe('trackUser new user creation', () => {
     expect(usersRepo.create).toHaveBeenCalledWith('user-1', 'Bob');
     expect(usersRepo.update).toHaveBeenCalledWith('page-new', { multiChats: ['room-1'] });
   });
+
+  it('re-reads instead of trusting a null snapshot, so a page created in the meantime is not duplicated', async () => {
+    vi.mocked(usersRepo.findByUserId).mockResolvedValue(makeUser({ groups: ['group-1'] }));
+
+    // Caller's lookup returned null, but another call already created the page and released the lock.
+    trackUser('user-1', { groupId: 'group-1' }, null);
+    await flush();
+
+    expect(usersRepo.findByUserId).toHaveBeenCalledWith('user-1');
+    expect(usersRepo.create).not.toHaveBeenCalled();
+    expect(usersRepo.incrementMessageCount).toHaveBeenCalledWith('page-1', 3);
+  });
 });
 
 describe('trackJoinedMember', () => {
