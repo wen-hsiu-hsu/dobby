@@ -4,7 +4,7 @@
 
 | 文件 | 說明 | 什麼情境該讀 |
 |------|------|------|
-| [overview.md](overview.md) | 專案用途、技術棧、部署方式、從 n8n 切換為正式 bot 的流程、系統常數 | 第一次接觸專案、確認部署方式、要把 Pi 切換成正式 bot |
+| [overview.md](overview.md) | 專案用途、技術棧、部署方式、從 n8n 遷移的背景與回滾方式、系統常數 | 第一次接觸專案、確認部署方式、需要回滾到 n8n |
 | [architecture.md](architecture.md) | 系統架構圖、資料流、設計決策 | 改動跨模組的流程（webhook 處理、事件路由） |
 | [commands.md](commands.md) | 所有 @Dobby 指令的說明與範例 | 新增/修改指令行為 |
 | [registration.md](registration.md) | 報名系統詳解：容量計算、guest 命名、Mutex | 改報名、請假、容量計算相關邏輯 |

@@ -28,6 +28,8 @@ npm run dev
 - 本機啟動時一樣會開排程（`src/index.ts` 的 `startWeeklyPush()`／`startDisplayNameUpdate()` 不看 `NODE_ENV`）。如果本機剛好在週日 09:00 開著，`DOBBY_GROUP_IDS` 又是正式群組，正式群組會收到第二份週報，也會多用掉正式 channel 的 push 額度。
 - 一個 channel 只能設一個 Webhook URL，拿正式 channel 接 ngrok 會把正式 bot 的流量整個搶走。
 
+因為 Notion 是正式的、LINE 是測試的，測試群組的成員一發言或加入群組，就會在正式的 USERS 建 row、在人員清單自動建一頁（見 `docs/notion/databases.md`），USERS 的 `groups` 欄位也會混進測試群組 ID。這些不會自己清掉；人員清單多出來的頁面會出現在管理員維護名冊時，需要的話手動刪除。
+
 ## 用 Docker + ngrok 本地開發（固定網址接真實 LINE）
 
 要用 docker 跑本地服務、並讓 LINE webhook 能打進來測試，用 `docker-compose.dev.yml`（純本地開發用，跟 production 的 `docker-compose.yml` 分開）：
