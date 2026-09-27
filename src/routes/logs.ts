@@ -504,6 +504,10 @@ function groupGroupId(group: FlowGroup): string {
   return '';
 }
 
+// 跟 `utils/log-upload.ts` 的 log 訊息字面量一致——不從那邊 import，測試會
+// 整個 mock 掉 log-upload.js，常數會變成 undefined。
+const R2_SYNC_COMPLETE_MSG = 'R2 log sync complete';
+
 const SCHEDULE_ORIGIN_MARKERS: Array<[string, string]> = [
   ['Starting display name batch update', 'display-name-update'],
   ['Display name update complete', 'display-name-update'],
@@ -511,7 +515,25 @@ const SCHEDULE_ORIGIN_MARKERS: Array<[string, string]> = [
   ['Weekly push complete', 'weekly-push'],
   ['Weekly push aborted', 'weekly-push'],
   ['Weekly push failed', 'weekly-push'],
+  [R2_SYNC_COMPLETE_MSG, 'log-upload'],
+  ['Failed to upload log file to R2, skipping', 'log-upload'],
+  ['R2 log sync failed: could not read log directory', 'log-upload'],
+  ['R2 log sync failed: could not initialize S3 client', 'log-upload'],
 ];
+
+/**
+ * 列表上可以「連續幾筆折疊成一列」的事件種類——只有純雜訊、又高頻的才收
+ * （目前只有 R2 同步：`LOG_LEVEL=debug` 下每 15 分鐘一輪、每輪都記一行
+ * `R2 log sync complete`，一天近百張卡片會把真正的指令淹掉）。折疊只發生在
+ * 前端畫面（`regroupMerges()`），log 檔本身、`buildEvents()`、`?format=text`
+ * 匯出、分頁徽章數字都照舊逐筆計算。狀態不是「完成」的那一輪（例如某個
+ * 檔案上傳失敗）不收進來，會打斷連續的一串、照常單獨顯示，異常不會被藏起來。
+ */
+const MERGE_LABELS: Record<string, string> = { 'r2-sync': 'R2 備份同步' };
+
+function eventMergeKey(kind: EventKind, origin: string, status: EventStatus): string | null {
+  return kind === 'schedule' && origin === 'log-upload' && status === 'ok' ? 'r2-sync' : null;
+}
 
 /** 「來自」欄位——訊息事件是指令類型，排程事件是排程檔案名稱，其餘退回一個通用標籤。 */
 function groupOrigin(group: FlowGroup, kind: EventKind): string {
@@ -926,6 +948,8 @@ interface EventView {
   stepsHeading: string;
   durationText: string;
   searchText: string;
+  /** 可折疊事件的種類（見 `MERGE_LABELS`），不可折疊就是 `null`。 */
+  mergeKey: string | null;
   rawEntries: LogEntry[];
   /**
    * 完整時間軸（含每一步展開後的 Notion/LINE payload JSON 樹）——組裝成本
@@ -983,6 +1007,7 @@ function buildEventView(group: FlowGroup, rawEntries: LogEntry[]): EventView {
     searchText: [title, preview, group.reqId, name ?? '', userIdRaw, origin]
       .join(' ')
       .toLowerCase(),
+    mergeKey: eventMergeKey(kind, origin, status),
     rawEntries,
     getSteps: () => (cachedSteps ??= buildTimeline(group)),
   };
@@ -1070,6 +1095,7 @@ function buildSystemEventView(entry: LogEntry, dupeIndex: number): EventView {
     stepsHeading,
     durationText: '—',
     searchText: `${msg} ${noteText}`.toLowerCase(),
+    mergeKey: null,
     rawEntries: [entry],
     getSteps: () => [step],
   };
@@ -1117,9 +1143,10 @@ function eventListItemHtml(ev: EventView, boundary: BoundaryMarker | undefined):
     ? `<span class="ev-flag ev-flag-${ev.status}">${escapeHtml(ev.flag)}</span>`
     : '';
   const previewLine = escapeHtml(ev.preview.split('\n').filter(Boolean).join(' · '));
+  const mergeAttr = ev.mergeKey ? ` data-merge="${escapeHtml(ev.mergeKey)}" data-stamp="${escapeHtml(ev.stamp)}"` : '';
 
   return `${boundaryHtml}
-  <div class="ev-item" data-key="${escapeHtml(ev.key)}" data-status="${ev.status}" data-bucket="${KIND_META[ev.kind].bucket}" data-search="${escapeHtml(ev.searchText)}" onclick="selectEvent('${escapeHtml(ev.key)}')">
+  <div class="ev-item" data-key="${escapeHtml(ev.key)}" data-status="${ev.status}" data-bucket="${KIND_META[ev.kind].bucket}" data-search="${escapeHtml(ev.searchText)}"${mergeAttr} onclick="selectEvent('${escapeHtml(ev.key)}')">
     <div class="ev-item-top">
       <span class="ev-dot" style="background:${STATUS_COLORS[ev.status]}"></span>
       <span class="ev-kind" style="${ev.kindCss}">${escapeHtml(ev.kindLabel)}</span>
@@ -1394,12 +1421,18 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
   const trailingBoundaryHtml = trailingBoundary
     ? `<div class="ev-boundary"><span class="ev-boundary-icon">⏻</span><span class="ev-boundary-label">${escapeHtml(trailingBoundary.label)}</span><span class="ev-boundary-meta">${escapeHtml(trailingBoundary.meta)}</span><span class="ev-boundary-time">${escapeHtml(trailingBoundary.time)}</span></div>`
     : '';
-  // 完整明細（含展開後的 Notion/LINE payload JSON 樹）只有第一筆（最新一筆，
-  // 預設選中的那筆）在初始 HTML 就內嵌好，其餘事件先送一個空殼，使用者點開
-  // 時才由前端 JS 呼叫 `?detail=` 現組現拿——同一份 events 陣列裡，7 天份量
-  // 的事件使用者實際只會點開其中一兩筆，組完整明細（尤其是 JSON 樹）的成本
-  // 不該花在使用者永遠不會點開的事件上。
-  const detailHtml = events.map((ev, i) => (i === 0 ? eventDetailHtml(ev, true) : lazyDetailPlaceholderHtml(ev))).join('');
+  // 完整明細（含展開後的 Notion/LINE payload JSON 樹）只有預設選中的那筆在
+  // 初始 HTML 就內嵌好，其餘事件先送一個空殼，使用者點開時才由前端 JS 呼叫
+  // `?detail=` 現組現拿——同一份 events 陣列裡，7 天份量的事件使用者實際只
+  // 會點開其中一兩筆，組完整明細（尤其是 JSON 樹）的成本不該花在使用者永遠
+  // 不會點開的事件上。預設選中的是最新一筆「不可折疊」的事件：最新一筆幾乎
+  // 總是 R2 同步（每 15 分鐘一輪），預設打開它的時間軸沒有意義，而且它在
+  // 列表上是被折疊起來看不到的；全部都可折疊時才退回最新一筆。
+  const initialIndex = Math.max(events.findIndex((ev) => !ev.mergeKey), 0);
+  const initialKey = events[initialIndex]?.key ?? '';
+  const detailHtml = events
+    .map((ev, i) => (i === initialIndex ? eventDetailHtml(ev, true) : lazyDetailPlaceholderHtml(ev)))
+    .join('');
 
   return `<!DOCTYPE html>
 <html lang="zh-Hant">
@@ -1477,6 +1510,21 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
     .ev-flag { font-size: 11px; font-weight: 500; }
     .ev-flag-warn { color: #d3a35c; }
     .ev-flag-error { color: #e0807f; }
+    /* 連續可折疊事件（見 MERGE_LABELS / regroupMerges()）：摘要列 + 收合時
+       藏起來的成員卡片。展開後成員卡片縮排、底色略深，看得出屬於上面那列。 */
+    .ev-merge { cursor: pointer; padding: 11px 16px; border-bottom: 1px solid #1c1d29; border-left: 3px solid transparent; }
+    .ev-merge:hover { background: #181926; }
+    .ev-merge .ev-title { color: #b2b6ca; }
+    .ev-merge-body { padding-left: 14px; display: flex; align-items: baseline; gap: 9px; }
+    .ev-merge-body .ev-preview { flex: 1 1 auto; min-width: 0; }
+    .ev-merge-toggle { flex: none; font-size: 11px; color: #d2cefd; }
+    .ev-item.in-merge { padding-left: 30px; background: #12131d; }
+    .ev-item.in-merge.active { background: #1c1c2c; }
+    .ev-item.merge-collapsed { display: none; }
+    /* 頁面很大（7 天 + debug）時瀏覽器可能在頁尾 script 跑完前就先畫出
+       列表，先把可折疊卡片藏起來，避免閃一下幾百張卡片再縮回去；
+       initSelection() 跑完 regroupMerges() 後拿掉這個 class。 */
+    #ev-list.merges-pending .ev-item[data-merge] { display: none; }
     #ev-list-empty { display: none; padding: 40px 20px; text-align: center; font-size: 12.5px; color: #595d6c; }
 
     .ev-boundary { display: flex; align-items: center; gap: 9px; padding: 12px 16px; background: #12131d; border-top: 1px solid #262835; border-bottom: 1px solid #262835; }
@@ -1589,7 +1637,7 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
           <label class="range-label" for="days-select">範圍</label>
           ${daysSwitcherHtml(days, token)}
         </div>
-        <div id="ev-list">${listHtml}${trailingBoundaryHtml}<div id="ev-list-empty">沒有符合的事件</div></div>
+        <div id="ev-list" class="merges-pending">${listHtml}${trailingBoundaryHtml}<div id="ev-list-empty">沒有符合的事件</div></div>
       </div>
       <div id="detail-pane">${detailHtml || '<div id="no-events">目前沒有日誌記錄</div>'}</div>
     </main>
@@ -1606,6 +1654,7 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
   <script>
     const LOGS_TOKEN = ${jsStringLiteral(token)};
     const LOGS_DAYS = ${days};
+    const INITIAL_EVENT_KEY = ${jsStringLiteral(initialKey)};
     let activeTab = 'all';
 
     function setTab(tab) {
@@ -1625,14 +1674,102 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
         if (show) visible++;
       });
       document.getElementById('ev-list-empty').style.display = visible === 0 ? 'block' : 'none';
+      regroupMerges();
+    }
+
+    const MERGE_LABELS = ${JSON.stringify(MERGE_LABELS).replace(/</g, '\\u003C')};
+    // 展開狀態記在成員卡片的 key 上，而不是記「第幾串」——切分頁／搜尋後
+    // 串的邊界會變（例如「排程」分頁裡中間沒有指令卡片夾著，好幾串會接成
+    // 一串），只要新的一串裡有任何一張之前展開過，就維持展開。
+    const expandedMergeKeys = new Set();
+
+    // 把目前看得到的卡片裡，連續 2 張以上同一種 data-merge 的包成一列可展開
+    // 的摘要。每次篩選條件變動都整個重算（先拆掉舊的摘要列）：被篩選藏起來
+    // 的卡片不打斷一串，服務重啟分隔線會打斷——不跨重啟合併。
+    // revealActive：篩選條件變動（或頁面載入）後，目前選中的卡片如果被收進
+    // 某一串，就自動展開那一串，不讓左側看不到選的是哪張。使用者自己按
+    // 「收合」時不套用（傳 false），否則收合按了沒反應。
+    function regroupMerges(revealActive = true) {
+      const list = document.getElementById('ev-list');
+      list.querySelectorAll('.ev-merge').forEach((el) => el.remove());
+      const runs = [];
+      let run = [];
+      const flush = () => {
+        if (run.length > 0) runs.push(run);
+        run = [];
+      };
+      for (const el of Array.from(list.children)) {
+        if (el.classList.contains('ev-boundary')) {
+          flush();
+          continue;
+        }
+        if (!el.classList.contains('ev-item')) continue;
+        el.classList.remove('in-merge', 'merge-collapsed');
+        if (el.classList.contains('hidden')) continue;
+        const mergeKey = el.dataset.merge;
+        if (!mergeKey || (run.length > 0 && run[0].dataset.merge !== mergeKey)) flush();
+        if (mergeKey) run.push(el);
+      }
+      flush();
+      for (const members of runs) {
+        if (members.length < 2) continue;
+        if (revealActive && members.some((m) => m.classList.contains('active'))) {
+          members.forEach((m) => expandedMergeKeys.add(m.dataset.key));
+        }
+        const expanded = members.some((m) => expandedMergeKeys.has(m.dataset.key));
+        members.forEach((m) => {
+          m.classList.add('in-merge');
+          m.classList.toggle('merge-collapsed', !expanded);
+        });
+        members[0].before(mergeSummaryEl(members, expanded));
+      }
+    }
+
+    function mergeSummaryEl(members, expanded) {
+      const newest = members[0];
+      const oldest = members[members.length - 1];
+      // data-stamp 是 'YYYY-MM-DD HH:MM:SS'。一串可能跨日（例如 7 天範圍的
+      // 「排程」分頁，中間沒有指令卡片切斷），跨日時要帶日期，不然
+      // 「08:00–08:15」會被誤讀成只有 15 分鐘。
+      const oldestStamp = oldest.dataset.stamp || '';
+      const newestStamp = newest.dataset.stamp || '';
+      const sameDay = oldestStamp.slice(0, 10) === newestStamp.slice(0, 10);
+      const fmt = (stamp) => (sameDay ? stamp.slice(11, 16) : stamp.slice(5, 16));
+      const span = (className, text) => {
+        const s = document.createElement('span');
+        s.className = className;
+        s.textContent = text;
+        return s;
+      };
+
+      const top = document.createElement('div');
+      top.className = 'ev-item-top';
+      top.append(
+        newest.querySelector('.ev-dot').cloneNode(true),
+        newest.querySelector('.ev-kind').cloneNode(true),
+        span('ev-title', (MERGE_LABELS[newest.dataset.merge] || newest.dataset.merge) + ' × ' + members.length),
+        span('ev-time', fmt(oldestStamp) + '–' + fmt(newestStamp))
+      );
+      const body = document.createElement('div');
+      body.className = 'ev-merge-body';
+      body.append(span('ev-preview', '全部成功'), span('ev-merge-toggle', expanded ? '▾ 收合' : '▸ 展開'));
+
+      const row = document.createElement('div');
+      row.className = 'ev-merge';
+      row.append(top, body);
+      row.onclick = () => {
+        members.forEach((m) => (expanded ? expandedMergeKeys.delete(m.dataset.key) : expandedMergeKeys.add(m.dataset.key)));
+        regroupMerges(false);
+      };
+      return row;
     }
 
     function showDetail(key) {
       document.querySelectorAll('.ev-detail').forEach((d) => d.classList.toggle('active', d.id === 'detail-' + key));
     }
 
-    // 事件詳情（含展開後的 Notion/LINE payload JSON 樹）只有第一筆（預設選
-    // 中那筆）在頁面載入時就內嵌好，其餘事件是一個空殼 <div id="detail-KEY">
+    // 事件詳情（含展開後的 Notion/LINE payload JSON 樹）只有預設選中那筆
+    // （INITIAL_EVENT_KEY）在頁面載入時就內嵌好，其餘事件是一個空殼 <div id="detail-KEY">
     // ——第一次點開時才用 ?detail= 換一份完整內容塞回去，換過一次之後
     // （children.length > 0）就直接切換顯示，不會重複打 API。
     function selectEvent(key) {
@@ -1677,6 +1814,12 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
     // API。拿第一行（最新一筆事件）當 fingerprint，跟頁面載入當下的第一次
     // 輪詢結果比對；有落差就把按鈕標成「有新 log」，但不自動重新整理——
     // 使用者要看新內容還是得自己按按鈕，只是現在按之前就知道按了有沒有用。
+    // 成功的 R2 同步（列表上會被折疊的那種）不算「新 log」：它每 15 分鐘
+    // 就來一筆，算進去的話按鈕幾乎永遠亮著，提示就失去意義——所以
+    // fingerprint 取的是第一個「不是成功 R2 同步」的事件行。後綴字串要跟
+    // renderEventListText() 的行格式對得上。「…還有 N 筆」那行也跳過，
+    // 它的數字會隨同步筆數浮動。
+    const POLL_IGNORED_LINE_SUFFIX = ${jsStringLiteral(`\t[${KIND_META.schedule.label}/${STATUS_LABELS.ok}]\t${R2_SYNC_COMPLETE_MSG}`)};
     function checkForNewLogs() {
       if (document.hidden) return;
       const url = '?format=text&days=' + LOGS_DAYS + '&token=' + encodeURIComponent(LOGS_TOKEN);
@@ -1686,11 +1829,16 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
           return r.text();
         })
         .then((text) => {
-          const firstLine = text.split('\\n')[0] || '';
+          const firstLine =
+            text.split('\\n').find((l) => l && !l.startsWith('…') && !l.endsWith(POLL_IGNORED_LINE_SUFFIX)) || '';
           if (latestSeenFingerprint === null) {
             latestSeenFingerprint = firstLine;
             return;
           }
+          // 找不到任何非 R2 行，不代表有新東西：清單只列前
+          // ${TEXT_EXPORT_LIST_LIMIT} 筆，fingerprint 那筆可能被後來的同步擠出
+          // 清單，或滑出 days 範圍。真的有新事件時它一定排在最前面、找得到。
+          if (firstLine === '') return;
           if (firstLine !== latestSeenFingerprint) {
             const btn = document.getElementById('refresh-btn');
             btn.classList.add('has-new');
@@ -1723,8 +1871,10 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
     }
 
     (function initSelection() {
-      const first = document.querySelector('.ev-item');
-      if (first) first.classList.add('active');
+      const initial = document.querySelector('.ev-item[data-key="' + CSS.escape(INITIAL_EVENT_KEY) + '"]');
+      if (initial) initial.classList.add('active');
+      regroupMerges();
+      document.getElementById('ev-list').classList.remove('merges-pending');
     })();
 
     // 標籤數字很大時 .tabs 會需要橫向捲動（見同名 CSS 註解），這裡判斷
@@ -1844,7 +1994,7 @@ export function createLogsRouter(logDir: string): Router {
     }
 
     // ?detail=<key>：單一事件的完整明細（含展開後的 Notion/LINE payload
-    // JSON 樹）——首次載入頁面時只有第一筆事件內嵌這份內容，其餘事件由
+    // JSON 樹）——首次載入頁面時只有預設選中那筆（INITIAL_EVENT_KEY）內嵌這份內容，其餘事件由
     // 前端 selectEvent() 點開時才呼叫這裡現組現拿，見 renderHtml() 的
     // lazyDetailPlaceholderHtml() 說明。用跟主頁一樣的 days 重新讀一次
     // entries、重新分組，不額外維護跨請求的快取/session 狀態。

@@ -1057,4 +1057,96 @@ describe('createLogsRouter', () => {
       expect(html).not.toContain('[1/1]');
     });
   });
+
+  // LOG_LEVEL=debug 下 R2 同步每 15 分鐘記一行 `R2 log sync complete`，每輪都
+  // 是一張排程卡片。前端會把連續成功的同步折疊成一列（regroupMerges()），
+  // 伺服器端負責：標記哪些卡片可折疊、預設選中跳過它們、輪詢提示忽略它們。
+  describe('R2 sync folding', () => {
+    const r2Sync = (reqId: string, minute: number) => ({
+      level: 20,
+      time: Date.UTC(2024, 0, 1, 0, minute, 0),
+      msg: 'R2 log sync complete',
+      succeeded: 1,
+      skipped: 3,
+      failed: 0,
+      total: 4,
+      reqId,
+    });
+    const command = [
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 20, 0), type: 'message', sourceType: 'group', reqId: 'req-cmd', msg: 'Processing event' },
+      { level: 20, time: Date.UTC(2024, 0, 1, 0, 20, 1), msg: 'Routing command', command: { type: 'register' }, reqId: 'req-cmd' },
+    ];
+
+    it('marks a successful R2 sync as mergeable and recognizes it as log-upload', async () => {
+      vi.mocked(readRecentLogs)
+        .mockResolvedValueOnce([r2Sync('r2-a', 0)])
+        .mockResolvedValueOnce([r2Sync('r2-a', 0)]);
+
+      const html = await getLogsHtml();
+      expect(html).toMatch(/data-key="r2-a"[^>]*data-merge="r2-sync"/);
+
+      const detail = await getEventDetailHtml('r2-a');
+      expect(detail).toContain('<span class="detail-field-value">log-upload</span>');
+    });
+
+    it('does not mark an R2 sync with a failed upload as mergeable (it must stay visible on its own)', async () => {
+      vi.mocked(readRecentLogs).mockResolvedValueOnce([
+        { level: 40, time: Date.UTC(2024, 0, 1, 0, 0, 0), msg: 'Failed to upload log file to R2, skipping', file: 'app.log', reqId: 'r2-bad' },
+        { ...r2Sync('r2-bad', 0), time: Date.UTC(2024, 0, 1, 0, 0, 1), succeeded: 0, failed: 1 },
+      ]);
+
+      const html = await getLogsHtml();
+      expect(html).toContain('data-key="r2-bad"');
+      expect(html).not.toContain('data-merge=');
+    });
+
+    it('does not mark other scheduled jobs as mergeable', async () => {
+      vi.mocked(readRecentLogs).mockResolvedValueOnce([
+        { level: 30, time: Date.UTC(2024, 0, 1, 4, 0, 5), msg: 'Display name update complete', updated: 2, reqId: 'sched-1' },
+      ]);
+
+      const html = await getLogsHtml();
+      expect(html).toContain('data-key="sched-1"');
+      expect(html).not.toContain('data-merge=');
+    });
+
+    it('pre-selects and embeds the newest non-mergeable event instead of the newest R2 sync', async () => {
+      vi.mocked(readRecentLogs).mockResolvedValueOnce([r2Sync('r2-old', 0), ...command, r2Sync('r2-new', 40)]);
+
+      const html = await getLogsHtml();
+
+      expect(html).toContain('const INITIAL_EVENT_KEY = "req-cmd";');
+      expect(html).toMatch(/<div class="ev-detail active" id="detail-req-cmd">/);
+      // 最新那筆 R2 同步只送空殼，點開才 lazy 載入。
+      expect(html).toContain('<div class="ev-detail" id="detail-r2-new"></div>');
+    });
+
+    it('falls back to the newest event when every event is mergeable', async () => {
+      vi.mocked(readRecentLogs).mockResolvedValueOnce([r2Sync('r2-old', 0), r2Sync('r2-new', 15)]);
+
+      const html = await getLogsHtml();
+
+      expect(html).toContain('const INITIAL_EVENT_KEY = "r2-new";');
+      expect(html).toMatch(/<div class="ev-detail active" id="detail-r2-new">/);
+    });
+
+    it('keeps listing every R2 sync individually in ?format=text, with the line shape the new-log poll skips', async () => {
+      vi.mocked(readRecentLogs)
+        .mockResolvedValueOnce([r2Sync('r2-old', 0), ...command, r2Sync('r2-new', 40)])
+        .mockResolvedValueOnce([r2Sync('r2-old', 0), ...command, r2Sync('r2-new', 40)]);
+
+      const { text } = await getLogsText();
+      const lines = text.trim().split('\n');
+      expect(lines).toHaveLength(3);
+
+      // 前端輪詢靠這個後綴認出「成功的 R2 同步」行並略過，行格式改了這裡要一起壞。
+      const suffix = '\t[排程/完成]\tR2 log sync complete';
+      expect(lines[0]!.startsWith('r2-new\t')).toBe(true);
+      expect(lines[0]!.endsWith(suffix)).toBe(true);
+      expect(lines[1]!.endsWith(suffix)).toBe(false);
+
+      const html = await getLogsHtml();
+      expect(html).toContain(`const POLL_IGNORED_LINE_SUFFIX = ${JSON.stringify(suffix)};`);
+    });
+  });
 });
