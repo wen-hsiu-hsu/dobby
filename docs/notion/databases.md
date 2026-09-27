@@ -27,7 +27,7 @@ Dobby 使用 5 個 Notion 資料庫。欄位的詳細型別定義請參考 `sche
 | `is_admin` | 管理員權限，`true` 可執行管理員指令、代他人操作 |
 | `groups` | 使用者所在的 LINE 群組 ID 清單（multi-select） |
 | `multi-chat` | 使用者所在的 LINE 聊天室 ID 清單（multi-select） |
-| `message_counts` | 累積訊息數量（加入群組不計入） |
+| `message_counts` | 在群組/聊天室發的文字訊息數。貼圖、圖片等非文字訊息和一對一私訊都不計（`message-handler.ts` 開頭就略過非文字訊息，且只追蹤群組/聊天室）；加入群組也不計入 |
 | `Registered name` | 關聯至「人員清單」（雙向，對應人員清單的 `USER`），建立 LINE 帳號與球員名冊的對應。新使用者會自動連到自動建立的人員頁面（見上方），所以**有值不代表是季租球員**；季租身分一律看季租承租紀錄的 `報名人` |
 
 **設定管理員：** 在 Notion 將該使用者的 `is_admin` 勾選為 true 即可。

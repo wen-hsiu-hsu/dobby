@@ -55,7 +55,7 @@
     },
     "message_counts": {
       "type": "number",
-      "description": "累積訊息數量，每次發訊息時 +1",
+      "description": "在群組/聊天室發的文字訊息數，每則 +1；貼圖等非文字訊息、一對一私訊、加入群組都不計",
       "config": {
         "format": "number"
       }

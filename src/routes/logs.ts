@@ -84,7 +84,7 @@ const KIND_META: Record<EventKind, { label: string; bucket: EventBucket; css: st
 const DEGRADATION_EXPLANATIONS: Record<string, string> = {
   'Could not get user profile': 'LINE profile API 呼叫失敗，這筆只能用 userId 顯示，看不到顯示名稱。',
   'buildMemberJoinedWelcome error, using fallback': '從 Notion 讀取歡迎詞失敗，送出的是內建的備用文案，不是社團自訂內容。',
-  'User tracking failed (non-blocking)': '使用者訊息計數/群組清單更新失敗，不影響這次回覆，但這位使用者的統計資料可能少算一筆。',
+  'User tracking failed (non-blocking)': '使用者記錄的建立或更新（訊息計數、群組清單）失敗。已知使用者不影響這次回覆，只是統計可能少算一筆；若這位使用者還沒有記錄、又剛好下了指令，指令會回「找不到您的帳號」，再打一次即可。',
   'People list already has this name, skipped auto-link': '人員清單已有同名頁面，為避免連錯人沒有自動建立或連結；需要管理員確認後手動設定這位使用者的 Registered name。',
   'Failed to create people record for new user (non-blocking)': '新使用者的人員清單頁面建立失敗（非 Notion API 錯誤），USERS 記錄照常建立，但沒有連結 Registered name，之後也不會自動重試。',
   'Failed to record joined member (non-blocking)': '新成員的 USERS 記錄寫入逾時或發生非 Notion API 的錯誤，歡迎訊息照常送出。逾時的話寫入仍在背景進行、多半會成功；真的沒寫進去時，會在他之後於該群組發言時補上。',
