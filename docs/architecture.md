@@ -72,6 +72,8 @@ Webhook 收到 LINE 事件後，立即回傳 200，再非同步處理事件。
 
 **限制：** mutex 狀態只存在記憶體，重啟時排隊中的呼叫會遺失，只影響重啟當下正在處理的請求（接受）。多 instance 部署需改用 Redis。
 
+**USERS 不重複建頁的前提：** Notion 沒有 unique constraint，同一 `user_id` 不會建出兩頁靠的是：(1) 呼叫端傳入的「查無此人」（`null`）快照不採信，一律在鎖內重新 `findByUserId`，所以前一個呼叫建好頁面並放鎖後，後一個呼叫看得到它；(2) Notion database query 對剛建立的頁面沒有索引延遲。(2) 於 2026-09-27 在真實 USERS 資料庫實測過：建頁後立即以 `user_id` 查詢，20 輪全部第一次就查得到，當時正式資料也沒有重複的 `user_id`。若日後真的看到同一 `user_id` 有兩頁，先懷疑 bot 跑了多個 process（見上方限制），再懷疑 Notion 行為改變。
+
 ### Zod 環境變數驗證
 
 `src/config/env.ts` 在啟動時驗證所有必要環境變數，任何缺失立即 `process.exit(1)`。

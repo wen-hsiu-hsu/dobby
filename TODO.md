@@ -29,14 +29,3 @@
 - [ ] **`people-repository.ts:40-44` `findAllUnpaid()` 用 `結清` 這個 formula 欄位當篩選條件，比篩一般欄位慢一個檔次。** 真實環境的 log 顯示這個查詢（`owe` 指令用到）耗時落在 715ms～3540ms，而其他篩一般欄位的查詢中位數只要 400～600ms——Notion 官方文件跟社群經驗都指出篩 formula/rollup 欄位沒辦法用索引、每次都要即時算。不是這個查詢寫錯，是 formula 欄位篩選本來就有這個代價；如果之後 `owe` 指令的回應速度變成明顯困擾，可以考慮的方向是另外維護一個非 formula 的「是否結清」欄位讓 Notion 自動同步，或是接受這個延遲。
 
 ---
-
-## 風險觀察（尚未驗證、尚未處理）
-
-- [ ] **USERS 資料庫可能因 Notion 查詢延遲出現同一個 `user_id` 的重複頁面（未驗證 Notion 是否真有此延遲）。**
-  - **背景**：`src/services/user-management.ts` 的 `_trackUserAsync` 用 `withMutex('user-track-${userId}')` 串行化「查使用者 → 不存在就建立」。有兩個入口共用這把鎖：發言（`trackUser`，由 `src/handlers/message-handler.ts:35` 觸發）和加入群組（`trackJoinedMember`，由 `src/handlers/member-joined-handler.ts` 觸發）。「加入後馬上發言」是常見組合，兩者會接連跑。
-  - **已處理的部分**：呼叫端傳入的 `null` 快照（「查無此人」）一律不信任，第 65 行 `knownUser != null` 會讓它在鎖內重新 `findByUserId`（第 68 行）。所以前一個呼叫建好頁面並放鎖之後，後一個呼叫不會拿舊的 `null` 再建一次。這部分有測試覆蓋。
-  - **剩下的風險**：鎖內重讀用的是 database query（`src/services/notion/users-repository.ts:32` 以 `user_id` 篩選）。如果 Notion 的 database query 對剛建立的頁面有索引延遲，前一個呼叫第 72 行 `create` 完、放鎖後，後一個呼叫的重讀可能還是查不到，就會再建一筆。目前**沒有驗證** Notion 是否真有這種延遲，也沒在正式資料看到重複頁面。
-  - **發生後的影響**：同一個 `user_id` 有兩頁時，`findByUserId` 只取 `results[0]`。`groups`／`message_counts`／`is_admin` 可能分散在兩頁、看起來像少算或權限忽有忽無。
-  - **如果要處理**：先確認是否真的發生，例如在 Notion 以 `user_id` 分組找重複，或在 `create` 前後加 log 觀察。確定有問題再考慮修法。已知限制：Notion 沒有 unique constraint，不能靠資料庫擋；mutex 是單一 process 記憶體鎖，重讀查不到時它也擋不住。可行方向是在 process 內快取「剛建立的 userId → pageId」一小段時間，讓鎖內重讀查不到時改用快取。不要為此拿掉 mutex 或改用 pushMessage 之類不相關的手段。
-
----

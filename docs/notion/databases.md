@@ -16,7 +16,7 @@ Dobby 使用 5 個 Notion 資料庫。欄位的詳細型別定義請參考 `sche
 
 | 欄位 | 用途 |
 |------|------|
-| `user_id` | LINE userId（主鍵） |
+| `user_id` | LINE userId（主鍵；Notion 不擋重複，唯一性靠程式的 mutex 維持，見 `docs/architecture.md` 的 In-Process Mutex） |
 | `Custom Name` | LINE displayName。建立時就寫入：群組用群組成員 profile，聊天室用好友 profile（使用者沒加 bot 好友就查不到）；查不到時先填 userId。之後由每週的 display name 排程同步，但排程只查 `groups`，只出現在聊天室的使用者不會被同步 |
 | `is_admin` | 管理員權限，`true` 可執行管理員指令、代他人操作 |
 | `groups` | 使用者所在的 LINE 群組 ID 清單（multi-select） |
