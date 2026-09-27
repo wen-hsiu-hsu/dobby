@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { trackUser } from '../user-management.js';
+import { trackUser, trackJoinedMember } from '../user-management.js';
 import * as usersRepo from '../notion/users-repository.js';
 import { getProfile } from '../line/profile-service.js';
 import type { NotionUser } from '../../types/notion-models.js';
@@ -100,6 +100,45 @@ describe('trackUser new user creation', () => {
   });
 });
 
+describe('trackJoinedMember', () => {
+  it('creates a new user with the pre-fetched display name without looking up the profile again', async () => {
+    vi.mocked(usersRepo.findByUserId).mockResolvedValue(null);
+    vi.mocked(usersRepo.create).mockResolvedValue(makeUser({ pageId: 'page-new' }));
+
+    await trackJoinedMember('user-1', { groupId: 'group-1' }, 'Alice');
+
+    expect(getProfile).not.toHaveBeenCalled();
+    expect(usersRepo.create).toHaveBeenCalledWith('user-1', 'Alice');
+    expect(usersRepo.update).toHaveBeenCalledWith('page-new', { groups: ['group-1'] });
+  });
+
+  it('falls back to userId without retrying the lookup when the caller already found no profile', async () => {
+    vi.mocked(usersRepo.findByUserId).mockResolvedValue(null);
+    vi.mocked(usersRepo.create).mockResolvedValue(makeUser({ pageId: 'page-new' }));
+
+    await trackJoinedMember('user-1', { groupId: 'group-1' }, null);
+
+    expect(getProfile).not.toHaveBeenCalled();
+    expect(usersRepo.create).toHaveBeenCalledWith('user-1', 'user-1');
+  });
+
+  it('merges the new group into an existing user without counting it as a message', async () => {
+    vi.mocked(usersRepo.findByUserId).mockResolvedValue(makeUser({ groups: ['group-1'] }));
+
+    await trackJoinedMember('user-1', { groupId: 'group-2' }, 'Alice');
+
+    expect(usersRepo.create).not.toHaveBeenCalled();
+    expect(usersRepo.update).toHaveBeenCalledWith('page-1', { groups: ['group-1', 'group-2'] });
+    expect(usersRepo.incrementMessageCount).not.toHaveBeenCalled();
+  });
+
+  it('propagates Notion failures to the caller', async () => {
+    vi.mocked(usersRepo.findByUserId).mockRejectedValue(new Error('notion down'));
+
+    await expect(trackJoinedMember('user-1', { groupId: 'group-1' }, 'Alice')).rejects.toThrow('notion down');
+  });
+});
+
 // Deliberately do NOT mock '../mutex.js' here — these tests drive trackUser() with
 // the REAL withMutex so they exercise the actual serialization, not a no-op stub.
 // See registration-concurrency.test.ts for the same rationale applied to
@@ -143,5 +182,31 @@ describe('trackUser concurrency', () => {
     // call queues behind it and must re-read fresh instead of trusting its own stale
     // snapshot.
     expect(usersRepo.findByUserId).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates only one page when a brand-new member joins and immediately sends a message', async () => {
+    let liveUser: NotionUser | null = null;
+    vi.mocked(usersRepo.findByUserId).mockImplementation(async () => (liveUser ? { ...liveUser } : null));
+    vi.mocked(usersRepo.create).mockImplementation(async (userId, customName) => {
+      liveUser = makeUser({ pageId: 'page-new', userId, customName, groups: [], messageCount: 0 });
+      return { ...liveUser };
+    });
+    vi.mocked(usersRepo.update).mockImplementation(async (_pageId, updates) => {
+      liveUser = { ...liveUser!, ...updates };
+    });
+    vi.mocked(usersRepo.incrementMessageCount).mockImplementation(async (_pageId, currentCount) => {
+      liveUser = { ...liveUser!, messageCount: currentCount + 1 };
+    });
+
+    const join = trackJoinedMember('user-1', { groupId: 'group-1' }, 'Alice');
+    // message-handler looked the user up before the join's create landed.
+    trackUser('user-1', { groupId: 'group-1' }, null);
+
+    await join;
+    await flush();
+    await flush();
+
+    expect(usersRepo.create).toHaveBeenCalledTimes(1);
+    expect(liveUser).toMatchObject({ customName: 'Alice', groups: ['group-1'], messageCount: 1 });
   });
 });

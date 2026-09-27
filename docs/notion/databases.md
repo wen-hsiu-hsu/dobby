@@ -9,7 +9,10 @@ Dobby 使用 5 個 Notion 資料庫。欄位的詳細型別定義請參考 `sche
 **環境變數：** `NOTION_DB_USERS`
 **Repository：** `src/services/notion/users-repository.ts`
 
-記錄所有曾與 bot 互動過的 LINE 使用者。
+記錄所有曾與 bot 互動過的 LINE 使用者。記錄在兩個時機建立（`src/services/user-management.ts`）：
+
+- **加入 bot 所在的群組/聊天室**（`memberJoined` 事件）：不用等發言就建立，所以沒講過話的成員也會有記錄（`message_counts = 0`）。
+- **在群組/聊天室第一次發言**：涵蓋 bot 進群前就在群裡的成員，以及加入時寫入失敗的人。
 
 | 欄位 | 用途 |
 |------|------|
@@ -18,7 +21,7 @@ Dobby 使用 5 個 Notion 資料庫。欄位的詳細型別定義請參考 `sche
 | `is_admin` | 管理員權限，`true` 可執行管理員指令、代他人操作 |
 | `groups` | 使用者所在的 LINE 群組 ID 清單（multi-select） |
 | `multi-chat` | 使用者所在的 LINE 聊天室 ID 清單（multi-select） |
-| `message_counts` | 累積訊息數量 |
+| `message_counts` | 累積訊息數量（加入群組不計入） |
 | `Registered name` | 關聯至「人員清單」，確認此 LINE 使用者是否為正式季租球員 |
 
 **設定管理員：** 在 Notion 將該使用者的 `is_admin` 勾選為 true 即可。

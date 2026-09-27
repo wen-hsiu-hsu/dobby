@@ -10,7 +10,7 @@ Event Router 依事件類型分派：
 
 - **message** → Message Handler：是否以 `@Dobby` 開頭？是 → Command Parser → Command Router → 對應 Command Handler；否 → Auto-Reply 比對 → LINE Reply API
 - **join** → Welcome Message Handler
-- **memberJoined** → Member Joined Handler（@mention 替換為新成員）
+- **memberJoined** → Member Joined Handler（@mention 替換為新成員，並寫入 USERS 資料庫）
 
 ## 指令系統
 
@@ -66,7 +66,7 @@ Webhook 收到 LINE 事件後，立即回傳 200，再非同步處理事件。
 
 ### In-Process Mutex
 
-使用 Map-based 的記憶體 mutex，key 依用途而定：報名/請假以活動日期字串為 key（不是 Notion 頁面 ID，避免多一次查詢才能知道要鎖哪個 key）；`user-management.ts` 的使用者統計（訊息計數、groups/multiChats 合併）以 `user-track-${userId}` 為 key。TTL 10 秒自動釋放。
+使用 Map-based 的記憶體 mutex，key 依用途而定：報名/請假以活動日期字串為 key（不是 Notion 頁面 ID，避免多一次查詢才能知道要鎖哪個 key）；`user-management.ts` 的使用者統計（訊息計數、groups/multiChats 合併）以 `user-track-${userId}` 為 key——發言（`trackUser`）和加入群組（`trackJoinedMember`）共用這把鎖，新成員加入後馬上發言也不會建出兩筆記錄。TTL 10 秒自動釋放。
 
 **原因：** 單一 server 不需要 Redis。任何「讀取 → 計算 → 寫回」的操作都需要這個原子性，避免並發覆蓋。
 

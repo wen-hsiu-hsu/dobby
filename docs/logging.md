@@ -59,13 +59,14 @@
 
 1. **失敗**：Notion API 呼叫失敗，或 LINE 回覆/推播失敗——不論那筆失敗 log 實際記錄的 level 是 warn 還是 error，一律算失敗。
 2. **警告**：看起來像指令（見上方「事件種類」），但整個流程從頭到尾沒有送出任何 LINE 回覆——通常代表指令解析失敗（例如日期格式不符），使用者完全沒收到反應。這種「安靜的失敗」跟真正的錯誤分開標示，方便定期檢查指令說明是不是不夠清楚。這個規則只套用在指令類事件，不套用在對話（自動回覆本來就常常沒有關鍵字命中、不回覆是正常行為，不該被標成警告）。
-3. **完成（有降級）**：流程仍然正常送出了回覆，但過程中出現已知的、不影響最終結果的降級訊息——目前認得三種：
+3. **完成（有降級）**：流程仍然正常送出了回覆，但過程中出現已知的、不影響最終結果的降級訊息——目前認得四種：
 
    | 訊息 | 什麼情況 |
    |------|----------|
    | `Could not get user profile` | LINE profile API 呼叫失敗，只能用 userId 顯示，看不到顯示名稱 |
    | `buildMemberJoinedWelcome error, using fallback` | 從 Notion 讀取歡迎詞失敗，送出的是內建備用文案 |
    | `User tracking failed (non-blocking)` | 使用者訊息計數/群組清單更新失敗，不影響這次回覆 |
+   | `Failed to record joined member (non-blocking)` | 新成員的 USERS 記錄寫入逾時（mutex 10 秒）或發生非 Notion API 的錯誤，歡迎訊息照常送出；逾時時寫入仍在背景進行。Notion API 本身回錯時會先被規則 1 判成失敗，不會落到這裡 |
 
    出現這些訊息時，詳情頁標題下方會有一塊黃色的降級原因說明。這個判定故意跟 log level 分開處理——`buildMemberJoinedWelcome error, using fallback` 是 `logger.error`，但歡迎訊息其實正常送出了，全部算「失敗」會蓋掉「其實有正常運作，只是走了備援路徑」這個更重要的訊息。
 4. 剩下的才照這個事件底下所有 log 行的最高等級（warn → 警告，error/fatal → 失敗）判定；都沒有就是「完成」。

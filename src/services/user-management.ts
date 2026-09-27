@@ -4,23 +4,52 @@ import { getProfile } from './line/profile-service.js';
 import { withMutex, isLocked } from './mutex.js';
 import type { NotionUser } from '../types/notion-models.js';
 
+type TrackContext = { groupId?: string; multiChatId?: string };
+
+interface TrackOptions {
+  knownUser?: NotionUser | null;
+  // undefined = not looked up yet; null = looked up but unavailable (don't retry).
+  displayName?: string | null;
+  countMessage: boolean;
+}
+
 export function trackUser(
   userId: string,
-  context: { groupId?: string; multiChatId?: string },
+  context: TrackContext,
   knownUser?: NotionUser | null
 ): void {
   // Fire-and-forget
-  _trackUserAsync(userId, context, knownUser).catch((err) =>
+  _trackUserAsync(userId, context, { knownUser, countMessage: true }).catch((err) =>
     logger.warn({ err, userId }, 'User tracking failed (non-blocking)')
   );
 }
 
+/**
+ * Joining isn't a message, so message_counts is left alone. Shares trackUser()'s
+ * mutex key, so a join immediately followed by a first message can't create two pages.
+ */
+export async function trackJoinedMember(
+  userId: string,
+  context: TrackContext,
+  displayName: string | null
+): Promise<void> {
+  await _trackUserAsync(userId, context, { displayName, countMessage: false });
+}
+
+async function resolveNewUserName(userId: string, context: TrackContext, displayName: string | null | undefined): Promise<string> {
+  if (displayName !== undefined) return displayName ?? userId;
+  // Without a groupId this is the friend-profile lookup, same as member-joined-handler.
+  const profile = await getProfile(userId, context.groupId);
+  return profile?.displayName ?? userId;
+}
+
 async function _trackUserAsync(
   userId: string,
-  context: { groupId?: string; multiChatId?: string },
-  knownUser?: NotionUser | null
+  context: TrackContext,
+  options: TrackOptions
 ): Promise<void> {
   const key = `user-track-${userId}`;
+  const { knownUser } = options;
 
   // `knownUser` is a snapshot the caller took (e.g. for an admin check) before this
   // call reaches the mutex — reusing it saves a redundant Notion query, but it's only
@@ -36,9 +65,8 @@ async function _trackUserAsync(
     const existing = trustKnownUser ? knownUser : await usersRepo.findByUserId(userId);
 
     if (!existing) {
-      // Without a groupId this is the friend-profile lookup, same as member-joined-handler.
-      const profile = await getProfile(userId, context.groupId);
-      const created = await usersRepo.create(userId, profile?.displayName ?? userId);
+      const customName = await resolveNewUserName(userId, context, options.displayName);
+      const created = await usersRepo.create(userId, customName);
       const updates: Parameters<typeof usersRepo.update>[1] = {};
       if (context.groupId) updates.groups = [context.groupId];
       if (context.multiChatId) updates.multiChats = [context.multiChatId];
@@ -61,6 +89,8 @@ async function _trackUserAsync(
     if (Object.keys(updates).length > 0) {
       await usersRepo.update(existing.pageId, updates);
     }
-    await usersRepo.incrementMessageCount(existing.pageId, existing.messageCount);
+    if (options.countMessage) {
+      await usersRepo.incrementMessageCount(existing.pageId, existing.messageCount);
+    }
   });
 }

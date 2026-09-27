@@ -81,7 +81,7 @@ docker compose down
 - **userId 不用轉換**：兩個 bot 在同一個 LINE Provider 底下，LINE 的 userId 是依 Provider 發放的，同一個人在兩個 bot 看到的 userId 相同，USERS DB 裡的資料（包括 `is_admin`）可以直接沿用。
 - **`@Dobby` 指令前綴不用改**：`command-parser.ts` 寫死比對 `@Dobby`，兩個 bot 的顯示名稱都叫 Dobby。
 - **Notion 資料不用清**：開發和測試一律直接使用正式的 Notion 資料，不另外建開發用的 DB（這是既定決定，見 `docs/development.md`「本地開發」）。
-- **USERS DB 寫法一致**：n8n 和 dobby 寫 USERS DB 的方式相同（建 row、更新 `groups`、`message_counts`）。
+- **USERS DB 寫法相容**：n8n 和 dobby 寫 USERS DB 的欄位相同（建 row、更新 `groups`、`message_counts`）。dobby 另外會在成員加入群組時就建 row、建立時直接寫入 `Custom Name`（見 `docs/notion/databases.md`），只是多寫，欄位格式不變，不影響 n8n 既有的資料。
 - **自動部署維持原樣**：切換後 pi-deployer 一樣是 push 到 `main` 就部署。這代表每次 push 都直接上正式環境，push 前要先在本機跑過測試。
 
 **切換前準備：**

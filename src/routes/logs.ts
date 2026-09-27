@@ -85,6 +85,7 @@ const DEGRADATION_EXPLANATIONS: Record<string, string> = {
   'Could not get user profile': 'LINE profile API 呼叫失敗，這筆只能用 userId 顯示，看不到顯示名稱。',
   'buildMemberJoinedWelcome error, using fallback': '從 Notion 讀取歡迎詞失敗，送出的是內建的備用文案，不是社團自訂內容。',
   'User tracking failed (non-blocking)': '使用者訊息計數/群組清單更新失敗，不影響這次回覆，但這位使用者的統計資料可能少算一筆。',
+  'Failed to record joined member (non-blocking)': '新成員的 USERS 記錄寫入逾時或發生非 Notion API 的錯誤，歡迎訊息照常送出。逾時的話寫入仍在背景進行、多半會成功；真的沒寫進去時，會在他之後於該群組發言時補上。',
 };
 
 /**

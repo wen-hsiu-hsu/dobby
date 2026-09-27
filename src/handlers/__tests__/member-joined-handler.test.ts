@@ -4,10 +4,13 @@ import { handleMemberJoined } from '../member-joined-handler.js';
 import { getProfile } from '../../services/line/profile-service.js';
 import { buildMemberJoinedWelcome } from '../../services/welcome-message.js';
 import { replyMessage } from '../../services/line/reply-service.js';
+import { trackJoinedMember } from '../../services/user-management.js';
+import { logger } from '../../utils/logger.js';
 
 vi.mock('../../services/line/profile-service.js');
 vi.mock('../../services/welcome-message.js');
 vi.mock('../../services/line/reply-service.js');
+vi.mock('../../services/user-management.js');
 
 vi.mock('../../utils/logger.js', () => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -63,5 +66,38 @@ describe('handleMemberJoined', () => {
     await handleMemberJoined(memberJoinEvent({ type: 'group', groupId: 'group-1' } as any));
 
     expect(replyMessage).toHaveBeenCalledWith('reply-token-1', [welcomeMessage]);
+  });
+
+  it('records the joined member in Notion with the group and looked-up display name', async () => {
+    vi.mocked(getProfile).mockResolvedValue({ userId: 'user-1', displayName: 'Alice' });
+
+    await handleMemberJoined(memberJoinEvent({ type: 'group', groupId: 'group-1' } as any));
+
+    expect(trackJoinedMember).toHaveBeenCalledWith('user-1', { groupId: 'group-1', multiChatId: undefined }, 'Alice');
+  });
+
+  it('records a room join under multiChatId, passing null when no profile was found', async () => {
+    vi.mocked(getProfile).mockResolvedValue(null);
+
+    await handleMemberJoined(memberJoinEvent({ type: 'room', roomId: 'room-1' } as any));
+
+    expect(trackJoinedMember).toHaveBeenCalledWith('user-1', { groupId: undefined, multiChatId: 'room-1' }, null);
+  });
+
+  it('keeps welcoming and recording the remaining members when one member fails to record', async () => {
+    vi.mocked(getProfile).mockImplementation(async (userId) => ({ userId, displayName: userId.toUpperCase() }));
+    vi.mocked(trackJoinedMember).mockRejectedValueOnce(new Error('notion down'));
+    const event = memberJoinEvent({ type: 'group', groupId: 'group-1' } as any);
+    event.joined.members = [
+      { type: 'user', userId: 'user-1' },
+      { type: 'user', userId: 'user-2' },
+    ];
+
+    await handleMemberJoined(event);
+
+    expect(replyMessage).toHaveBeenCalledTimes(2);
+    expect(logger.warn).toHaveBeenCalledWith(expect.objectContaining({ userId: 'user-1' }), 'Failed to record joined member (non-blocking)');
+    expect(buildMemberJoinedWelcome).toHaveBeenCalledWith('user-2', 'USER-2');
+    expect(trackJoinedMember).toHaveBeenCalledWith('user-2', { groupId: 'group-1', multiChatId: undefined }, 'USER-2');
   });
 });
