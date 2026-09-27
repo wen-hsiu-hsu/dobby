@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { trackUser } from '../user-management.js';
 import * as usersRepo from '../notion/users-repository.js';
+import { getProfile } from '../line/profile-service.js';
 import type { NotionUser } from '../../types/notion-models.js';
 
 vi.mock('../notion/users-repository.js');
+vi.mock('../line/profile-service.js');
 
 function makeUser(overrides: Partial<NotionUser> = {}): NotionUser {
   return {
@@ -57,6 +59,44 @@ describe('trackUser', () => {
     await flush();
 
     expect(usersRepo.findByUserId).not.toHaveBeenCalled();
+  });
+});
+
+describe('trackUser new user creation', () => {
+  beforeEach(() => {
+    vi.mocked(usersRepo.findByUserId).mockResolvedValue(null);
+    vi.mocked(usersRepo.create).mockResolvedValue(makeUser({ pageId: 'page-new' }));
+  });
+
+  it('creates the user with their current LINE display name when seen in a group', async () => {
+    vi.mocked(getProfile).mockResolvedValue({ userId: 'user-1', displayName: 'Alice' });
+
+    trackUser('user-1', { groupId: 'group-1' });
+    await flush();
+
+    expect(getProfile).toHaveBeenCalledWith('user-1', 'group-1');
+    expect(usersRepo.create).toHaveBeenCalledWith('user-1', 'Alice');
+    expect(usersRepo.update).toHaveBeenCalledWith('page-new', { groups: ['group-1'] });
+  });
+
+  it('falls back to the userId as customName when the profile lookup fails', async () => {
+    vi.mocked(getProfile).mockResolvedValue(null);
+
+    trackUser('user-1', { groupId: 'group-1' });
+    await flush();
+
+    expect(usersRepo.create).toHaveBeenCalledWith('user-1', 'user-1');
+  });
+
+  it('falls back to the friend profile lookup when only seen in a multi-person chat room', async () => {
+    vi.mocked(getProfile).mockResolvedValue({ userId: 'user-1', displayName: 'Bob' });
+
+    trackUser('user-1', { multiChatId: 'room-1' });
+    await flush();
+
+    expect(getProfile).toHaveBeenCalledWith('user-1', undefined);
+    expect(usersRepo.create).toHaveBeenCalledWith('user-1', 'Bob');
+    expect(usersRepo.update).toHaveBeenCalledWith('page-new', { multiChats: ['room-1'] });
   });
 });
 

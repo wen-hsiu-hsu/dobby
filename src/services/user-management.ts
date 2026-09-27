@@ -1,5 +1,6 @@
 import { logger } from '../utils/logger.js';
 import * as usersRepo from './notion/users-repository.js';
+import { getProfile } from './line/profile-service.js';
 import { withMutex, isLocked } from './mutex.js';
 import type { NotionUser } from '../types/notion-models.js';
 
@@ -35,7 +36,9 @@ async function _trackUserAsync(
     const existing = trustKnownUser ? knownUser : await usersRepo.findByUserId(userId);
 
     if (!existing) {
-      const created = await usersRepo.create(userId, userId);
+      // Without a groupId this is the friend-profile lookup, same as member-joined-handler.
+      const profile = await getProfile(userId, context.groupId);
+      const created = await usersRepo.create(userId, profile?.displayName ?? userId);
       const updates: Parameters<typeof usersRepo.update>[1] = {};
       if (context.groupId) updates.groups = [context.groupId];
       if (context.multiChatId) updates.multiChats = [context.multiChatId];
