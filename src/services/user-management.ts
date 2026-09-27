@@ -90,7 +90,7 @@ async function _trackUserAsync(
 
     if (!existing) {
       const customName = await resolveNewUserName(userId, context, options.displayName);
-      const created = await usersRepo.create(userId, customName);
+      const created = await usersRepo.create(userId, customName, options.countMessage ? 1 : 0);
       const updates: Parameters<typeof usersRepo.update>[1] = {};
       if (context.groupId) updates.groups = [context.groupId];
       if (context.multiChatId) updates.multiChats = [context.multiChatId];

@@ -118,13 +118,13 @@ describe('users-repository', () => {
         }, 'user-page-2'),
       );
 
-      const user = await create('user-bob', 'Bob');
+      const user = await create('user-bob', 'Bob', 1);
 
       expect(notionPostMock).toHaveBeenCalledWith('/pages', expect.objectContaining({
         properties: expect.objectContaining({
           user_id: { title: [{ text: { content: 'user-bob' } }] },
           'Custom Name': { rich_text: [{ text: { content: 'Bob' } }] },
-          message_counts: { number: 0 },
+          message_counts: { number: 1 },
         }),
       }));
       expect(user.pageId).toBe('user-page-2');

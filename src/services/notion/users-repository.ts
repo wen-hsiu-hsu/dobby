@@ -75,14 +75,14 @@ export async function findByCustomName(name: string): Promise<NotionUser | null>
   });
 }
 
-export async function create(userId: string, customName: string): Promise<NotionUser> {
+export async function create(userId: string, customName: string, messageCount: number): Promise<NotionUser> {
   return withPurpose('建立新的 bot 使用者帳號', async () => {
     const page = await notionPost('/pages', {
       parent: { database_id: env.NOTION_DB_USERS },
       properties: {
         user_id: { title: [{ text: { content: userId } }] },
         'Custom Name': { rich_text: [{ text: { content: customName } }] },
-        message_counts: { number: 0 },
+        message_counts: { number: messageCount },
       },
     });
     return pageToUser(page as PageObjectResponse);

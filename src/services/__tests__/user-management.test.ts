@@ -83,7 +83,7 @@ describe('trackUser new user creation', () => {
     await flush();
 
     expect(getProfile).toHaveBeenCalledWith('user-1', 'group-1');
-    expect(usersRepo.create).toHaveBeenCalledWith('user-1', 'Alice');
+    expect(usersRepo.create).toHaveBeenCalledWith('user-1', 'Alice', 1);
     expect(usersRepo.update).toHaveBeenCalledWith('page-new', { groups: ['group-1'], registeredPersonPageId: 'person-new' });
   });
 
@@ -93,7 +93,7 @@ describe('trackUser new user creation', () => {
     trackUser('user-1', { groupId: 'group-1' });
     await flush();
 
-    expect(usersRepo.create).toHaveBeenCalledWith('user-1', 'user-1');
+    expect(usersRepo.create).toHaveBeenCalledWith('user-1', 'user-1', 1);
   });
 
   it('falls back to the friend profile lookup when only seen in a multi-person chat room', async () => {
@@ -103,7 +103,7 @@ describe('trackUser new user creation', () => {
     await flush();
 
     expect(getProfile).toHaveBeenCalledWith('user-1', undefined);
-    expect(usersRepo.create).toHaveBeenCalledWith('user-1', 'Bob');
+    expect(usersRepo.create).toHaveBeenCalledWith('user-1', 'Bob', 1);
     expect(usersRepo.update).toHaveBeenCalledWith('page-new', { multiChats: ['room-1'], registeredPersonPageId: 'person-new' });
   });
 
@@ -128,7 +128,7 @@ describe('trackJoinedMember', () => {
     await trackJoinedMember('user-1', { groupId: 'group-1' }, 'Alice');
 
     expect(getProfile).not.toHaveBeenCalled();
-    expect(usersRepo.create).toHaveBeenCalledWith('user-1', 'Alice');
+    expect(usersRepo.create).toHaveBeenCalledWith('user-1', 'Alice', 0);
     expect(usersRepo.update).toHaveBeenCalledWith('page-new', { groups: ['group-1'], registeredPersonPageId: 'person-new' });
   });
 
@@ -139,7 +139,7 @@ describe('trackJoinedMember', () => {
     await trackJoinedMember('user-1', { groupId: 'group-1' }, null);
 
     expect(getProfile).not.toHaveBeenCalled();
-    expect(usersRepo.create).toHaveBeenCalledWith('user-1', 'user-1');
+    expect(usersRepo.create).toHaveBeenCalledWith('user-1', 'user-1', 0);
   });
 
   it('merges the new group into an existing user without counting it as a message', async () => {
@@ -271,8 +271,8 @@ describe('trackUser concurrency', () => {
   it('creates only one page when a brand-new member joins and immediately sends a message', async () => {
     let liveUser: NotionUser | null = null;
     vi.mocked(usersRepo.findByUserId).mockImplementation(async () => (liveUser ? { ...liveUser } : null));
-    vi.mocked(usersRepo.create).mockImplementation(async (userId, customName) => {
-      liveUser = makeUser({ pageId: 'page-new', userId, customName, groups: [], messageCount: 0 });
+    vi.mocked(usersRepo.create).mockImplementation(async (userId, customName, messageCount) => {
+      liveUser = makeUser({ pageId: 'page-new', userId, customName, groups: [], messageCount });
       return { ...liveUser };
     });
     vi.mocked(usersRepo.update).mockImplementation(async (_pageId, updates) => {
