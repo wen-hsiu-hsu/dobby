@@ -8,7 +8,7 @@ LINE → POST /webhook → Signature Verification → Event Router
 
 Event Router 依事件類型分派：
 
-- **message** → Message Handler：是否以 `@Dobby` 開頭？是 → Command Parser → Command Router → 對應 Command Handler；否 → Auto-Reply 比對 → LINE Reply API
+- **message** → Message Handler：是否以 `@Dobby` 開頭？是 → Command Parser → Command Router → 對應 Command Handler；否 → Auto-Reply 比對 → LINE Reply API。群組/聊天室訊息同時在背景追蹤使用者（`user-management.ts`，建立或更新 USERS）；唯一會等追蹤完成的情況是 USERS 查無此人且訊息是指令，因為報名、請假需要先有記錄
 - **join** → Welcome Message Handler
 - **memberJoined** → Member Joined Handler（@mention 替換為新成員，並寫入 USERS 資料庫）
 

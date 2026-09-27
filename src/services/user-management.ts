@@ -14,13 +14,13 @@ interface TrackOptions {
   countMessage: boolean;
 }
 
+/** Never rejects, so callers can fire-and-forget or await it. */
 export function trackUser(
   userId: string,
   context: TrackContext,
   knownUser?: NotionUser | null
-): void {
-  // Fire-and-forget
-  _trackUserAsync(userId, context, { knownUser, countMessage: true }).catch((err) =>
+): Promise<void> {
+  return _trackUserAsync(userId, context, { knownUser, countMessage: true }).catch((err) =>
     logger.warn({ err, userId }, 'User tracking failed (non-blocking)')
   );
 }

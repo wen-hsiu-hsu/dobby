@@ -37,4 +37,53 @@ describe('handleMessage', () => {
     expect(routeCommand).not.toHaveBeenCalled();
     expect(trackUser).not.toHaveBeenCalled();
   });
+
+  describe('user tracking vs. command routing', () => {
+    let finishTracking: () => void;
+
+    beforeEach(() => {
+      vi.mocked(trackUser).mockReturnValue(new Promise<void>((resolve) => { finishTracking = resolve; }));
+    });
+
+    async function flush(): Promise<void> {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    it('waits for a brand-new user to be recorded before routing their command', async () => {
+      vi.mocked(findByUserId).mockResolvedValue(null);
+
+      const handling = handleMessage(textEvent('@Dobby +1'));
+      await flush();
+      expect(routeCommand).not.toHaveBeenCalled();
+
+      finishTracking();
+      await handling;
+      expect(trackUser).toHaveBeenCalledWith('user-1', { groupId: 'group-1', multiChatId: undefined }, null);
+      expect(routeCommand).toHaveBeenCalled();
+    });
+
+    it('does not wait on tracking for a known user', async () => {
+      vi.mocked(findByUserId).mockResolvedValue({ isAdmin: false } as any);
+
+      const handling = handleMessage(textEvent('@Dobby +1'));
+      await flush();
+      expect(routeCommand).toHaveBeenCalled();
+
+      finishTracking();
+      await handling;
+    });
+
+    it('does not wait on tracking for a brand-new user sending a non-command message', async () => {
+      vi.mocked(findByUserId).mockResolvedValue(null);
+      let done = false;
+
+      const handling = handleMessage(textEvent('hello')).then(() => { done = true; });
+      await flush();
+      expect(trackUser).toHaveBeenCalled();
+      expect(done).toBe(true);
+
+      finishTracking();
+      await handling;
+    });
+  });
 });

@@ -30,12 +30,16 @@ export async function handleMessage(event: MessageEvent): Promise<void> {
   const isAdmin = notionUser?.isAdmin ?? false;
   logger.debug({ userId, text, isAdmin, sourceType: event.source.type }, 'handleMessage');
 
-  // Fire-and-forget user tracking
+  const isCommandText = isCommand(text);
+
   if (event.source.type === 'group' || event.source.type === 'room') {
-    trackUser(userId, { groupId, multiChatId }, notionUser);
+    const tracking = trackUser(userId, { groupId, multiChatId }, notionUser);
+    // Commands like +1 need the USERS record that tracking creates for a brand-new
+    // user; left fire-and-forget, their first command always loses the race.
+    if (!notionUser && isCommandText) await tracking;
   }
 
-  if (isCommand(text)) {
+  if (isCommandText) {
     const command = parseCommand(text);
     if (!command) {
       logger.debug({ text }, 'Message looks like command but failed to parse');

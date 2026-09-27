@@ -96,7 +96,7 @@ src/services/mutex.ts
 
 | 情境 | 判斷條件 | 處理方式 |
 |------|----------|----------|
-| 自己報名 | 無 mention | 查 USERS 資料庫取得對應 userId 的記錄 |
+| 自己報名 | 無 mention | 查 USERS 資料庫取得對應 userId 的記錄（群組裡第一次發言就下指令的新使用者，會先等記錄建好才走到這步，見 `docs/notion/databases.md` USERS 小節） |
 | @mention 指定 | 有目標 userId | 查 USERS 資料庫取得對應 userId 的記錄 |
 | 名字指定 | `@名字` 沒帶 userId（LINE 電腦版的 mention），或 @mention 的 userId 查不到 USERS 記錄 | 用 `@` 後面的文字查 People List 比對 |
 
