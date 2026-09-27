@@ -19,7 +19,7 @@ Target Resolver
 取得當前 Season 資料（供 isSelfSeasonMember 判斷）
     │
     ▼
-獲取 Mutex 鎖（key = 下一個週六的日期字串，TTL 10 秒）
+獲取 Mutex 鎖（key = 下一個週六的日期字串，同 key FIFO 排隊，見下方「Mutex 保護」）
     │
     ├── 鎖內查詢最新 Calendar 事件（避免 race condition；查無此活動 → 回「找不到活動」，不視為系統錯誤）
     │

@@ -62,6 +62,8 @@
 
 **實作：** `src/schedulers/display-name-update.ts`
 
+新使用者建立 USERS 記錄時就已經寫入當下的顯示名稱（見 `docs/notion/databases.md` USERS 小節），這支排程負責同步之後的改名，以及建立時沒查到名稱、先填 userId 的人。
+
 ### 執行流程
 
 1. 查詢所有 USERS 資料庫的使用者
