@@ -16,6 +16,8 @@ vi.mock('../config/line.js');
 vi.mock('../services/mutex.js');
 ```
 
+自動 mock 會把 `mutex.js` 的 `MutexTimeoutError` 也換成 mock class，在這種測試檔裡 `new MutexTimeoutError()` 產生的物件不是真的 `Error`。要測逾時分支時，改用部分 mock 保留真的 class，寫法見 `src/commands/registration/__tests__/with-fresh-calendar-event.test.ts` 開頭。
+
 然後在測試中：
 
 ```ts

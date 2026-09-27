@@ -4,10 +4,14 @@ import * as mutex from '../../../services/mutex.js';
 import { replyMessage } from '../../../services/line/reply-service.js';
 import { logger } from '../../../utils/logger.js';
 
-vi.mock('../../../services/mutex.js');
+// Keep the real MutexTimeoutError so the wrapper's instanceof check sees the same class.
+vi.mock('../../../services/mutex.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof mutex>()),
+  withMutex: vi.fn(),
+}));
 vi.mock('../../../services/line/reply-service.js');
 vi.mock('../../../utils/logger.js', () => ({
-  logger: { debug: vi.fn(), error: vi.fn() },
+  logger: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
 const calEvent = {
@@ -45,13 +49,19 @@ describe('withFreshCalendarEvent', () => {
     expect(mutation).toHaveBeenCalledWith(fresh);
   });
 
-  it('replies with a generic error when the queued mutex task times out', async () => {
-    vi.mocked(mutex.withMutex).mockRejectedValue(new Error('Mutex timeout: 2026-05-09'));
+  it('tells the user the result is unknown and not to retry when the mutex times out', async () => {
+    vi.mocked(mutex.withMutex).mockRejectedValue(new mutex.MutexTimeoutError('2026-05-09'));
 
     await withFreshCalendarEvent('token', '2026-05-09', 'ctx', () => Promise.resolve(calEvent), vi.fn());
 
-    expect(replyMessage).toHaveBeenCalledWith('token', [{ type: 'text', text: '系統錯誤，請稍後再試' }]);
-    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ err: expect.any(Error) }), 'ctx error');
+    expect(replyMessage).toHaveBeenCalledWith('token', [
+      { type: 'text', text: '處理時間較長，這次操作可能已經完成，請勿重複操作。如需確認，請洽管理員。' },
+    ]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(mutex.MutexTimeoutError) }),
+      'ctx timed out; result unknown to the user',
+    );
+    expect(logger.error).not.toHaveBeenCalled();
   });
 
   it('replies with a generic error and logs when mutation throws', async () => {

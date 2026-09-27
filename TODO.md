@@ -58,7 +58,7 @@
 > - 沒有任何 429，也沒有任何 mutex 逾時。
 > - log 幾乎都是測試流量：報名只有 2 個 userId，請假人數只有 0～2 人。正式搶報的行為還沒被觀察到。
 >
-> 慢的原因是呼叫模式（逐筆查、人為延遲、重複查、能平行卻依序），不是 Notion 本身或 rate limit。前三項都**不是 bug**：結果正確，只是慢，不是急件，依效益排序。第四項 mutex 逾時是潛在的錯誤回覆風險，排序依據不同，要獨立評估。做完任何一項後，都要在 `/logs` 時間軸比對同類指令前後的 Notion 呼叫數與總耗時。
+> 慢的原因是呼叫模式（逐筆查、人為延遲、重複查、能平行卻依序），不是 Notion 本身或 rate limit。以下都**不是 bug**：結果正確，只是慢，不是急件，依效益排序。做完任何一項後，都要在 `/logs` 時間軸比對同類指令前後的 Notion 呼叫數與總耗時。
 
 - [ ] **`findByPageIds` 逐筆 GET，每筆之間 sleep 400ms，是 `participants`／`news` 慢的主因。** 兩個 repository 都有這個函式：
   - `src/services/notion/people-repository.ts:17-27`（sleep 在第 21 行）
@@ -115,7 +115,7 @@
   - **傳 `notionUser`：** `routeCommand`（`message-handler.ts:49`）加一個參數；router 的 3 個呼叫點（`command-router.ts:52,56,59`）、`handleRegistration`、`handleLeave`、`resolveTarget` 各加一個 optional 參數 `actorUser?: NotionUser | null`。只有非 null 時才採用，null 或 undefined 就重查。既有 handler 測試直接用 `(event, x, false)` 呼叫的地方不用改，但 `src/commands/__tests__/command-router.test.ts:141,149,157,178,185,192` 用 `toHaveBeenCalledWith(event, x, isAdmin)` 斷言，router 多傳一個參數（即使是 undefined）就會失敗，要跟著改。
   - **並行：** 把 `resolveTarget` 和 `findByName` 包進 `Promise.all`。要放在 `parseError`／非管理員檢查之後，並保留「`resolved` 為 null 就先回覆錯誤」的順序，錯誤訊息才會跟現在一樣。失敗路徑會多白查一次 Season（約 0.4 秒），不影響正確性。
 
-  預估效益（用 log 的實際 durationMs 逐筆重算 20 筆既有使用者的 `+N`）：中位數從約 3.3 秒降到約 2.4～2.5 秒，大約省 0.7 秒。其中 USERS 去重約省 0.45 秒；並行只有在使用者有綁 People 時才有效，約省 0.26 秒。這些呼叫都在鎖外，對第四項的 mutex 逾時風險沒有幫助。
+  預估效益（用 log 的實際 durationMs 逐筆重算 20 筆既有使用者的 `+N`）：中位數從約 3.3 秒降到約 2.4～2.5 秒，大約省 0.7 秒。其中 USERS 去重約省 0.45 秒；並行只有在使用者有綁 People 時才有效，約省 0.26 秒。這些呼叫都在鎖外，不會降低 mutex 逾時（含排隊時間，見 [ADR 0002](docs/adr/0002-mutex-timeout-does-not-cancel-task.md)）的機率。
 
   已知陷阱：
   - **傳進來的 `null` 不能當成「使用者不存在」。** 在群組／多人聊天裡，`notionUser` 為 null 時，`message-handler.ts:36-39` 會 await `trackUser` 把 USERS 頁面建好，所以傳下去的 null 在這條路徑上一定是過時的。這跟 `services/user-management.ts:83-85` 註解講的「null snapshot 不能信」同理。1 對 1 聊天不做 tracking，null 才是真的不存在，重查也只多一次呼叫。反過來，非 null 的 snapshot 可以直接用：既有使用者的 `trackUser` 只會改 groups／multiChats／message_counts（`user-management.ts` 的 existing 分支），不會改 `resolveTarget` 需要的 `registeredPersonPageId`。
@@ -129,28 +129,10 @@
 
   鎖內多出的時間會隨請假人數增加：每位請假人約 0.3 秒 GET，加上筆與筆之間 400ms sleep。1 人約 0.3 秒，2～3 人約 1～1.7 秒，5～6 人約 3.1～3.8 秒。log 是測試流量，請假人數只有 0～2 人。但從 calendar payload 看，7/04～9/19 各週的最終請假人數是 0～6 人（中位數約 2.5），週末前的報名可能遇到較高的數字。
 
-  這項不是 bug，單一使用者的回覆時間也不會變短，只在有人排隊時才有幫助（縮短後面的人的等待，降低第四項的逾時風險）。
+  這項不是 bug，單一使用者的回覆時間也不會變短，只在有人排隊時才有幫助：縮短後面的人的等待，降低 mutex 逾時的機率。`withMutex` 的 10 秒逾時從呼叫時起算、含排隊時間（見 [ADR 0002](docs/adr/0002-mutex-timeout-does-not-cancel-task.md)）。以目前鎖持有中位數 1.43 秒估算，約 7 人同時排隊才會逾時；遇到 Notion 長尾時約 3～4 人。逾時的使用者會收到「這次操作可能已經完成，請勿重複操作」，背景寫入照常完成。
 
-  如果要處理：可以讓 mutation 回傳組訊息需要的資料，改到鎖外組訊息並 `replyMessage`。要改 `with-fresh-calendar-event.ts:12` 的 mutation 簽名，它現在是 `(fresh: T) => Promise<void>`。
+  如果要處理：可以讓 mutation 回傳組訊息需要的資料，改到鎖外組訊息並 `replyMessage`。要改 `with-fresh-calendar-event.ts:18` 的 mutation 簽名，它現在是 `(fresh: T) => Promise<void>`。
   - 移到鎖外不會造成資料不一致：訊息內容仍然用 mutation 在鎖內算出的快照（`updatedGuests`、`newAbsentees`、`totalSlots`），跟現在一樣。差別只有姓名查詢晚一點（姓名不會變），以及 B 的回覆可能比 A 先到，都無害。
   - 如果做了第一項的快取備案，請假人姓名會走快取，鎖內只剩 LINE reply 約 0.2 秒，這一項就不值得做了。第一項的首選做法（反向 relation 查詢）不碰鎖內的查詢，做完後這一項的效益不變。
-
-- [ ] **`withMutex` 的 10 秒逾時把排隊時間也算進去，尖峰時使用者可能收到「系統錯誤」，但報名其實已經成功，重試還會重複報名。** 現象推論自程式碼，log 裡還沒發生過。
-  - **機制。** `src/services/mutex.ts:25` 的 `settle` 是「等前一個任務完成、再執行 `fn()`」，第 45 行從一呼叫 `withMutex` 就開始用 `raceAgainstTimeout` 計時（`TIMEOUT_MS` 在第 5 行），所以 10 秒是「排隊＋執行」的合計。`mutex.test.ts:64-65` 的註解也明寫 "each call's timeout is armed at call time, independent of queue"。
-  - **文件跟實際行為不一致。** 下面三處都寫「單次執行有 10 秒逾時」：
-    - [ADR 0002](docs/adr/0002-mutex-timeout-does-not-cancel-task.md) 第 3 行
-    - `docs/architecture.md:69`
-    - `docs/registration.md:89`
-
-    另外 [ADR 0001](docs/adr/0001-explicit-fresh-calendar-event-wrapper.md) 第 3 行寫「統一處理逾時以外的例外」，但逾時其實也走同一個 catch，回的也是「系統錯誤」。
-  - **逾時後使用者看到什麼。** `with-fresh-calendar-event.ts:27-28` 的 catch 先用 replyToken 回「系統錯誤，請稍後再試」，token 就被用掉了。背景的 `fn()` 會照樣跑完，報名實際寫入，但它的 `replyMessage` 會被 LINE 拒絕（token 只能用一次），被 `reply-service.ts:42-44` 吞掉，只記一筆 warn。所以使用者只看到錯誤，不會收到第二則成功訊息。同一 key 後面排隊的人也會連鎖逾時，因為每人都從自己呼叫時開始計時。
-  - **重試會重複報名或多取消一筆。** `+N` 不是冪等的，重試會再寫入一筆「名字 (2)」（`capacity-calculator.ts:144`），佔掉一個名額。零打名額本來就少（約場地數×7 − 季租人數 + 請假人數），推播後的搶報正是最可能逾時的時候。`-N` 也不是冪等的：使用者有 2 筆以上報名時，重試會再刪一筆。請假／銷假重試會走 no-op 分支，不受影響。
-  - **觸發機率低。** 推播是週日 09:00（`weekly-push.ts:63`）。以鎖持有中位數 1.43 秒估算，要約 7 人同時排隊才會超過 10 秒。遇到 Notion 長尾（單次 3～5 秒）時，約 3～4 人就可能觸發。log 最密集的一段是 10 秒內 3 次，最大排隊等待 1.24 秒，而且是測試流量，不代表正式搶報。
-
-  如果要處理：
-  - **建議：逾時時改回覆「處理較久，結果可能已寫入，請勿重複報名或取消」**，不要回「系統錯誤」。做法是新增 `MutexTimeoutError`（或判斷錯誤訊息前綴 `Mutex timeout: `），在 `withFreshCalendarEvent` 的 catch 分流。訊息要寫成「結果未定」：逾時當下任務可能還在排隊，最後也可能因名額不足而失敗，不能說「已成功」。改完要同步修正上面列的文件描述。
-    - **陷阱：訊息不能叫一般使用者用 `next` 確認。** `next` 限管理員使用（`next-event.ts:8-10`），一般成員目前沒有任何指令能查本週報名狀態。可以寫「如需確認請洽管理員」。要不要開放 `next` 或新增成員可用的查詢指令，是範圍外的產品決策，不要順手做。
-  - **縮短鎖持有時間**（第三項，或第一項的快取備案）能降低觸發機率，但沒辦法消除「看到錯誤、實際已寫入」這個結果。第一項的首選做法不碰鎖內，對這一項沒有幫助。
-  - **不建議改成從拿到鎖才開始計時。** 程式改起來不難（計時器移到 `settle` 內、`fn()` 之前），但 `notion-fetch.ts` 沒有請求逾時（第 57 行的 `fetch` 沒帶 signal）。前一個任務卡住時，排隊的人會永遠拿不到鎖、永遠收不到回覆，等於拿掉現有的安全網。這個改動也會影響 `user-management.ts:88` 的 `user-track` 鎖。真要做，得先補 fetch 逾時或總等待上限。另外**不能**改成「逾時就讓下一個排隊任務開始」，那會重新引入 ADR 0002 防的 race。
 
 ---

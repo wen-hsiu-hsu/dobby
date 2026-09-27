@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { withMutex, isLocked } from '../mutex.js';
+import { withMutex, isLocked, MutexTimeoutError } from '../mutex.js';
 
 describe('mutex', () => {
   it('acquires lock and runs fn', async () => {
@@ -59,6 +59,8 @@ describe('mutex', () => {
     });
     // Attach the rejection assertion before advancing timers so the rejection is never unhandled.
     const stuckAssertion = expect(stuck).rejects.toThrow('Mutex timeout: key5');
+    // withFreshCalendarEvent branches on this class to avoid telling users a write failed.
+    const stuckTypeAssertion = expect(stuck).rejects.toBeInstanceOf(MutexTimeoutError);
 
     // Stagger the second call's own 10s timeout window so it starts strictly after
     // the first's — each call's timeout is armed at call time, independent of queue
@@ -73,6 +75,7 @@ describe('mutex', () => {
     expect(isLocked('key5')).toBe(true);
     await vi.advanceTimersByTimeAsync(10_000 - 100);
     await stuckAssertion;
+    await stuckTypeAssertion;
 
     // The first caller has given up, but `next` is still queued/pending, so the key
     // is still considered locked from a caller's perspective.

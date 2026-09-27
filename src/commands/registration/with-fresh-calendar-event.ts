@@ -1,8 +1,14 @@
-import { withMutex } from '../../services/mutex.js';
+import { withMutex, MutexTimeoutError } from '../../services/mutex.js';
 import { replyMessage } from '../../services/line/reply-service.js';
 import { logger } from '../../utils/logger.js';
 
 class EventNotFoundError extends Error {}
+
+// The mutation keeps running after a timeout and may still write, but its own reply
+// will be rejected because this message has already used the replyToken. `+N`/`-N`
+// are not idempotent, so the message must stop users from retrying. `next` is
+// admin-only, so it can't point regular members there.
+const TIMEOUT_REPLY = '處理時間較長，這次操作可能已經完成，請勿重複操作。如需確認，請洽管理員。';
 
 export async function withFreshCalendarEvent<T>(
   replyToken: string,
@@ -22,6 +28,11 @@ export async function withFreshCalendarEvent<T>(
   } catch (err: unknown) {
     if (err instanceof EventNotFoundError) {
       await replyMessage(replyToken, [{ type: 'text', text: `找不到 ${date} 的活動` }]);
+      return;
+    }
+    if (err instanceof MutexTimeoutError) {
+      logger.warn({ err }, `${context} timed out; result unknown to the user`);
+      await replyMessage(replyToken, [{ type: 'text', text: TIMEOUT_REPLY }]);
       return;
     }
     logger.error({ err }, `${context} error`);

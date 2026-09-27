@@ -73,6 +73,8 @@
    出現這些訊息時，詳情頁標題下方會有一塊黃色的降級原因說明。這個判定故意跟 log level 分開處理——`buildMemberJoinedWelcome error, using fallback` 是 `logger.error`，但歡迎訊息其實正常送出了，全部算「失敗」會蓋掉「其實有正常運作，只是走了備援路徑」這個更重要的訊息。
 4. 剩下的才照這個事件底下所有 log 行的最高等級（warn → 警告，error/fatal → 失敗）判定；都沒有就是「完成」。
 
+**報名／請假 mutex 逾時的事件，狀態會從「警告」變成「失敗」。** 逾時當下，`withFreshCalendarEvent` 記一筆 warn（`… timed out; result unknown to the user`），並回覆使用者「這次操作可能已經完成，請勿重複操作」，所以事件先顯示「警告」。之後背景任務跑完，它自己的回覆會因為 replyToken 已被用掉而被 LINE 拒絕（`Reply failed, no fallback available`），套用規則 1 改判「失敗」。這時 Notion 寫入其實可能已經成功，要看時間軸裡的 PATCH 才能確認結果。背景設計見 [ADR 0002](adr/0002-mutex-timeout-does-not-cancel-task.md)。
+
 ## 處理過程時間軸
 
 點開一個事件，右側依時間順序畫出這個事件的完整處理過程（`stepsHeading` 依種類略有不同：訊息類是「處理過程」，排程是「執行過程」；系統類則不是固定值，依訊息各自設定——`src/routes/logs.ts` 的 `SYSTEM_EVENT_INFO` 裡，`Webhook received multiple events` 跟 `R2 not configured, log sync disabled` 用「說明」，`LINE signature validation failed` 跟其餘沒有專屬文案的 fallback 才用「發生了什麼」），每一步左側有跟等級對應的色點（綠 info、藍 debug、黃 warn、紅 error），不用點開也看得出哪一步異常。時間軸嚴格依時間排序（Notion 呼叫、其他 log、LINE 收發全部混在一起排，不是先列完所有 Notion 呼叫、再列雜項）。

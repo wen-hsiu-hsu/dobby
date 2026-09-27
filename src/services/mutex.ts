@@ -5,6 +5,17 @@ const pending = new Map<string, number>();
 const TIMEOUT_MS = 10_000;
 
 /**
+ * Thrown when the caller stops waiting. `fn()` may still be queued or running and can
+ * succeed afterwards, so callers must not report this as a plain failure.
+ */
+export class MutexTimeoutError extends Error {
+  constructor(key: string) {
+    super(`Mutex timeout: ${key}`);
+    this.name = 'MutexTimeoutError';
+  }
+}
+
+/**
  * Runs `fn` under a per-key FIFO queue: concurrent callers for the same key wait
  * their turn instead of being rejected, so a busy key never forces the caller to retry.
  *
@@ -14,6 +25,9 @@ const TIMEOUT_MS = 10_000;
  * times out, the caller gets an error back, but `fn()` keeps running in the
  * background and the next queued task still waits for it to actually finish before
  * starting, preventing it from reading stale data and clobbering the eventual write.
+ *
+ * The timeout is armed when `withMutex` is called, so it covers time spent waiting in
+ * the queue as well as `fn()` itself.
  */
 export async function withMutex<T>(key: string, fn: () => Promise<T>): Promise<T> {
   pending.set(key, (pending.get(key) ?? 0) + 1);
@@ -61,7 +75,7 @@ function raceAgainstTimeout<T>(key: string, settle: Promise<T>): Promise<T> {
         { key },
         "Mutex task timed out from caller's perspective; task keeps running in the background and the next queued task will still wait for it"
       );
-      reject(new Error(`Mutex timeout: ${key}`));
+      reject(new MutexTimeoutError(key));
     }, TIMEOUT_MS);
   });
   return Promise.race([settle, timeout]).finally(() => clearTimeout(timer));
