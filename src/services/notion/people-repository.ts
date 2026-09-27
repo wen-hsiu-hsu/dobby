@@ -36,6 +36,18 @@ export async function findByName(name: string): Promise<PersonRecord | null> {
   });
 }
 
+export async function create(name: string): Promise<PersonRecord> {
+  return withPurpose('建立新的成員資料', async () => {
+    const page = await notionPost('/pages', {
+      parent: { database_id: env.NOTION_DB_PEOPLE },
+      properties: {
+        Name: { title: [{ text: { content: name } }] },
+      },
+    });
+    return pageToRecord(page as PageObjectResponse);
+  });
+}
+
 export async function findAllUnpaid(): Promise<PersonRecord[]> {
   return withPurpose('查詢所有未結清費用的成員', async () => {
     const response = await notionPost(`/databases/${env.NOTION_DB_PEOPLE}/query`, {

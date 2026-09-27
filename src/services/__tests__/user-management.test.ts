@@ -1,11 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { trackUser, trackJoinedMember } from '../user-management.js';
 import * as usersRepo from '../notion/users-repository.js';
+import * as peopleRepo from '../notion/people-repository.js';
 import { getProfile } from '../line/profile-service.js';
+import { logger } from '../../utils/logger.js';
 import type { NotionUser } from '../../types/notion-models.js';
 
 vi.mock('../notion/users-repository.js');
+vi.mock('../notion/people-repository.js');
 vi.mock('../line/profile-service.js');
+vi.mock('../../utils/logger.js', () => ({
+  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
 
 function makeUser(overrides: Partial<NotionUser> = {}): NotionUser {
   return {
@@ -29,6 +35,8 @@ async function flush(): Promise<void> {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(peopleRepo.findByName).mockResolvedValue(null);
+  vi.mocked(peopleRepo.create).mockImplementation(async (name) => ({ pageId: 'person-new', name, hasPaid: true }));
 });
 
 describe('trackUser', () => {
@@ -76,7 +84,7 @@ describe('trackUser new user creation', () => {
 
     expect(getProfile).toHaveBeenCalledWith('user-1', 'group-1');
     expect(usersRepo.create).toHaveBeenCalledWith('user-1', 'Alice');
-    expect(usersRepo.update).toHaveBeenCalledWith('page-new', { groups: ['group-1'] });
+    expect(usersRepo.update).toHaveBeenCalledWith('page-new', { groups: ['group-1'], registeredPersonPageId: 'person-new' });
   });
 
   it('falls back to the userId as customName when the profile lookup fails', async () => {
@@ -96,7 +104,7 @@ describe('trackUser new user creation', () => {
 
     expect(getProfile).toHaveBeenCalledWith('user-1', undefined);
     expect(usersRepo.create).toHaveBeenCalledWith('user-1', 'Bob');
-    expect(usersRepo.update).toHaveBeenCalledWith('page-new', { multiChats: ['room-1'] });
+    expect(usersRepo.update).toHaveBeenCalledWith('page-new', { multiChats: ['room-1'], registeredPersonPageId: 'person-new' });
   });
 
   it('re-reads instead of trusting a null snapshot, so a page created in the meantime is not duplicated', async () => {
@@ -121,7 +129,7 @@ describe('trackJoinedMember', () => {
 
     expect(getProfile).not.toHaveBeenCalled();
     expect(usersRepo.create).toHaveBeenCalledWith('user-1', 'Alice');
-    expect(usersRepo.update).toHaveBeenCalledWith('page-new', { groups: ['group-1'] });
+    expect(usersRepo.update).toHaveBeenCalledWith('page-new', { groups: ['group-1'], registeredPersonPageId: 'person-new' });
   });
 
   it('falls back to userId without retrying the lookup when the caller already found no profile', async () => {
@@ -148,6 +156,70 @@ describe('trackJoinedMember', () => {
     vi.mocked(usersRepo.findByUserId).mockRejectedValue(new Error('notion down'));
 
     await expect(trackJoinedMember('user-1', { groupId: 'group-1' }, 'Alice')).rejects.toThrow('notion down');
+  });
+});
+
+describe('new user people list linking', () => {
+  beforeEach(() => {
+    vi.mocked(usersRepo.findByUserId).mockResolvedValue(null);
+    vi.mocked(usersRepo.create).mockResolvedValue(makeUser({ pageId: 'page-new' }));
+  });
+
+  it('creates a people page named after the custom name and links it via Registered name', async () => {
+    await trackJoinedMember('user-1', { groupId: 'group-1' }, 'Alice');
+
+    expect(peopleRepo.findByName).toHaveBeenCalledWith('Alice');
+    expect(peopleRepo.create).toHaveBeenCalledWith('Alice');
+    expect(usersRepo.update).toHaveBeenCalledWith('page-new', { groups: ['group-1'], registeredPersonPageId: 'person-new' });
+  });
+
+  it('uses the userId as the people page name when no display name was found', async () => {
+    await trackJoinedMember('user-1', { groupId: 'group-1' }, null);
+
+    expect(peopleRepo.create).toHaveBeenCalledWith('user-1');
+  });
+
+  it('skips creating and linking when the people list already has that name', async () => {
+    vi.mocked(peopleRepo.findByName).mockResolvedValue({ pageId: 'person-existing', name: 'Alice', hasPaid: true });
+
+    await trackJoinedMember('user-1', { groupId: 'group-1' }, 'Alice');
+
+    expect(peopleRepo.create).not.toHaveBeenCalled();
+    expect(usersRepo.update).toHaveBeenCalledWith('page-new', { groups: ['group-1'] });
+    expect(logger.warn).toHaveBeenCalledWith(
+      { userId: 'user-1', personPageId: 'person-existing' },
+      'People list already has this name, skipped auto-link'
+    );
+  });
+
+  it('still records groups on the new user when creating the people page fails', async () => {
+    vi.mocked(peopleRepo.create).mockRejectedValue(new Error('notion down'));
+
+    await trackJoinedMember('user-1', { groupId: 'group-1' }, 'Alice');
+
+    expect(usersRepo.update).toHaveBeenCalledWith('page-new', { groups: ['group-1'] });
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      'Failed to create people record for new user (non-blocking)'
+    );
+  });
+
+  it('still records groups on the new user when the same-name lookup fails', async () => {
+    vi.mocked(peopleRepo.findByName).mockRejectedValue(new Error('notion down'));
+
+    await trackJoinedMember('user-1', { groupId: 'group-1' }, 'Alice');
+
+    expect(peopleRepo.create).not.toHaveBeenCalled();
+    expect(usersRepo.update).toHaveBeenCalledWith('page-new', { groups: ['group-1'] });
+  });
+
+  it('does not touch the people list for an existing user', async () => {
+    vi.mocked(usersRepo.findByUserId).mockResolvedValue(makeUser());
+
+    await trackJoinedMember('user-1', { groupId: 'group-2' }, 'Alice');
+
+    expect(peopleRepo.findByName).not.toHaveBeenCalled();
+    expect(peopleRepo.create).not.toHaveBeenCalled();
   });
 });
 

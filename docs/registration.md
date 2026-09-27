@@ -98,9 +98,11 @@ src/services/mutex.ts
 |------|----------|----------|
 | 自己報名 | 無 mention | 查 USERS 資料庫取得對應 userId 的記錄 |
 | @mention 指定 | 有目標 userId | 查 USERS 資料庫取得對應 userId 的記錄 |
-| 名字指定（文字） | 有目標名字文字 | 查 People List 比對 |
+| 名字指定 | `@名字` 沒帶 userId（LINE 電腦版的 mention），或 @mention 的 userId 查不到 USERS 記錄 | 用 `@` 後面的文字查 People List 比對 |
 
-「自己報名」「@mention 指定」這兩種情境查到 USERS 記錄後，顯示名稱不是直接用 `customName`：會**優先**用該 user 的 `registeredPersonPageId` 去查 People DB，若查得到就用 People DB 上的 `person.name`；只有查不到對應的 People 記錄（例如非季租成員從未在 People DB 註冊）時，才 fallback 用 USERS 資料庫的 `customName`（見 `src/commands/registration/target-resolver.ts`）。
+「自己報名」「@mention 指定」這兩種情境查到 USERS 記錄後，顯示名稱不是直接用 `customName`：會**優先**用該 user 的 `registeredPersonPageId` 去查 People DB，若查得到就用 People DB 上的 `person.name`；只有查不到對應的 People 記錄（例如自動建立人員頁面前就存在、`Registered name` 空著的舊使用者，或建立時遇到同名而跳過的人）時，才 fallback 用 USERS 資料庫的 `customName`（見 `src/commands/registration/target-resolver.ts`）。新使用者會自動連到一個以當下 LINE 名稱命名的 People 頁面（見 `docs/notion/databases.md` USERS 小節），該頁面 `Name` 不隨 LINE 改名同步，所以這些人報名時顯示的是建立當下的名稱，直到管理員修改。
+
+「名字指定」用 `findByName` 以 People `Name` 精確比對、取第一筆。沒有 `@` 的純文字（例如 `@Dobby +1 名字`）不會走到這裡，會直接回「指令格式錯誤：指定對象需使用 @Name」。因為新使用者都會自動建立 People 頁面，現在用他們建立當下的 LINE 名稱也能被名字指定找到，他們不在任何季度的 `報名人`，所以會以零打身分處理；但使用者之後在 LINE 改名，mention 帶出的新名字就對不上 People `Name`（不同步）。人員清單若有同名頁面，取到哪一筆不保證——被 @ 的人不在 USERS、而名字剛好跟別人的頁面相同時，會報到那個人名下。
 
 管理員才能代他人操作（非管理員發出代他人指令會被拒絕）。`handleRegistration`／`handleLeave` 檢查順序是先判斷 `target.parseError`（指定對象語法錯誤，例如漏了 `@`）、再判斷是否為管理員：語法錯誤跟權限無關，優先回報，避免一般成員打錯 `@Name` 語法時被誤導以為是權限問題（收到「你不是管理員」而非「指令格式錯誤：指定對象需使用 @Name」）。
 

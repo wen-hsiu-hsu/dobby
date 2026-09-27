@@ -7,7 +7,7 @@
   "properties": {
     "Name": {
       "type": "title",
-      "description": "球員姓名，主鍵。報名時的顯示名稱（零打欄位）以此為基礎",
+      "description": "球員姓名，主鍵。報名時的顯示名稱（零打欄位）以此為基礎。新的 LINE 使用者會自動建立一頁，以建立當下的 LINE 顯示名稱命名（不隨改名同步）",
       "config": null
     },
     "USER": {

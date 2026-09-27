@@ -91,7 +91,7 @@ export async function create(userId: string, customName: string): Promise<Notion
 
 export async function update(
   pageId: string,
-  updates: Partial<Pick<NotionUser, 'customName' | 'groups' | 'multiChats'>>,
+  updates: Partial<Pick<NotionUser, 'customName' | 'groups' | 'multiChats' | 'registeredPersonPageId'>>,
 ): Promise<void> {
   return withPurpose('更新 bot 使用者帳號資料', async () => {
     const properties: Record<string, unknown> = {};
@@ -101,6 +101,8 @@ export async function update(
       properties['groups'] = { multi_select: updates.groups.map(name => ({ name })) };
     if (updates.multiChats !== undefined)
       properties['multi-chat'] = { multi_select: updates.multiChats.map(name => ({ name })) };
+    if (updates.registeredPersonPageId !== undefined)
+      properties['Registered name'] = { relation: [{ id: updates.registeredPersonPageId }] };
     await notionPatch(`/pages/${pageId}`, { properties });
   });
 }

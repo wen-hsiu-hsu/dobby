@@ -1,5 +1,6 @@
 import { logger } from '../utils/logger.js';
 import * as usersRepo from './notion/users-repository.js';
+import * as peopleRepo from './notion/people-repository.js';
 import { getProfile } from './line/profile-service.js';
 import { withMutex, isLocked } from './mutex.js';
 import type { NotionUser } from '../types/notion-models.js';
@@ -43,6 +44,26 @@ async function resolveNewUserName(userId: string, context: TrackContext, display
   return profile?.displayName ?? userId;
 }
 
+/**
+ * Never links to an existing same-name person: it could be a different player, and the
+ * link would hand the new user that player's season membership and leave rights.
+ * Failures don't block the USERS write; the user just stays unlinked (no retry, since
+ * they're no longer "new" next time).
+ */
+async function createPersonForNewUser(userId: string, name: string): Promise<string | null> {
+  try {
+    const sameName = await peopleRepo.findByName(name);
+    if (sameName) {
+      logger.warn({ userId, personPageId: sameName.pageId }, 'People list already has this name, skipped auto-link');
+      return null;
+    }
+    return (await peopleRepo.create(name)).pageId;
+  } catch (err) {
+    logger.warn({ err, userId }, 'Failed to create people record for new user (non-blocking)');
+    return null;
+  }
+}
+
 async function _trackUserAsync(
   userId: string,
   context: TrackContext,
@@ -73,6 +94,8 @@ async function _trackUserAsync(
       const updates: Parameters<typeof usersRepo.update>[1] = {};
       if (context.groupId) updates.groups = [context.groupId];
       if (context.multiChatId) updates.multiChats = [context.multiChatId];
+      const personPageId = await createPersonForNewUser(userId, customName);
+      if (personPageId) updates.registeredPersonPageId = personPageId;
       if (Object.keys(updates).length > 0) {
         await usersRepo.update(created.pageId, updates);
       }

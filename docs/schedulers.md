@@ -62,7 +62,7 @@
 
 **實作：** `src/schedulers/display-name-update.ts`
 
-新使用者建立 USERS 記錄時就已經寫入當下的顯示名稱（見 `docs/notion/databases.md` USERS 小節），這支排程負責同步之後的改名，以及建立時沒查到名稱、先填 userId 的人。
+新使用者建立 USERS 記錄時就已經寫入當下的顯示名稱（見 `docs/notion/databases.md` USERS 小節），這支排程負責同步之後的改名，以及建立時沒查到名稱、先填 userId 的人。只更新 USERS 的 `Custom Name`，**刻意不動**人員清單的 `Name`：那個欄位會被管理員改成真名，排程分不出哪些頁面是自動建立的，同步會蓋掉管理員的修改。
 
 ### 執行流程
 

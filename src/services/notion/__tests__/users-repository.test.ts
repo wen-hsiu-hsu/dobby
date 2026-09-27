@@ -155,6 +155,16 @@ describe('users-repository', () => {
         },
       });
     });
+
+    it('patches the Registered name relation when registeredPersonPageId is provided', async () => {
+      notionPatchMock.mockResolvedValue(undefined);
+
+      await update('user-page-1', { registeredPersonPageId: 'person-1' });
+
+      expect(notionPatchMock).toHaveBeenCalledWith('/pages/user-page-1', {
+        properties: { 'Registered name': { relation: [{ id: 'person-1' }] } },
+      });
+    });
   });
 
   describe('incrementMessageCount', () => {
