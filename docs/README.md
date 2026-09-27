@@ -12,6 +12,7 @@
 | [development.md](development.md) | 本地開發設定、環境變數、測試方式 | 建置、部署、加新指令的步驟、環境變數、本機 `.env` 該接哪個 LINE channel |
 | [notion/databases.md](notion/databases.md) | Notion 資料庫業務邏輯與欄位說明 | 改動任何讀寫 Notion 的邏輯 |
 | [logging.md](logging.md) | `/logs` 頁面的事件列表/時間軸版面、合併顯示、R2 同步折疊、遮蔽 ID 說明 | 要用 `/logs` 除錯、不確定這個頁面有什麼功能 |
+| [achievements-rulebook.md](achievements-rulebook.md) | 成就系統（含賽季彩蛋）的遊戲規則，**尚未實作** | 要開發或討論成就系統；開工前先看 `TODO.md`「規劃中功能」 |
 
 只針對特定功能開發時，不需要全部讀完——依上表挑對應文件即可。
 
