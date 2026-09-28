@@ -134,68 +134,91 @@
 
 ## Log 可觀測性（2026-09-28 評估，尚未處理）
 
-> 2026-09-28 用 subagent 評估「只靠 log 能不能 debug」，逐一檢查這些情境：報名結果不對、bot 沒回、同時報名、換季、排程失敗、USERS 重複建頁、Notion 錯誤或變慢。
+> 2026-09-28 用 subagent 評估「只靠 log 能不能 debug」，逐一檢查這些情境：報名結果不對、bot 沒回、同時報名、換季、排程失敗、USERS 重複建頁、Notion 錯誤或變慢。之後再派三個無背景的 subagent 逐條對照程式碼驗證過這一節的行號與描述。
 > - **前提：正式環境（Pi）一直跑 `LOG_LEVEL=debug`**（2026-09-28 決定維持，理由與 PII 取捨見 `docs/overview.md`「日誌」小節、ADR 0005「現況」段；可看 Pi `/logs` footer 的 LOG_LEVEL 徽章複查）。所以 Notion request/response 全文、LINE 回覆全文、`Routing command`、userId 都有記錄，大部分「為什麼這樣判斷」可以從 debug 行反推。下面的優先順序以 debug 為前提；之後若要改回 info，先看 ADR 0005「現況」段列的前置事項。
-> - 做得好的部分不用動：reqId 分組、每次 Notion 呼叫的 purpose 和 durationMs、429 重試的 warn、Notion HTTP 錯誤的 status 和 body、LINE 回覆失敗的 `err`、報名／請假成功的摘要、排程每條路徑結尾都有 log。
+> - 做得好的部分不用動：reqId 分組、每次 Notion 呼叫的 purpose 和 durationMs、429 重試的 warn、Notion HTTP 錯誤的 status 和 body（限 body 是 JSON 時，見第一項）、LINE 回覆失敗的 `err`、報名／請假成功的摘要、排程每條路徑結尾都有 log。
 > - 本機 `logs/` 是本機 docker 測試產生的，不是 Pi 的 log。Pi 上的實際狀態（例如 R2 有沒有啟用）要到 Pi 的 `/logs` 確認。
+> - 路徑除非另外寫明，都相對於 `src/`。
 >
-> 以下都不是急件：正式環境是 debug，除了「Notion 網路錯誤…」那一項以外，都只影響 `/logs` 的呈現或除錯效率，不影響使用者。
+> 以下都不是急件，**也都不影響使用者**：只影響 `/logs` 的呈現或除錯效率。會讓使用者收不到回覆的是「已知問題」的「報名／請假在取鎖前的 Notion 例外不會回覆使用者」，那一項跟這裡分開處理。
 
-- [ ] **Notion 網路錯誤、或錯誤回應不是 JSON 時，`Notion API error` 那一行不會寫出來。** `src/services/notion/notion-fetch.ts`：
-  - 第 57 行的 `fetch` 沒有 try/catch。DNS 失敗、連線中斷、逾時這類網路錯誤會直接丟出，不會記任何 Notion 層的錯誤 log。
-  - 第 32 行的 `assertOk` 先 `await res.json()`。Notion 或中間的 proxy 回傳 HTML／純文字（常見於 502/503）時，這裡會丟 `SyntaxError`，第 33 行的 `logger.error` 永遠不會執行，HTTP status 也跟著遺失。
+- [ ] **Notion 網路錯誤、或錯誤回應不是 JSON 時，`Notion API error` 那一行不會寫出來。** `services/notion/notion-fetch.ts`：
+  - 第 57 行的 `fetch` 沒有 try/catch。DNS 失敗、連線中斷、逾時這類網路錯誤會直接丟出，不會記任何 Notion 層的錯誤 log。程式沒有傳 AbortSignal，所以「逾時」只會來自 undici 的預設值（連線 10 秒；header、body 各 300 秒），沒有自訂 timeout。
+  - 第 32 行的 `assertOk`（宣告在第 30 行）先 `await res.json()`。Notion 或中間的 proxy 回傳 HTML／純文字（常見於 502/503）時，這裡會丟 `SyntaxError`，第 33 行的 `logger.error` 永遠不會執行，HTTP status 也跟著遺失。
 
-  這是 bug，但目前還沒觀察到。發生時的結果：
-  - 多數呼叫端有自己的 try/catch（`message-handler.ts:23-29`、各指令 handler、`with-fresh-calendar-event.ts:38`），會記自己的 error（例如 `Message handler error`）並回「系統錯誤」，事件狀態是「失敗」。但 error 裡只看得到 `fetch failed` 或 JSON 解析錯誤，看不出是哪個 Notion 呼叫、status 多少。
-  - `/logs` 時間軸上那一步只有 request、沒有 response 也沒有錯誤（`log-grouping.ts:103-110` 靠 `Notion API error` 這個訊息把該步標成失敗）。
-  - 沒被接住的路徑（目前主要是「已知問題」裡報名／請假取鎖前那段）才會落到 `event-router.ts:39` 的 `Error handling event`。這種情況沒有回覆，再加上下一項的判斷順序問題，事件會顯示成「警告」而不是「失敗」。
+  這是 log 記錄不完整的 bug，但目前還沒觀察到，而且**不影響使用者**：使用者有沒有收到回覆由呼叫端的 try/catch 決定，沒有任何程式去比對丟出的錯誤訊息。發生時的結果：
+  - 多數指令的呼叫端有自己的 try/catch（`handlers/message-handler.ts:23-29`、各指令 handler、`commands/registration/with-fresh-calendar-event.ts:38`），會記自己的 error（例如 `Message handler error`）並回「系統錯誤」，事件狀態是「失敗」。
+  - **遺失的資訊比想像中少**：pino 的 err serializer 會把 `cause` 串進訊息，實際記到的是 `fetch failed: getaddrinfo ENOTFOUND api.notion.com` 這種完整原因，stack 也有 `at async findByUserId (...)` 之類的 async frame；JSON 解析錯誤的訊息會帶到 body 開頭（`Unexpected token '<', "<html>..." is not valid JSON`）；時間軸上沒配對到回應的那一步也帶著 purpose。真正遺失的只有三樣：HTTP status、該步驟沒被標成失敗、事件卡片沒有「Notion API 失敗」旗標（`routes/logs.ts:596` 的 `groupFlag`）。
+  - `/logs` 時間軸上那一步只有 request、沒有 response 也沒有錯誤，畫面顯示黃色的「尚無回應記錄」（`routes/logs.ts:791-793`）。`routes/log-grouping.ts:103-110` 靠 `Notion API error` 這個訊息把該步標成失敗。
+  - fire-and-forget／非阻塞的路徑遇到這種錯誤時，事件目前顯示「**完成（有降級）**」，不是「失敗」：`trackUser`（`services/user-management.ts:24` 的 `User tracking failed (non-blocking)`）、`trackJoinedMember`（`handlers/member-joined-handler.ts:29`）、`createPersonForNewUser`（`services/user-management.ts:62`）、`buildMemberJoinedWelcome`（`services/welcome-message.ts:79`）。因為沒有 `Notion API error` 行，事件落到 `groupStatus()` 的降級判斷。`docs/logging.md:69` 寫「Notion API 本身回錯時會先被規則 1 判成失敗，不會落到這裡」，這句目前對非 JSON 的 5xx 和網路錯誤不成立。
+  - 沒被接住的路徑（目前主要是「已知問題」裡報名／請假取鎖前那段）才會落到 `handlers/event-router.ts:39` 的 `Error handling event`。這種情況沒有回覆，再加上下一項的判斷順序問題，事件會顯示成「警告」而不是「失敗」。
 
   如果要處理：
-  - 可以用 try/catch 包住 `fetch`，失敗時用**同一個訊息字串** `'Notion API error'` 記 `{method, path, db, durationMs, err}` 再丟出。訊息字串不能改，`log-grouping.ts` 靠它配對。
+  - 可以用 try/catch 包住 `fetch`，失敗時用**同一個訊息字串** `'Notion API error'` 記 `{method, path, db, durationMs, err}` 再丟出。訊息字串不能改，`log-grouping.ts` 靠它配對，而且配對用 method+path 當 key，所以一定要帶 `method`、`path`。重新丟出時要保留原本的錯誤（原樣丟出或放進 `cause`），pino 才能繼續把 `ENOTFOUND` 這類原因串進訊息。
   - `assertOk` 可以改成先 `res.text()`，再試著 `JSON.parse`，失敗就把截斷後的原文當 `err` 記下來。
   - 丟出的 `Error` 訊息目前是 `Notion API error: ${JSON.stringify(err)}`（第 34 行），改法要讓呼叫端拿到的訊息仍然可讀。
+  - `routes/logs.ts:787-789` 已經能處理沒有 `status` 的錯誤行（`typeof status === 'number'` 才顯示 HTTP 碼），網路錯誤的 log 不帶 status 也不用改 `logs.ts`。
+  - **改完之後，上面那幾條非阻塞路徑的事件會從「完成（有降級）」變成「失敗」**，跟現在 Notion 回 JSON 格式的 HTTP 錯誤一致。這是改對了，不是回歸；`docs/logging.md:69`、`:71` 和 `routes/logs.ts:89-90` 的「非 Notion API 錯誤」說法也要到這時才完全成立。
   - 跟 TODO「已知問題」的「報名／請假在取鎖前的 Notion 例外不會回覆使用者」是不同的事：那一項是使用者收不到回覆，這一項是 log 記得不完整，兩者可以分開做。
 
-- [ ] **`/logs` 的事件狀態判斷順序，會把真正的錯誤顯示成「警告」或「降級」。** `src/routes/logs.ts:559-576` 的 `groupStatus()` 依序判斷：
+- [ ] **`/logs` 的事件狀態判斷順序，會把真正的錯誤顯示成「警告」或「降級」。** `routes/logs.ts:559-576` 的 `groupStatus()` 依序判斷：
   1. Notion 步驟錯誤或 LINE 送出失敗 → `error`（第 560-564 行）
   2. 指令類事件從頭到尾沒送出回覆 → `warn`（第 568 行，原意是標示「指令解析失敗、使用者沒收到反應」這種安靜的失敗）
   3. 有降級訊息 → `degraded`（第 569-571 行）
   4. 任何 error／fatal 等級的 log → `error`（第 572-573 行）
 
-  問題在第 2 步排在第 4 步前面：指令處理中途丟出、且沒被 handler 自己的 try/catch 接住（因此沒有回覆）的例外（例如程式 bug、上一項的網路錯誤），`event-router.ts:39` 會記一行 error 等級的 `Error handling event`，但因為沒有回覆，第 2 步先回傳 `warn`，「需要注意」分頁裡看起來跟「指令打錯字」一樣。
+  問題在第 2 步排在第 4 步前面：指令處理中途丟出、且沒被 handler 自己的 try/catch 接住（因此沒有回覆）的例外，`handlers/event-router.ts:39` 會記一行 error 等級的 `Error handling event`，但因為沒有回覆，第 2 步先回傳 `warn`，「需要注意」分頁（`logs.ts:1670`，篩 `status !== 'ok'`）裡看起來跟「指令打錯字」一樣。
 
-  第 3 步排在第 4 步前面則是**刻意的設計**，不是 bug：`buildMemberJoinedWelcome error, using fallback`（`welcome-message.ts:79`）是 `logger.error`，但歡迎訊息有正常送出，所以列進 `DEGRADATION_EXPLANATIONS`（`logs.ts:76-91`），要顯示成「完成（有降級）」而不是「失敗」（`docs/logging.md:73` 也有寫）。
+  受影響的範圍比「所有例外」窄：
+  - 大部分指令 handler 自己的 try/catch 也會接住程式 bug 並回「系統錯誤」，那種情況現在已經是「失敗」。會被誤判的只有沒被接住的區段：報名／請假取鎖前的 `Promise.all`（見「已知問題」），以及 `handlers/message-handler.ts` 在 `findByUserId` 之後到 `routeCommand` 之前那段。
+  - 沒被接住的 Notion **HTTP（JSON）錯誤**不受影響，第 1 步就判成失敗。只有網路錯誤或非 JSON 回應（上一項）才會落到這裡。
+
+  第 3 步排在第 4 步前面則是**刻意的設計**，不是 bug：`buildMemberJoinedWelcome error, using fallback`（`services/welcome-message.ts:79`）是 `logger.error`，但歡迎訊息有正常送出，所以列進 `DEGRADATION_EXPLANATIONS`（`logs.ts:76-91`，物件本體在 84-91 行），要顯示成「完成（有降級）」而不是「失敗」（`docs/logging.md:73` 也有寫）。
 
   這是 `/logs` 的顯示 bug，資料本身沒有少，點進事件還是看得到 error 行。如果要處理：
   - 可以在第 2 步之前加一個 error／fatal 判斷，但**要排除 `DEGRADATION_EXPLANATIONS` 裡的訊息**。不能單純把第 572-573 行整段往前搬，否則上面那個降級會被改判成「失敗」。
-  - 既有的狀態測試在 `src/routes/__tests__/logs.test.ts`（第 274、434、445 行附近，用 `data-status` 斷言），沒有直接測 `groupStatus` 的單元測試。第 445 行的降級測試用的是 info 等級的訊息，改之前要補一個「error 等級的降級訊息仍然是 degraded」的測試，才抓得到回歸。
+  - 排除要**逐行做**：先濾掉降級訊息那幾行，再看剩下的行有沒有 error／fatal。不能寫成「只要事件裡有降級訊息就跳過整個 error 檢查」，否則同時有 `User tracking failed (non-blocking)` 和 `Error handling event` 的指令事件還是會被判成 `warn`。
+  - 既有的狀態測試在 `routes/__tests__/logs.test.ts`，用 `data-status` 斷言，沒有直接測 `groupStatus` 的單元測試（`groupStatus` 沒有 export）：
+    - 第 250-271 行附近：依 log 等級判成 error（第 259 行 `level: 50` 的 `'boom'`，第 270 行斷言）。這個測試直接涵蓋第 4 步，改判斷順序時最需要確認。
+    - 第 274 行起的測試（第 298 行斷言）、第 434 行起的解析失敗 → `warn`（第 442 行斷言）、第 445 行起的降級（第 455 行斷言）。
+    - 降級測試用的是 info 等級的 `Could not get user profile`（第 448 行 `level: 30`）。改之前要補一個「error 等級的降級訊息仍然是 degraded」的測試，才抓得到回歸。
   - 改完要同步 `docs/logging.md` 的狀態判定說明。
 
-- [ ] **只有 `LOG_LEVEL=info` 才會發生：所有文字訊息都被判成「指令」，其中沒命中自動回覆的（多數閒聊）再被標成「警告」。** `src/routes/logs.ts:448` 的 `groupKind()`，在沒有 debug 層的 `Routing command`／`Auto-reply lookup` 時，改用「這個事件有沒有 Notion 呼叫」判斷是不是指令。但 `handlers/message-handler.ts:24` 對每則文字訊息都會 `findByUserId`，群組訊息還會觸發 `trackUser` 的累加發言數 PATCH，所以閒聊一定有 Notion 呼叫，被判成指令；沒命中自動回覆的閒聊沒有回覆，再被第 568 行標成 `warn`。命中自動回覆的有送出回覆，不會是警告，但「來自」欄位會顯示未知。
+- [ ] **只有 `LOG_LEVEL=info` 才會發生：所有文字訊息都被判成「指令」，其中沒命中自動回覆的（多數閒聊）再被標成「警告」。** `routes/logs.ts:448` 的 fallback（`groupKind()` 宣告在第 435 行），在沒有 debug 層的 `Routing command`／`Auto-reply lookup` 時，改用「這個事件有沒有 Notion 呼叫」判斷是不是指令。但 `handlers/message-handler.ts:24` 對每則文字訊息都會 `findByUserId`，群組／多人聊天室（room）訊息還會觸發 `trackUser`（第 35 行）的累加發言數 PATCH，所以閒聊一定有 Notion 呼叫，被判成指令；沒命中自動回覆的閒聊沒有回覆，再被第 568 行標成 `warn`。命中自動回覆的有送出回覆，不會是警告，但「來自」欄位會顯示「（未知，需要 LOG_LEVEL=debug）」（`logs.ts:547`）。非文字訊息在 `message-handler.ts:11` 就 return，沒有 Notion 呼叫，不受影響。
 
-  正式環境是 debug，現在**不會發生**，因為第 444-447 行會先命中 debug 訊息。風險是之後改回 info 的那一刻（ADR 0005「現況」段），「需要注意」分頁會被閒聊洗版。另外，`logs.ts:433` 的註解寫「單純聊天不會查 Notion」，這句與程式不符（`docs/logging.md` 同一句已在 2026-09-28 修正）：程式從第一版（commit `23c32a1`）起就對每則訊息查 USERS，所以這句註解寫下時就不成立。
+  正式環境是 debug，現在**不會發生**，因為第 444-447 行會先命中 debug 訊息。風險是之後改回 info 的那一刻（ADR 0005「現況」段第 35 行也列了這一點），「需要注意」分頁會被閒聊洗版。另外，`logs.ts:433` 的註解寫「單純聊天不會查 Notion」，這句與程式不符（`docs/logging.md:45` 同一句已在 2026-09-28 的 commit `b1ef62f` 修正）：程式從第一版（commit `23c32a1`）起就對每則文字訊息查 USERS，這句註解是之後（`80c38e7`）才加的，寫下時就不成立。
 
-  如果要處理：可以在 `message-handler.ts` 加一行 info 摘要，例如 `{isCommand, commandType, parsed}`，不含訊息原文（ADR 0005），`groupKind()` 改看這一行。舊的 log 檔沒有這行，所以第 448 行的 fallback 要保留給舊檔。
+  如果要處理：
+  - 可以在 `message-handler.ts` 加一行 info 摘要，例如 `{isCommand, commandType, parsed}`，`groupKind()` 改看這一行。依 ADR 0005，這行不能含訊息原文，也不能含 userId。
+  - 這行要放在所有分支之前，才能涵蓋解析失敗的 early return（第 44-47 行）和管理員略過自動回覆的 return（第 54-57 行）。
+  - **只改 `groupKind()` 不夠**：`groupOrigin()`（`logs.ts:540-547`）靠 `Routing command` 的 `command.type` 決定「來自」欄位，也要改成讀新的摘要行，不然改回 info 後指令事件的「來自」還是顯示未知。
+  - 舊的 log 檔沒有這行，所以第 448 行的 fallback 要保留給舊檔。
 
-- [ ] **mutex 沒有記排隊多久、鎖持有多久。** `src/services/mutex.ts:32-68` 的 `withMutex` 只在逾時時記一行 warn（第 74-77 行，只有 `{key}`），正常情況完全沒有 log。
+- [ ] **mutex 沒有記排隊多久、鎖持有多久。** `services/mutex.ts:32-68` 的 `withMutex` 只在逾時時記一行 warn（第 74-77 行，只有 `{key}`），正常情況完全沒有 log。
 
   不是 bug。影響是：
   - 兩人同時報名、名額算錯或逾時的時候，看不出前面排了幾個、等了多久。
-  - TODO「回覆訊息在鎖內組」那一項的鎖持有時間，只能用「鎖內第一個 calendar query 開始」到「`LINE reply sent`」間接推算。做了這一項，那一項改完後就能直接比對效果。
+  - TODO「報名／請假的回覆訊息在鎖內組」那一項的鎖持有時間，只能用「鎖內第一個 calendar query 開始」到「`LINE reply sent`」間接推算。做了這一項，那一項改完後就能直接比對效果。
 
   如果要處理：
-  - 可以在任務**真正結束**時記一行摘要，欄位如 `{key, queuedAhead, waitMs, heldMs, callerTimedOut}`，掛在 `settle` 完成的地方（第 43-46 行的 `tail`），不要掛在 caller 的 `finally`（第 60 行）。逾時後 caller 早就離開，但 `fn()` 還在背景跑（ADR 0002），掛在 caller 那邊會量到錯的持有時間。建議記一行摘要，不要分 acquire／release 兩行，量比較小。
+  - 可以在任務**真正結束**時記一行摘要，欄位如 `{key, queuedAhead, waitMs, heldMs, callerTimedOut}`。掛在 `tail` 完成的地方（`tail` 在第 43-46 行，第 54-56 行已經有一個 `void tail.then(...)` 負責清 `queues`，可以掛在那裡），不要掛在 caller 的 `finally`（第 60 行）。逾時後 caller 早就離開，但 `fn()` 還在背景跑（`mutex.ts:22-27` 註解、ADR 0002），掛在 caller 那邊會量到錯的持有時間。建議記一行摘要，不要分 acquire／release 兩行，量比較小。
+  - 只在 `tail` 加一行 log 不夠：`waitMs`／`heldMs` 要知道 `fn()` 什麼時候開始，得改第 39 行的 `settle`（例如 `.then(() => { startedAt = Date.now(); return fn(); })`）；`callerTimedOut` 要讓 `raceAgainstTimeout`（第 70-82 行）和 `tail` 共用一個旗標。
   - `queuedAhead` 若直接讀第 33 行加一前的 `pending`，會少算已逾時、但 `fn()` 仍在排隊或執行的任務（`pending` 在 caller 的 `finally` 就減一，第 60-67 行），而逾時正是最需要這個數字的情境。要準確的話，另外維護一個在 `tail` 完成時才減一的計數。
-  - **`user-track-${userId}` 這種 key 含 userId**（`user-management.ts` 的 `trackUser`），而且每則群組訊息都會觸發一次。這類 key 如果要記，要放 debug 或完全不記，不然 info 層會帶 userId，量也大。日期 key（`2026-10-03`）每次報名／請假才一行，可以放 info。
+  - **不能順手改 `pending` 減一的時機**：`isLocked()`（第 84-86 行）讀的就是 `pending`，`services/user-management.ts:86` 用它判斷能不能信任 `knownUser` 快照，`services/__tests__/mutex.test.ts:229-242` 也鎖住了「`isLocked` 反映的是還有沒有 caller 在等，不是背景任務還在不在跑」這個語意。改了會打掛測試，也會改變 `trackUser` 的快照信任邏輯。
+  - **`user-track-${userId}` 這種 key 含 userId**（`services/user-management.ts:72`，`_trackUserAsync` 內），群組／room 的每則帶 userId 的文字訊息都會觸發一次，新成員加入（`trackJoinedMember`）也用同一個 key。這類 key 如果要記，要放 debug 或完全不記，不然 info 層會帶 userId，量也大。日期 key（`2026-10-03`）只有 `withFreshCalendarEvent` 用（`with-fresh-calendar-event.ts:23`），每次報名／請假才一行，可以放 info。
   - 逾時的 warn 可以一起補上 `queuedAhead`。
+  - 逾時的情況下，摘要 log 會在 caller 那個事件已經 `Event processed` 之後才寫出。reqId 相同所以還是歸在同一個事件，但在時間軸上會排在最後面。
+  - 測試：`createTestBot` 把 `withMutex` 整個 mock 掉（`test-utils/create-test-bot.ts:196-199`，直接執行 `fn`），handler 層的測試看不到新 log，要測只能寫在 `services/__tests__/mutex.test.ts`。
 
-- [ ] **報名／請假只有成功路徑有 info 摘要，被拒絕或 no-op 的分支沒有。** 成功時有 `Registration updated`（`registration-handler.ts:90-99`）和 `Leave status updated`（`leave-handler.ts:108-116`）。以下分支都只有 LINE 回覆，沒有自己的 log：
-  - 報名鎖內被拒：`registration-handler.ts:73-85`（`result.canAdd === false`，包含名額不足、活動暫停、找不到報名紀錄、取消數量 ≤0，見 `capacity-calculator.ts:107,120,188,197`）
+- [ ] **報名／請假只有成功路徑有 info 摘要，被拒絕或 no-op 的分支沒有。** 成功時有 `Registration updated`（`commands/registration/registration-handler.ts:90-99`）和 `Leave status updated`（`commands/registration/leave-handler.ts:108-116`）。以下分支都只有 LINE 回覆，debug 層也沒有自己的 log：
+  - 報名鎖內被拒：`registration-handler.ts:73-85`（`result.canAdd === false`，包含活動暫停、名額不足、找不到報名紀錄、取消數量為 0，分別見 `services/capacity-calculator.ts:107,120,188,197`，涵蓋全部 `canAdd: false` 的路徑）。注意 `+0` 也會走取消路徑（`registration-handler.ts:67` 判斷 `delta > 0`），所以會被判成「找不到報名紀錄」或「取消數量需大於 0」，不是報名被拒。
   - 請假已請假、未請假的 no-op：`leave-handler.ts:74-86`、`88-100`
-  - 找不到下週六的活動：`with-fresh-calendar-event.ts:29-31`（報名、請假共用）
+  - 找不到下週六的活動：`commands/registration/with-fresh-calendar-event.ts:29-31`（報名、請假共用）
   - 取鎖前的拒絕：`registration-handler.ts:28-54`（格式錯誤、不是管理員、找不到對象、找不到季租資料）、`leave-handler.ts:28-63`（同上，再加非季租成員）
 
-  在正式環境（debug）**不是缺口**：被拒原因看 `LINE reply payload`，季度看 Season query 的 request body，寫入內容看 Notion PATCH body，大多可以反推，只是要一個一個點開 debug 行，比較費工。
+  `with-fresh-calendar-event.ts:33-39` 的逾時和一般錯誤兩個分支已經有 warn／error，不用重複記。
+
+  在正式環境（debug）**不是缺口**：被拒原因看 `LINE reply payload`（`services/line/reply-service.ts:35-38`），季度看 Season query 的 request body（`services/notion/notion-fetch.ts:55`），寫入內容看 Notion PATCH body，大多可以反推，只是要一個一個點開 debug 行，比較費工。
 
   以下情況價值會提高：之後改回 info 時（見 ADR 0005「現況」段），或想用封存的 log 做季末對帳時。
 
@@ -205,20 +228,46 @@
     - `date`、`seasonName`、`isSelfSeasonMember`、`isAdmin`
     - `requestedDelta`、`cappedAt`
     - 容量數字：`courts`、`totalSlots`、`guestCountBefore`／`After`
-    - 只放本次新增／移除的條目
-  - 容量數字都在 `occupancy` 裡，不用改 calculator。
-  - 想記目標是怎麼解析出來的（本人／mention／姓名 fallback），`resolveTarget` 要多回傳一個欄位，`target-resolver.ts` 的三條路徑都要改，測試也要跟著改。
-  - 完整名單和姓名放 debug 就好；目前正式環境是 debug，放 info 沒有額外好處，只會讓改回 info 時多一處要處理的 PII。
+  - 欄位依分支取得到的為準：格式錯誤和「不是管理員」這兩支在 `date`（第 38 行）、`seasonName`（第 41 行）算出來之前就 return；請假過了第 58 行之後 `isSelfSeasonMember` 恆為 true；報名的 `isSelfSeasonMember` 在 `personPageId` 是空字串時為 false（`target-resolver.ts:34`）。
+  - 不用改 calculator，但數字來源不只 `occupancy`：`occupancy`（`services/notion/event-occupancy.ts:7-16`）只有**寫入前**的 `courts`、`totalSlots`、`remainingSlots`、`presentSeasonMembers`。請假後的名額是 handler 自己算的（`leave-handler.ts:122-123` 的 `newTotalSlots`／`newPresentSeasonMembers`），報名後人數是 `updatedGuests.length`。
+  - `CapacityResult` 沒有「本次新增的條目」，只有整份 `newGuests` 和 `removedGuests`（`capacity-calculator.ts:17-24`、`:207`）。新增的條目要用 `newGuests.slice(freshEvent.guests.length)` 取，這依賴第 147 行 `[...event.guests, ...newEntries]` 的順序。
+  - 「找不到活動」這支在共用 wrapper 裡：wrapper 把 `EventNotFoundError` 吃掉並回傳 `void`，handler 看不到，也拿不到 `delta`、`seasonName` 這些欄位。要記這支，只能在 wrapper 裡用 `context` 參數記一行較簡單的摘要，或改 wrapper 的介面。
+  - 想記目標是怎麼解析出來的，`resolveTarget` 要多回傳一個欄位。結果其實有四種：本人、mention、mention 在 USERS 查無後改用姓名查（`target-resolver.ts:45`，parser 在 mention 時會同時帶 `targetName`，見 `registration-parser.ts:42-46`）、直接用姓名。`target-resolver.ts` 的三條路徑（27-35、37-46、48-52 行）都要改，`target-resolver.test.ts:36,45,61` 用 `toEqual` 斷言整個物件，也要跟著改。
+  - **條目、完整名單和姓名都放 debug**：零打條目本身就是姓名（`{Name}的朋友 (2)`，`capacity-calculator.ts:136,144`），放 info 就是把姓名放 info。現有 info 的 `targetDisplayName`（`registration-handler.ts:94`、`leave-handler.ts:112`）已經列在 ADR 0005 第 37 行的待決 PII，如果想放 info，要跟它一起決定。目前正式環境是 debug，放 info 沒有額外好處，只會讓改回 info 時多一處要處理的 PII。
 
 - [ ] **小項彙整（低優先，各自獨立，不是 bug 或影響很小）：**
-  - **週報中止分不出原因。** `services/notion/event-occupancy.ts:27` 在「沒有活動」或「沒有季資料」時都回 `null`，`weekly-push.ts:30` 只記 `Weekly push aborted: no calendar/season data for date`。debug 層可以從 Calendar／Season query 的 response 看出哪個是空的，所以正式環境查得到。如果要處理：可以在第 27 行 return 前記 `{date, hasEvent, hasSeason}`。這也能解釋 ADR 0008 最後一段 `@Dobby next` 誤導訊息的那個情況。
-  - **沒記 webhook 延遲。** `handlers/event-router.ts:17-20` 的 `Processing event` 沒有 `Date.now() - event.timestamp`。replyToken 失效或 Pi 積壓時，看不出事件是不是很晚才處理。如果要處理：加 `lagMs` 欄位，不含 PII，可以放 info。
-  - **沒有 userId 的訊息直接丟掉，沒有 log。** `handlers/message-handler.ts:15` `if (!userId) return;`。LINE 群組來源在某些情況可能不帶 userId（未確認是哪些用戶端），發生時使用者會覺得 bot 沒反應，但 log 只有 `Processing event` 跟 `Event processed`。如果要處理：return 前記一行 `{sourceType}`。
-  - **新使用者建立完成沒有摘要。** `services/user-management.ts:91-102` 建 USERS、建 People、連結三步都沒有成功 log，只有同名略過（第 57 行）和失敗（第 62 行）有 warn。debug 層看得到每個 Notion 呼叫的 body，可以反推。如果要處理：記一行 `{usersPageId, personLink: 'created'|'same-name-skipped'|'failed'}`，userId 放 debug。
-  - **display-name 批次的統計會誤導。** `schedulers/display-name-update.ts:66` 的 summary 有 `updated/skipped/failed/total`，但「名稱沒變」（第 52 行條件不成立）和「沒有 userId」（第 36 行 `continue`）的人算進 `total`，卻不在任何一個計數裡。`/logs` 的批次結果圖只按有記錄的欄位畫比例，30 人只更新 1 人也會顯示 100% 綠色。如果要處理：補 `unchanged`、`noUserId` 兩個計數。另外，USERS `groups` 殘留的測試群組 ID 每週都會讓 `profile-service.ts:32` 記 `Could not get user profile`（該使用者所有群組都查不到時，再加第 47 行的 warn），這是降級訊息，事件每週都顯示成「完成（有降級）」，真的出問題時會被蓋掉；比較好的做法是清掉殘留的群組 ID，不是降低 log 等級。
-  - **同一事件裡兩個相同的 Notion 呼叫會被誤判成重試。** `routes/log-grouping.ts:35-37` 用 `method + path` 當配對 key，第 59-76 行遇到同 key 還沒回應的呼叫就當成重試（`attempts += 1`）。同一個 reqId 裡並行發出兩個 method＋path 相同的呼叫時（對同一個 DB 的 query 路徑都是 `POST /databases/{id}/query`，不管查詢條件；例如同一人快速連發訊息，`trackUser` 的鎖內重查剛好撞上 `resolveTarget` 查被 mention 對象的 USERS query），時間軸會顯示「重試 1 次」，另外多一筆沒配對到的 response。只影響顯示。如果要處理：可以讓 `notion-fetch.ts` 每次呼叫產生一個 `callId`（做法同 ADR 0005 補充段的 LINE `sendId`），`log-grouping.ts` 改用它配對；舊 log 檔沒有 `callId`，要保留 method+path 的 fallback。
-  - **事件的「使用者」欄位抓群組裡第一個符合的值。** `routes/logs.ts:473-486` 的 `groupUserId`／`groupDisplayName` 各自抓第一筆有 `userId`／`targetDisplayName` 的 log。管理員代報 `+1 @X` 時，userId 是管理員、姓名卻是被報名的 X，兩者對不起來；display-name 排程會把批次中第一筆帶 userId／displayName 的 log 對應的使用者顯示成「使用者」。只影響顯示。
-  - **兩個會誤導的 log 文字。** `services/line/reply-service.ts:43` 的訊息 `Reply failed, no fallback available (no groupId for push)` 暗示有 push 備援的可能，但依 `CLAUDE.md` 永遠不會用 push 補發；這個字串也寫死在 `routes/log-grouping.ts:30`，`docs/logging.md:76` 也有引用，改的時候三處要一起改，否則 `/logs` 會配對失敗。另外，`services/notion/users-repository.ts:30` 的 purpose「查詢發話者的 bot 使用者帳號」，也被用在查被 mention 的目標（`target-resolver.ts:38`）和 `trackUser` 的鎖內重查（`user-management.ts:89`），時間軸上的標籤不精確。
-  - **沒有 `unhandledRejection`／`uncaughtException` handler。** `src/index.ts` 沒有註冊，process 因此 crash 時 stack 只在 docker 的 json-file log（上限約 30MB，見 `docs/overview.md:104`），不在 `logs/`，`/logs` 看不到。如果要處理：要注意 pino 在 process 結束前可能來不及 flush 到檔案。
+  - **週報中止分不出原因。** `services/notion/event-occupancy.ts:27` 在「沒有活動」或「沒有季資料」時都回 `null`，`schedulers/weekly-push.ts:30` 只記 `Weekly push aborted: no calendar/season data for date`。debug 層可以從 Calendar／Season query 的 response 看出哪個是空的，所以正式環境查得到。如果要處理：
+    - 可以在第 27 行 return 前記 `{date, hasEvent, hasSeason}`。這也能讓管理員在 `/logs` 查到 ADR 0008 最後一段 `@Dobby next` 誤導訊息（`commands/next-event.ts:19-21`）的真正原因；使用者收到的回覆還是一樣誤導，要另外改。
+    - `getEventOccupancy` 還有報名（`registration-handler.ts:62`）、請假（`leave-handler.ts:69`）、`next-event.ts:17` 三個呼叫端，新 log 會出現在這四種事件裡。報名／請假事先確認過 season 不是 null，null 只代表沒有活動。
+    - **log 等級用 info，不要用 warn**：`routes/logs.ts:574` 會掃所有 log 行的等級，用 warn 的話報名「找不到活動」和 `next` 事件都會被標成「警告」。
+  - **沒記 webhook 送達延遲。** `handlers/event-router.ts:17-20` 的 `Processing event` 只有 `type/sourceType/webhookEventId/isRedelivery`，沒有 `Date.now() - event.timestamp`。`routes/webhook.ts` 先回 200 就馬上處理，所以 `Processing event` 幾乎是收到 webhook 的當下；Pi 端處理慢可以從 `Event processed` 的 `durationMs`（第 37 行）看。缺的是「LINE 送到 Pi 花了多久」，replyToken 會不會失效要看 `lagMs + durationMs`。如果要處理：
+    - 加 `lagMs` 欄位，不含 PII，可以放 info。它量到的是 LINE→Pi 的延遲、Pi 的時鐘偏差，以及同一個 webhook 裡多個事件依序處理時（第 9-11 行的 for-await）後面事件的排隊時間。
+    - 重送事件（`isRedelivery=true`）的 `event.timestamp` 是原始發生時間，`lagMs` 本來就會很大，要搭配 `isRedelivery` 判讀。Pi 沒有 NTP 校時的話可能出現負值或固定偏移。
+    - 未實測的替代方案：`webhookEventId` 是 ULID，含毫秒時間戳，而它已經記在 info，理論上現有 log 就能事後算出延遲。
+  - **沒有 userId 的訊息直接丟掉，info 層沒有 log。** `handlers/message-handler.ts:15` `if (!userId) return;`。LINE 群組來源在某些情況可能不帶 userId（未確認是哪些用戶端），發生時使用者會覺得 bot 沒反應。info 層只有 `Processing event` 跟 `Event processed`；正式環境的 debug 層還有 `Processing event detail`（`event-router.ts:21`），裡面有完整的 `source`，看得出沒有 userId，所以**現在查得到**，只是要手動點開。如果要處理：return 前記一行標明「因為沒有 userId 而丟棄」（`sourceType` 已經在 `Processing event` 裡）。第 11 行 `message.type !== 'text'` 的 return 同樣沒有 log，兩者在 info 層分不出來。
+  - **新使用者建立完成沒有摘要。** `services/user-management.ts:91-102` 建 USERS、建 People、連結三步都沒有成功 log，只有 People 同名略過（第 57 行）和 People 建立失敗（第 62 行）有 warn。USERS 的 create/update 失敗不走第 62 行：走 `trackUser` 時由第 24 行的 `User tracking failed (non-blocking)` 記，走 `trackJoinedMember`（`handlers/member-joined-handler.ts:27`）時往上丟給呼叫端。debug 層看得到每個 Notion 呼叫的 body，可以反推。如果要處理：
+    - 記一行 `{usersPageId, personLink: 'created'|'same-name-skipped'|'failed'}`，userId 放 debug。
+    - `createPersonForNewUser` 在同名略過和建立失敗都回 `null`（第 58、63 行），要分出 `same-name-skipped`／`failed` 得先改它的回傳形狀，不能只看是不是 null。
+    - 這段在 memberJoined 事件也會跑，摘要會出現在兩種事件裡。
+  - **display-name 批次的統計會誤導。** `schedulers/display-name-update.ts:66` 的 summary 有 `updated/skipped/failed/total`，但「名稱沒變」（第 52 行條件不成立）和「沒有 userId」（第 36 行 `continue`）的人算進 `total`，卻不在任何一個計數裡。`/logs` 的批次結果圖（`routes/logs.ts:681-695` 的 `computeBatch`）排除 `total`，只拿其他數字欄位畫比例，30 人只更新 1 人也會顯示 100% 綠色、「1 / 1」。`logs.ts:677` 的註解假設「total 是其他欄位加總」，這個假設本身不成立。如果要處理：
+    - 補 `unchanged`、`noUserId` 兩個計數。`computeBatch` 會自動收數字欄位，名稱不含 fail／success 之類關鍵字的會畫成灰色，不用改 `logs.ts`；順便修正第 677 行的註解。
+    - 另一個問題：USERS `groups` 殘留的測試群組 ID，每週都會讓 `services/line/profile-service.ts:32` 記 `Could not get user profile`（該使用者所有群組都查不到時，再加 `schedulers/display-name-update.ts:47` 的 `Could not resolve profile for user in any known group` warn）。這是降級訊息，事件每週都顯示成「完成（有降級）」。Notion API 錯誤和 LINE 送出失敗仍會顯示「失敗」（`groupStatus` 第 1 步先判），會被降級蓋掉的只有非 Notion 的 `logger.error`（例如第 58 行）和第 47 行的 warn。
+    - 比較好的做法是清掉殘留的群組 ID，不是降低 log 等級。但**清掉不保證事件變回綠色**：使用者退出的群組查 profile 也會 404（`display-name-update.ts:7-9` 註解），只要那個群組排在清單前面就會再記一次；如果 bot 還在那個測試群組，使用者在裡面發言時 `trackUser`（`user-management.ts:108-110`）會把群組 ID 加回去。
+  - **同一事件裡兩個相同的 Notion 呼叫會被誤判成重試。** `routes/log-grouping.ts:35-37` 用 `method + path` 當配對 key，第 59-76 行遇到同 key 還沒回應的呼叫就當成重試（`attempts += 1`）。對同一個 DB 的 query 路徑都是 `POST /databases/{id}/query`，不管查詢條件。實際情境：管理員前一則訊息的 `trackUser`（fire-and-forget）還握著 `user-track-${userId}` 鎖時，又送出 `+1 @X`。第二則的 `trackUser` 因為 `isLocked` 不信任快照（`user-management.ts:86`），拿到鎖後在第 89 行重查 USERS；同時第二則的 `resolveTarget`（`commands/registration/target-resolver.ts:38`）也在查 USERS。`withMutex` 的 `prev.then(() => fn())` 是在第二則的 context 註冊的，所以**兩個呼叫都屬於第二則訊息的 reqId**。`+1 @X` 只有管理員能用，實際上很少見。只影響顯示，但錯亂比「重試 1 次」更多：
+    - 第二個呼叫的 `Notion API request payload` 會蓋掉該列的 `requestPayload`（第 81 行），那一列會顯示「第一個呼叫的 purpose＋第二個呼叫的 body＋第一個 response」。
+    - 另外多一筆沒配對到的 response 和 response payload（第 99-100 行）。
+
+    如果要處理：可以讓 `notion-fetch.ts` 每次呼叫產生一個 `callId`（做法同 ADR 0005 補充段的 LINE `sendId`），`log-grouping.ts` 改用它配對；舊 log 檔沒有 `callId`，要保留 method+path 的 fallback。**429 重試是遞迴呼叫 `request()`（`notion-fetch.ts:67`）**，`callId` 要在最外層產生、透過參數往下傳，`Notion API rate limited, retrying`（第 65 行）也要帶上；否則每次重試拿到不同的 callId，真正的重試會被拆成獨立的呼叫，「重試 N 次」旗標反而消失。
+  - **事件的「使用者」欄位抓群組裡第一個符合的值。** `routes/logs.ts:473-486` 的 `groupUserId` 抓第一筆有 `userId` 的 log，`groupDisplayName` 抓第一筆的 `targetDisplayName ?? displayName`（第 482 行）。「第一筆」是 `flattenEntries`（`logs.ts:361-387`）的順序：start、Notion steps，最後才是 misc，不是時間順序。只影響顯示，但兩欄可能對不起來：
+    - 管理員代報 `+1 @X` 時，userId 來自 `message-handler.ts:31` 的 debug `handleMessage`，是管理員本人；姓名來自 `targetDisplayName`（只出現在 `registration-handler.ts:94`、`leave-handler.ts:112`），是被報名的 X。
+    - display-name 排程裡，第一筆帶 userId 的 log 和第一筆帶 displayName 的 log 可能屬於不同的人（例如 A 先記了只有 userId 的 `Skipping…`，B 的 profile detail `profile-service.ts:29` 才有 displayName），顯示的名字和 ID 根本不是同一人。
+
+    如果要處理：可以讓兩欄從同一筆 log 取值（例如指令事件都取 `handleMessage` 那一行的發話者），代報對象另外顯示成「對象」；批次排程本來就沒有單一使用者，可以不顯示這欄。
+  - **兩個會誤導的 log 文字。**
+    - `services/line/reply-service.ts:43` 的訊息 `Reply failed, no fallback available (no groupId for push)` 暗示有 push 備援的可能，但依 `CLAUDE.md` 永遠不會用 push 補發。這個字串寫死在 `routes/log-grouping.ts:30`，`docs/logging.md:76` 引用它的前綴，測試也寫死（`services/line/__tests__/reply-service.test.ts:124`、`routes/__tests__/log-grouping.test.ts:101,153`、`routes/__tests__/logs.test.ts:289-300`），改的時候要一起改。**`log-grouping.ts` 要同時認新舊兩個字串**：舊 log 檔（本機保留 7 天、R2 備份）還是舊字串，只認新字串的話，舊事件的回覆失敗會配對不到，從「失敗」降成「警告」。
+    - `services/notion/users-repository.ts:30` 的 purpose「查詢發話者的 bot 使用者帳號」，也被用在查被 mention 的目標（`commands/registration/target-resolver.ts:38`）和 `trackUser` 的鎖內重查（`services/user-management.ts:89`；在 memberJoined 路徑查的是新加入的成員，也不是發話者），時間軸上的標籤不精確。如果要處理：`withPurpose`（`utils/request-context.ts:25-26`）是內層蓋掉外層，在呼叫端再包一層沒有用，會被 `findByUserId` 自己那層覆蓋；只能加參數，或拆成另一個函式。
+  - **沒有 `unhandledRejection`／`uncaughtException` handler。** `src/index.ts` 只註冊了 SIGTERM／SIGINT（第 103-104 行），啟動用的 async IIFE（結尾在第 110 行）也沒有 `.catch`。process 因此 crash 時（Node 22 遇到 unhandled rejection 預設會 crash），stack 只在 docker 的 json-file log（`docker-compose.yml:19-20` 的 `10m × 3`，約 30MB，見 `docs/overview.md:104`），不在 `logs/`，`/logs` 看不到。正式環境跑 debug，stdout 量大，30MB 保留的時間比 info 短，crash 後要趁早看 `docker compose logs`。如果要處理：
+    - 一旦註冊 handler，Node 就不會自動結束 process。handler 記完 log 後必須自己 `process.exit(1)`，否則 process 會帶著不確定的狀態繼續跑。
+    - pino 在 process 結束前可能來不及 flush 到檔案，要先 flush 再 exit。
 
 ---
