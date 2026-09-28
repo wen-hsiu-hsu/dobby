@@ -105,6 +105,8 @@ Pi 上另外跑了一套通用的監控 stack（跟 Cloudflare Tunnel、pi-deplo
 
 **正式環境（Pi）常駐 `LOG_LEVEL=debug`**（2026-09-28 決定，在 Pi 的 `.env` 設定；`src/config/env.ts` 的程式預設值仍是 `info`）。`notion-fetch.ts` 打 Notion API 的完整 request/response、LINE 回覆/推播全文、userId/groupId、使用者訊息原文都只在 `debug` level 才會記錄，常駐 debug 代表這些內容（含成員姓名、LINE user_id 等 PII）會一直寫進 `logs/`，有啟用 R2 時也會上傳備份。這是刻意接受的取捨：社團規模小、`/logs` 需要 `LOGS_ACCESS_TOKEN`，換到的是出問題時不用重現就能直接從 log 查出原因。程式裡 info/debug 的分層仍然保留，切到 `info` 時 `/logs` 畫面不會空白；但改回 `info` 前要先看 [ADR 0005](adr/0005-purpose-context-layered-on-reqid.md) 的「現況」段，有幾個在 info 層才會出現的問題要先處理。
 
+**process crash 的 stack 會寫進 `logs/`。** `src/index.ts` 在啟動流程之前呼叫 `registerCrashHandlers()`（`src/utils/crash-handlers.ts`），`uncaughtException`、`unhandledRejection`，以及啟動用的 async IIFE 失敗（`.catch`），都會記一行 fatal（`Uncaught exception, exiting`／`Unhandled promise rejection, exiting`／`Startup failed, exiting`，`err` 帶 stack）。接著用 `flushLogsSync()`（`src/utils/logger.ts`）把還排在記憶體裡的 log 同步寫進檔案，再 `process.exit(1)`，由 `restart: unless-stopped` 重啟。一定要自己 exit：註冊了這兩個 handler，Node 就不會自動結束 process，不 exit 會帶著不確定的狀態繼續跑。要先 flush 是因為 pino-roll 的檔案 stream 是非同步寫入，實測直接 exit 會丟掉排隊中的行（細節見 `flushLogsSync` 的註解）。在 `/logs` 上，沒有 reqId 的 crash 是一筆「系統」事件，在某次事件處理中丟出的可能帶著那次的 reqId、出現在那個事件裡，兩種都因為 fatal 等級顯示「失敗」。`initLogger()` 完成之前的 crash（例如 log 目錄建不起來）只會寫到 stdout，這時要看 `docker compose logs`（上面說的 json-file log，約 30MB 保留量，正式環境跑 debug 時 stdout 量大，舊的內容很快會被輪替掉）。
+
 **千萬不要對正在跑的容器直接 `rm` log 檔案。** `pino-roll` 在 `initLogger()`（`app.listen()` 之前就跑）就已經開好檔案控制代碼在寫入；在 Linux 上刪除一個程式還握著在寫的檔案，只會拿掉目錄裡的檔名，process 完全不知道、還是會繼續往那個已經沒有名字的 inode 寫下去。結果是：`docker compose logs app` 明明看得到 bot 還在正常處理流量，但 `logs/` 資料夾用 `ls` 看是空的，`/logs` 頁面也是空的——因為它是靠掃檔名找資料，掃到的是空資料夾。想確認是不是踩到這個雷，進容器看一下 process 手上還握著哪些檔案：
 
 ```bash

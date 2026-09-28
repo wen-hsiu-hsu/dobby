@@ -6,6 +6,7 @@ import { initLogger, logger } from './utils/logger.js';
 import { healthRouter } from './routes/health.js';
 import { webhookRouter } from './routes/webhook.js';
 import { createLogsRouter } from './routes/logs.js';
+import { logFatalAndExit, registerCrashHandlers } from './utils/crash-handlers.js';
 
 // We anchor LOG_DIR here — the single entry point — rather than in each
 // util module, and pass it down as a parameter to everything that needs it.
@@ -58,6 +59,9 @@ const errorHandler: express.ErrorRequestHandler = (err, req, res, next) => {
 app.use(errorHandler);
 
 if (env.NODE_ENV !== 'test') {
+  // 在啟動流程之前註冊，initLogger 之前的 crash 也會記到（那時只寫 stdout）。
+  registerCrashHandlers();
+
   (async () => {
     await initLogger(LOG_DIR);
 
@@ -107,5 +111,9 @@ if (env.NODE_ENV !== 'test') {
     const { startDisplayNameUpdate } = await import('./schedulers/display-name-update.js');
     startWeeklyPush();
     startDisplayNameUpdate();
-  })();
+  })().catch((err: unknown) => {
+    // 啟動做到一半失敗（例如某個動態 import 丟例外），服務可能只起了一部分
+    // （排程沒啟動、或還沒 listen），不要帶著半套狀態繼續跑。
+    logFatalAndExit(err, 'Startup failed, exiting');
+  });
 }
