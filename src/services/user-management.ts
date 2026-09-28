@@ -45,22 +45,31 @@ async function resolveNewUserName(userId: string, context: TrackContext, display
 }
 
 /**
+ * `personLink` 是寫進「New user created」摘要 log 的結果，同名略過和建立失敗都沒有
+ * personPageId，只看有沒有 pageId 分不出是哪一種，所以回傳時明確標出來。
+ */
+type PersonLinkResult =
+  | { personLink: 'created'; personPageId: string }
+  | { personLink: 'same-name-skipped' }
+  | { personLink: 'failed' };
+
+/**
  * Never links to an existing same-name person: it could be a different player, and the
  * link would hand the new user that player's season membership and leave rights.
  * Failures don't block the USERS write; the user just stays unlinked (no retry, since
  * they're no longer "new" next time).
  */
-async function createPersonForNewUser(userId: string, name: string): Promise<string | null> {
+async function createPersonForNewUser(userId: string, name: string): Promise<PersonLinkResult> {
   try {
     const sameName = await peopleRepo.findByName(name);
     if (sameName) {
       logger.warn({ userId, personPageId: sameName.pageId }, 'People list already has this name, skipped auto-link');
-      return null;
+      return { personLink: 'same-name-skipped' };
     }
-    return (await peopleRepo.create(name)).pageId;
+    return { personLink: 'created', personPageId: (await peopleRepo.create(name)).pageId };
   } catch (err) {
     logger.warn({ err, userId }, 'Failed to create people record for new user (non-blocking)');
-    return null;
+    return { personLink: 'failed' };
   }
 }
 
@@ -94,11 +103,23 @@ async function _trackUserAsync(
       const updates: Parameters<typeof usersRepo.update>[1] = {};
       if (context.groupId) updates.groups = [context.groupId];
       if (context.multiChatId) updates.multiChats = [context.multiChatId];
-      const personPageId = await createPersonForNewUser(userId, customName);
-      if (personPageId) updates.registeredPersonPageId = personPageId;
+      const person = await createPersonForNewUser(userId, customName);
+      if (person.personLink === 'created') updates.registeredPersonPageId = person.personPageId;
       if (Object.keys(updates).length > 0) {
         await usersRepo.update(created.pageId, updates);
       }
+      // 建 USERS、建 People、寫連結三步都做完才記；任何一步丟例外就不會有這行
+      // （USERS 寫入失敗由 trackUser 的 warn 或 trackJoinedMember 的呼叫端記）。
+      // userId 是身分識別資訊，只放 debug（ADR 0005）。
+      logger.info({ usersPageId: created.pageId, personLink: person.personLink }, 'New user created');
+      logger.debug(
+        {
+          userId,
+          usersPageId: created.pageId,
+          ...(person.personLink === 'created' && { personPageId: person.personPageId }),
+        },
+        'New user created detail'
+      );
       return;
     }
 

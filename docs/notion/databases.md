@@ -18,6 +18,8 @@ Dobby 使用 5 個 Notion 資料庫。欄位的詳細型別定義請參考 `sche
 - **人員清單已有同名頁面**：不建立也不連結，記 warn（`/logs` 顯示為降級），由管理員確認是不是同一個人後手動連結。不自動連到同名頁面，是因為同名不代表同一人，連錯會讓新使用者繼承對方的季租身分與請假權限。
 - **建立人員頁面失敗**：USERS 照常建立，只是沒有連結，之後也不會自動重試。
 
+三步（建 USERS、建人員頁面、寫連結）都做完後記一行 info `New user created`，帶 `usersPageId` 和 `personLink`：`created`（已建立並連結）、`same-name-skipped`（同名略過）、`failed`（人員頁面建立失敗）。userId 只在 debug 的 `New user created detail`。USERS 的建立或連結寫入失敗時不會有這行，錯誤由 `trackUser` 的 `User tracking failed (non-blocking)` 記，或由 `trackJoinedMember` 往上丟給呼叫端。這段在第一次發言和成員加入兩種事件都會跑，所以這行會出現在兩種事件裡。
+
 只處理新建立的使用者，這個功能上線前就存在、`Registered name` 空著的使用者不會被回填。兩個不同的新使用者若同時以相同名稱建立（不同 userId 用的是不同的 mutex key），仍可能各建一頁同名頁面。
 
 | 欄位 | 用途 |

@@ -213,6 +213,45 @@ describe('new user people list linking', () => {
     expect(usersRepo.update).toHaveBeenCalledWith('page-new', { groups: ['group-1'] });
   });
 
+  it('logs a new-user summary with personLink=created once the link is written', async () => {
+    await trackJoinedMember('user-1', { groupId: 'group-1' }, 'Alice');
+
+    expect(logger.info).toHaveBeenCalledWith({ usersPageId: 'page-new', personLink: 'created' }, 'New user created');
+    // userId 是身分識別資訊，只在 debug
+    expect(logger.debug).toHaveBeenCalledWith(
+      { userId: 'user-1', usersPageId: 'page-new', personPageId: 'person-new' },
+      'New user created detail'
+    );
+  });
+
+  it('logs personLink=same-name-skipped when the people list already has that name', async () => {
+    vi.mocked(peopleRepo.findByName).mockResolvedValue({ pageId: 'person-existing', name: 'Alice', hasPaid: true });
+
+    await trackJoinedMember('user-1', { groupId: 'group-1' }, 'Alice');
+
+    expect(logger.info).toHaveBeenCalledWith(
+      { usersPageId: 'page-new', personLink: 'same-name-skipped' },
+      'New user created'
+    );
+    expect(logger.debug).toHaveBeenCalledWith({ userId: 'user-1', usersPageId: 'page-new' }, 'New user created detail');
+  });
+
+  it('logs personLink=failed when creating the people page fails', async () => {
+    vi.mocked(peopleRepo.create).mockRejectedValue(new Error('notion down'));
+
+    await trackJoinedMember('user-1', { groupId: 'group-1' }, 'Alice');
+
+    expect(logger.info).toHaveBeenCalledWith({ usersPageId: 'page-new', personLink: 'failed' }, 'New user created');
+  });
+
+  it('does not log the new-user summary when writing the link fails', async () => {
+    vi.mocked(usersRepo.update).mockRejectedValue(new Error('notion down'));
+
+    await expect(trackJoinedMember('user-1', { groupId: 'group-1' }, 'Alice')).rejects.toThrow('notion down');
+
+    expect(logger.info).not.toHaveBeenCalledWith(expect.anything(), 'New user created');
+  });
+
   it('does not touch the people list for an existing user', async () => {
     vi.mocked(usersRepo.findByUserId).mockResolvedValue(makeUser());
 
@@ -220,6 +259,7 @@ describe('new user people list linking', () => {
 
     expect(peopleRepo.findByName).not.toHaveBeenCalled();
     expect(peopleRepo.create).not.toHaveBeenCalled();
+    expect(logger.info).not.toHaveBeenCalledWith(expect.anything(), 'New user created');
   });
 });
 
