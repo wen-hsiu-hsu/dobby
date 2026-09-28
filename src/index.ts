@@ -7,6 +7,7 @@ import { healthRouter } from './routes/health.js';
 import { webhookRouter } from './routes/webhook.js';
 import { createLogsRouter } from './routes/logs.js';
 import { logFatalAndExit, registerCrashHandlers } from './utils/crash-handlers.js';
+import { createGracefulShutdown } from './utils/graceful-shutdown.js';
 
 // We anchor LOG_DIR here — the single entry point — rather than in each
 // util module, and pass it down as a parameter to everything that needs it.
@@ -75,34 +76,7 @@ if (env.NODE_ENV !== 'test') {
       logger.info({ port: env.PORT }, 'Server started');
     });
 
-    const gracefulShutdown = (signal: string): void => {
-      logger.info({ signal }, 'Received shutdown signal, closing server');
-
-      const forceExitTimer = setTimeout(() => {
-        logger.error('Graceful shutdown timed out, forcing exit');
-        process.exit(1);
-      }, 10_000);
-      forceExitTimer.unref();
-
-      // 關閉前多同步一次 log——套獨立的短逾時，逾時或失敗都吞掉繼續往下走，
-      // 不能卡住既有的 10 秒 forceExitTimer/server.close() 流程。
-      const uploadWithTimeout = Promise.race([
-        uploadAllLogs(LOG_DIR),
-        new Promise<void>((resolveTimeout) => setTimeout(resolveTimeout, 5_000)),
-      ]);
-
-      uploadWithTimeout
-        .catch((err: unknown) => {
-          logger.error({ err }, 'R2 log sync on shutdown failed');
-        })
-        .finally(() => {
-          server.close(() => {
-            clearTimeout(forceExitTimer);
-            logger.info('Server closed, exiting');
-            process.exit(0);
-          });
-        });
-    };
+    const gracefulShutdown = createGracefulShutdown(server, () => uploadAllLogs(LOG_DIR));
 
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
     process.on('SIGINT', () => gracefulShutdown('SIGINT'));
