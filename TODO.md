@@ -88,7 +88,7 @@
 
 - [ ] **同一個 webhook 事件送達兩次時會被處理兩次，`+N`／`-N` 可能重複寫入。**（2026-09-29 對照 LINE 官方文件發現）
 
-  **嚴重度：潛在的資料錯誤，沒有觀察到，不是急件。動手前第一步是到 LINE Developers Console 確認現況**（見下方「動手前先確認」），確認有發生或風險確實存在再決定要不要做。
+  **嚴重度：潛在的資料錯誤，沒有觀察到，低優先、不是急件。** 2026-09-29 已在 LINE Developers Console 確認 **Webhook redelivery 是關閉的**，所以下方「重送」與「2 秒逾時」兩種來源目前都不會觸發重複送達；剩下的只有 LINE 文件那句沒講清楚適用範圍的「網路路由問題」。**如果之後要打開 Webhook redelivery，要先處理這一條。** 沒打開的話，可以先照下方「動手前先確認」開 Error statistics 觀察，確認真的有重複送達再決定要不要做。
 
   現況：`src/routes/webhook.ts:9-30` 驗完簽章就回 200（第 11 行），再把 `events` 丟給 `processEvents()`。`src/handlers/event-router.ts` 對每筆事件在 `Processing event`（第 24-33 行）記下 `webhookEventId`、`isRedelivery`，但**沒有任何去重**，同一個 `webhookEventId` 來幾次就處理幾次。
 
@@ -100,7 +100,7 @@
   - [Check webhook error statistics](https://developers.line.biz/en/docs/messaging-api/check-webhook-error-statistics/)：LINE 等回應只等 **2 秒**，超過就記成 `request_timeout`，而且文件明講「Note that the webhook may have been successfully received by the bot server」。也就是說，「Pi 已經處理、LINE 卻當成失敗」不只發生在 200 遺失，只要 200 超過 2 秒才回到 LINE 就算。正式環境的路徑是 LINE → Cloudflare Tunnel → Pi（`docs/overview.md:66`），Pi 負載高、事件迴圈卡住、tunnel 抖動都可能讓回應超過 2 秒。
 
   **動手前先確認**：
-  1. Console → Messaging API 分頁，「Webhook redelivery」有沒有開。沒開的話只剩「網路路由問題」這種來源，風險更低。
+  1. Console → Messaging API 分頁，「Webhook redelivery」有沒有開（2026-09-29 確認為關閉；有人改過設定的話要重新評估）。
   2. 同一頁打開「Error statistics aggregation」（預設關閉、不會回溯），觀察一段時間，看有沒有 `request_timeout` 或 `error_status_code`。這比到 `/logs` 逐筆看更適合確認現況。
   3. Pi 的 `/logs`：`isRedelivery` 為 true 時，「起點」那一步會顯示黃色的「LINE 重送這筆事件（isRedelivery）」（`src/routes/logs.ts:884-901`）；重複處理時第二次的 `Reply failed` 會讓事件卡片變紅（`groupStatus()` 的 `hasReplyFailure`，`logs.ts:661-664`），可以用 `webhookEventId` 搜尋對照。
   - 本機 `logs/`（檔案日期 2026-09-21、22、26、27、28）沒有任何 `isRedelivery: true`，也沒有重複的 `webhookEventId`。但本機是 ngrok 開發環境的資料（`docs/development.md`），不能當正式環境的證據。
@@ -113,7 +113,6 @@
   - **發言數**：群組／多人聊天的**所有文字訊息**（不只指令，閒聊也算）重複送達都會讓 `trackUser` 多算 1；一對一聊天不追蹤（`handlers/message-handler.ts:58-63`）。新使用者的第一則訊息重複送達不會建出兩個 USERS 頁（null 快照一律重查，`services/user-management.ts:95`），只會多算 1。
   - 其他只會多一筆 `Reply failed`、不會寫壞資料的：自動回覆、其他唯讀指令（owe、next、news 等）、`join`；`memberJoined` 的 `trackJoinedMember` 不計發言數、groups 是合併寫入，重複也是冪等的。
 
-  另外，`docs/architecture.md:65` 和 `docs/_analysis-report.html:376` 都寫「LINE 在收不到 200 時會重試」，只在 Console 開啟重送時成立，預設不會重試，要順便更正。
 
   如果要處理：
   - **位置**：放在 `event-router.ts` 的 `runWithContext` 裡面、`Processing event` 那行 info log 之後、`switch` 之前。放在 `runWithContext` 外面，略過時記的 log 沒有 reqId，在 `/logs` 會變成「背景/未關聯事件」；放在 `Processing event` 之前，就沒有「起點」那一步，`isRedelivery` 也不會記下來。原本那次和重複那次一定是兩個不同的 reqId（`utils/request-context.ts:13` 每次隨機產生），`/logs` 上只能靠 `webhookEventId` 把兩者對起來。
@@ -125,7 +124,7 @@
   - 同一個 webhook 裡的多筆事件各自有自己的 `webhookEventId`，去重的單位是「事件」，不是整個 webhook 請求。放在 event-router 會自動涵蓋 `join`／`memberJoined`，對它們去重也無害。
   - **`/logs` 呈現**：略過時記一行 info（例如 `Duplicate webhook event skipped`，帶 `webhookEventId`、`isRedelivery`，不帶 userId；不要用 warn，否則卡片會變黃）。**要注意的方向**：被略過的訊息事件不會有 `Message classified`、也沒有 Notion 步驟，`groupKind()`（`routes/logs.ts:468-491`）會把它判成「對話」、`groupStatus()` 判成「完成」，變成一張看不出是重複事件的綠色卡片。要讓 `groupKind()`／`groupStatus()`（或標題、預覽）認得這個訊息字串，在 `/logs` 上一眼分辨出「這是被略過的重複事件」。
   - **測試**：寫在 `src/handlers/__tests__/event-router.test.ts`（那裡的 `handleMessage` 本來就是 mock），同一個 `webhookEventId` 送兩次，斷言 `handleMessage` 只被呼叫一次；另外測沒有 `webhookEventId` 的事件不會被去重。去重的 Map 在模組層級，測試之間會殘留，要提供重置函式（在 `beforeEach` 呼叫），或每個測試用不同的 ID。**不要用 `createTestBot` 測**：它的 `run()` 直接呼叫 `handleMessage`（`src/test-utils/create-test-bot.ts:204`），完全不經過 `processEvents()`，測不到去重；如果為了測試改成經過 `processEvents()`，`buildLineEvent` 把 `webhookEventId` 寫死成 `'evt-1'`（第 136 行），同一個測試檔裡第二次以後的 `run()` 會全部被當成重複吞掉。
-  - 同步文件：`docs/architecture.md:65`、`docs/_analysis-report.html:376`，以及 `docs/logging.md` 對「起點」和事件種類／狀態的說明（新 log 行要寫進去）。
+  - 同步文件：`docs/architecture.md`「Fire-and-Forget Webhook 處理」小節（目前寫「本專案沒有開啟重送」，改完要一起更新），以及 `docs/logging.md` 對「起點」和事件種類／狀態的說明（新 log 行要寫進去）。
 
 ---
 
