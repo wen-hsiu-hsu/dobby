@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { env } from '../../config/env.js';
 import { logger } from '../../utils/logger.js';
 
@@ -41,7 +42,14 @@ function truncate(text: string): string {
  * `res.json()` 會丟 SyntaxError，錯誤 log 跟 HTTP status 都會一起消失
  * （`/logs` 那一步就只剩「尚無回應記錄」，事件也不會被判成失敗）。
  */
-async function assertOk(res: Response, method: string, path: string, db: string | undefined, durationMs: number): Promise<void> {
+async function assertOk(
+  res: Response,
+  method: string,
+  path: string,
+  db: string | undefined,
+  callId: string,
+  durationMs: number,
+): Promise<void> {
   if (res.ok) return;
   let err: unknown;
   let detail: string;
@@ -59,7 +67,7 @@ async function assertOk(res: Response, method: string, path: string, db: string 
     err = readErr;
     detail = `(failed to read error body: ${readErr instanceof Error ? readErr.message : String(readErr)})`;
   }
-  logger.error({ method, path, db, status: res.status, err, durationMs }, 'Notion API error');
+  logger.error({ method, path, db, callId, status: res.status, err, durationMs }, 'Notion API error');
   throw new Error(`Notion API error: HTTP ${res.status} ${detail}`);
 }
 
@@ -71,7 +79,19 @@ function retryDelayMs(res: Response): number {
   return Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : DEFAULT_RETRY_DELAY_MS;
 }
 
-async function request(method: string, path: string, body?: unknown, attempt = 0): Promise<unknown> {
+/**
+ * 一次邏輯上的 Notion 呼叫（含 429 重試）。`callId` 在這裡產生一次，所有
+ * 這次呼叫的 log 行（request／payload／response／error／rate limited）都帶
+ * 同一個，`routes/log-grouping.ts` 用它配對。不能改成在 `send()` 裡產生：
+ * 429 重試是遞迴呼叫 `send()`，每次重試拿到新 callId 的話，真正的重試會被
+ * 拆成好幾個獨立呼叫，`/logs` 的「重試 N 次」旗標就消失了。
+ */
+function request(method: string, path: string, body?: unknown): Promise<unknown> {
+  const callId = randomBytes(3).toString('hex');
+  return send(method, path, body, callId, 0);
+}
+
+async function send(method: string, path: string, body: unknown, callId: string, attempt: number): Promise<unknown> {
   const db = getDbName(path);
   // Split into a lightweight info-level line (method/path/db/purpose — always
   // visible, this is what the /logs flow-table view groups on) and a
@@ -79,8 +99,8 @@ async function request(method: string, path: string, body?: unknown, attempt = 0
   // calls rather than one at a variable level means the flow view still has
   // *something* to show (that a call happened, and why) even when LOG_LEVEL
   // is 'info' and the full Notion payload isn't being captured.
-  logger.info({ method, path, db }, 'Notion API request');
-  logger.debug({ method, path, db, ...(body !== undefined && { body }) }, 'Notion API request payload');
+  logger.info({ method, path, db, callId }, 'Notion API request');
+  logger.debug({ method, path, db, callId, ...(body !== undefined && { body }) }, 'Notion API request payload');
   const startedAt = Date.now();
   let res: Response;
   try {
@@ -94,28 +114,28 @@ async function request(method: string, path: string, body?: unknown, attempt = 0
     // 'Notion API error'，`routes/log-grouping.ts` 靠它把這一步標成失敗。
     // 原樣丟出（不包新 Error），pino 的 err serializer 才會把
     // `cause`（例如 getaddrinfo ENOTFOUND）串進呼叫端記的錯誤訊息。
-    logger.error({ method, path, db, durationMs: Date.now() - startedAt, err }, 'Notion API error');
+    logger.error({ method, path, db, callId, durationMs: Date.now() - startedAt, err }, 'Notion API error');
     throw err;
   }
   const durationMs = Date.now() - startedAt;
   if (res.status === 429 && attempt < MAX_RETRIES) {
     const delayMs = retryDelayMs(res);
-    logger.warn({ method, path, db, attempt: attempt + 1, delayMs, durationMs }, 'Notion API rate limited, retrying');
+    logger.warn({ method, path, db, callId, attempt: attempt + 1, delayMs, durationMs }, 'Notion API rate limited, retrying');
     await new Promise((r) => setTimeout(r, delayMs));
-    return request(method, path, body, attempt + 1);
+    return send(method, path, body, callId, attempt + 1);
   }
-  await assertOk(res, method, path, db, durationMs);
+  await assertOk(res, method, path, db, callId, durationMs);
   let data: unknown;
   try {
     data = await res.json();
   } catch (err) {
     // 2xx 但 body 讀到一半斷線或不是 JSON。跟上面一樣要留 'Notion API error'，
     // 否則這一步在 /logs 只會顯示「尚無回應記錄」。
-    logger.error({ method, path, db, status: res.status, durationMs, err }, 'Notion API error');
+    logger.error({ method, path, db, callId, status: res.status, durationMs, err }, 'Notion API error');
     throw err;
   }
-  logger.info({ method, path, db, durationMs }, 'Notion API response');
-  logger.debug({ method, path, db, result: data }, 'Notion API response payload');
+  logger.info({ method, path, db, callId, durationMs }, 'Notion API response');
+  logger.debug({ method, path, db, callId, result: data }, 'Notion API response payload');
   return data;
 }
 

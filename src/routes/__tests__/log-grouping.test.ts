@@ -78,6 +78,73 @@ describe('groupPairedEntries', () => {
     }
   });
 
+  it('splits two overlapping same-method+path calls in one reqId by callId instead of counting a retry', () => {
+    // 例：同一則訊息裡 trackUser 跟 resolveTarget 同時查 USERS，路徑都是
+    // POST /databases/{id}/query。
+    const path = '/databases/users-db/query';
+    const entries = [
+      entry({ msg: 'Notion API request', method: 'POST', path, callId: 'c1', purpose: 'A', reqId: 'r1' }),
+      entry({ level: 20, msg: 'Notion API request payload', method: 'POST', path, callId: 'c1', body: { a: 1 }, reqId: 'r1' }),
+      entry({ msg: 'Notion API request', method: 'POST', path, callId: 'c2', purpose: 'B', reqId: 'r1' }),
+      entry({ level: 20, msg: 'Notion API request payload', method: 'POST', path, callId: 'c2', body: { b: 2 }, reqId: 'r1' }),
+      entry({ msg: 'Notion API response', method: 'POST', path, callId: 'c2', reqId: 'r1' }),
+      entry({ level: 20, msg: 'Notion API response payload', method: 'POST', path, callId: 'c2', result: 'B', reqId: 'r1' }),
+      entry({ msg: 'Notion API response', method: 'POST', path, callId: 'c1', reqId: 'r1' }),
+      entry({ level: 20, msg: 'Notion API response payload', method: 'POST', path, callId: 'c1', result: 'A', reqId: 'r1' }),
+    ];
+
+    const rows = groupPairedEntries(entries);
+    expect(rows.filter((r) => r.kind === 'single')).toHaveLength(0);
+    const notionRows = rows.filter((r): r is NotionCallRow => r.kind === 'notion-call');
+    expect(notionRows).toHaveLength(2);
+    const a = notionRows.find((r) => r.purpose === 'A')!;
+    const b = notionRows.find((r) => r.purpose === 'B')!;
+    expect(a.attempts).toBe(1);
+    expect(b.attempts).toBe(1);
+    expect(a.requestPayload?.['body']).toEqual({ a: 1 });
+    expect(b.requestPayload?.['body']).toEqual({ b: 2 });
+    expect(a.responsePayload?.['result']).toBe('A');
+    expect(b.responsePayload?.['result']).toBe('B');
+  });
+
+  it('still counts repeated requests with the same callId (429 retry) as one call with retries', () => {
+    const entries = [
+      entry({ msg: 'Notion API request', method: 'GET', path: '/pages/abc', callId: 'c1', reqId: 'r1' }),
+      entry({ msg: 'Notion API rate limited, retrying', method: 'GET', path: '/pages/abc', callId: 'c1', reqId: 'r1' }),
+      entry({ msg: 'Notion API request', method: 'GET', path: '/pages/abc', callId: 'c1', reqId: 'r1' }),
+      entry({ msg: 'Notion API request', method: 'GET', path: '/pages/abc', callId: 'c2', reqId: 'r1' }),
+      entry({ msg: 'Notion API response', method: 'GET', path: '/pages/abc', callId: 'c1', reqId: 'r1' }),
+      entry({ level: 50, msg: 'Notion API error', method: 'GET', path: '/pages/abc', callId: 'c2', reqId: 'r1' }),
+    ];
+
+    const rows = groupPairedEntries(entries);
+    const notionRows = rows.filter((r): r is NotionCallRow => r.kind === 'notion-call');
+    expect(notionRows).toHaveLength(2);
+    const c1 = notionRows.find((r) => r.request['callId'] === 'c1')!;
+    const c2 = notionRows.find((r) => r.request['callId'] === 'c2')!;
+    expect(c1.attempts).toBe(2);
+    expect(c1.response).toBeDefined();
+    expect(c1.error).toBeUndefined();
+    expect(c2.attempts).toBe(1);
+    expect(c2.error).toBeDefined();
+    expect(c2.response).toBeUndefined();
+  });
+
+  it('keeps the method+path fallback for old callId-less logs (overlapping same-path calls still look like a retry)', () => {
+    const entries = [
+      entry({ msg: 'Notion API request', method: 'POST', path: '/databases/x/query', reqId: 'r1' }),
+      entry({ msg: 'Notion API request', method: 'POST', path: '/databases/x/query', reqId: 'r1' }),
+      entry({ msg: 'Notion API response', method: 'POST', path: '/databases/x/query', reqId: 'r1' }),
+      entry({ msg: 'Notion API response', method: 'POST', path: '/databases/x/query', reqId: 'r1' }),
+    ];
+
+    const rows = groupPairedEntries(entries);
+    const notionRows = rows.filter((r): r is NotionCallRow => r.kind === 'notion-call');
+    expect(notionRows).toHaveLength(1);
+    expect(notionRows[0]!.attempts).toBe(2);
+    expect(rows.filter((r) => r.kind === 'single')).toHaveLength(1);
+  });
+
   it('pairs a successful LINE reply', () => {
     const entries = [
       entry({ msg: 'LINE reply', method: 'POST', path: '/v2/bot/message/reply', sendId: 's1', reqId: 'r1' }),

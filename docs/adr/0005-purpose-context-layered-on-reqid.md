@@ -34,6 +34,17 @@
 - **網路錯誤要原樣丟出，不要包成新的 `Error`**。原本的 `TypeError: fetch failed` 帶著 `cause`（例如 `getaddrinfo ENOTFOUND api.notion.com`），呼叫端 `logger.error({ err })` 時 pino 會把 cause 串進訊息；包一層新 Error 又沒設 `cause` 的話，這個最有用的原因就沒了。
 - 呼叫端（`Message handler error`、`User tracking failed (non-blocking)` 等）照樣會記自己的錯誤，這一行是額外的，不是取代。
 
+## 補充（2026-09-28）：Notion 呼叫也改用專屬 `callId` 配對
+
+Notion 呼叫原本在 `log-grouping.ts` 用 method+path 配對，同一個 key 還沒回應時又出現 request 就當成 429 重試。同一個 DB 的 query 路徑都是 `POST /databases/{id}/query`，不管查詢條件，所以同一個 reqId 底下兩個重疊的查詢（例如管理員 `+1 @X` 時，前一則訊息的 `trackUser` 還握著鎖，第二則的 `trackUser` 跟 `resolveTarget` 同時查 USERS）會被併成一列「重試 1 次」，第二個的 payload 蓋掉第一個，還多出一筆配不到的 response。
+
+做法跟上面 LINE 的 `sendId` 一樣：`notion-fetch.ts` 的 `request()` 每次呼叫產生一個 `callId`（`randomBytes(3).toString('hex')`），這次呼叫的所有 log 行都帶上，`log-grouping.ts` 優先用它配對。跟 `sendId` 不同的地方有兩個：
+
+- **`callId` 只能在最外層產生一次，透過參數傳給重試**。429 重試是遞迴呼叫內部的 `send()`，如果改成在 `send()` 裡產生，每次重試拿到新的 callId，真正的重試就被拆成好幾個獨立呼叫，「重試 N 次」旗標反而消失。`request()`／`send()` 分成兩個函式就是為了讓這件事在結構上不會被改錯，不要把它們「簡化」回一個帶 `attempt` 預設參數的函式。
+- **舊 log 檔沒有 `callId`，要保留 method+path 的 fallback**。兩種 key 加不同前綴（`call:`／`path:`），同一個檔案裡新舊格式混在一起也不會撞。
+
+`callId` 是隨機值、不含使用者資料，留在 info 行沒有 PII 問題。
+
 ## 現況（2026-09-28）：正式環境常駐 debug
 
 上面的理由都建立在「正式環境預設 `info`，診斷時才暫時開 `debug`」這個前提上。實際上正式環境（Pi）一直都跑 `LOG_LEVEL=debug`，2026-09-28 決定維持這個做法、把文件改成符合現況，不改回 `info`。取捨是：Notion payload、LINE 訊息全文、userId/groupId 這些 PII 會常駐寫進 `logs/` 與 R2 備份；換到的是出問題時不用重現就能直接從 log 查出原因（見 `docs/overview.md`「日誌」小節）。

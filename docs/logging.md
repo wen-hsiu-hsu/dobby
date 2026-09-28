@@ -130,6 +130,8 @@ Footer 的 LOG_LEVEL 徽章旁邊還有一個「R2 備份」徽章，顯示 log 
 
 Notion API 回應 429（rate limit）時程式會自動重試，同一次呼叫因此會在底層產生好幾行 request log。這些重試會被辨識成同一次呼叫、合併成**一個**時間軸步驟，標題後面會加註「· 重試 N 次」；底層記錄重試本身的那行 warn log（`Notion API rate limited, retrying`）則是獨立的一個時間軸步驟（通用渲染器顯示），不會被吃掉。
 
+「是不是同一次呼叫」看的是 `callId`：`notion-fetch.ts` 每次呼叫產生一個，這次呼叫的所有 log 行（request、request payload、response、response payload、`Notion API error`、`Notion API rate limited, retrying`）都帶同一個，429 重試沿用同一個。所以同一個事件裡兩個同時在跑、打同一路徑的呼叫（例如同一個 DB 的 query 路徑都是 `POST /databases/{id}/query`）會分成兩個步驟，不會被當成「重試 1 次」。加上 `callId` 之前寫的舊 log 沒有這個欄位，退回用 method+path 配對，這種情況仍會被誤判成重試。
+
 ## reqId 分組／排程事件的 reqId
 
 事件分組底層是 `request-context.ts` 的 `runWithContext`：同一次事件處理過程中所有 log 都會自動帶上同一個 `reqId`（見 `docs/architecture.md` 的「Request Correlation ID」小節）。`weekly-push.ts`/`display-name-update.ts` 這兩個排程也各自用 `runWithContext` 包住整次執行，所以每次排程執行也會有自己專屬的 reqId、在 `/logs` 頁面上變成一個獨立的「排程」事件，不會跟其他次執行、或其他排程的 log 混在同一組。

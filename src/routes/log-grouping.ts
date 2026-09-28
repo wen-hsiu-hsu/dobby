@@ -32,19 +32,32 @@ const LINE_PUSH_FAILURE_MSG = 'Push message failed';
 const LINE_REPLY_FAILURE_PAYLOAD_MSG = 'Reply failed payload';
 const LINE_PUSH_FAILURE_PAYLOAD_MSG = 'Push message failed payload';
 
+/**
+ * 同一次 Notion 呼叫的所有 log 行帶同一個 `callId`（`notion-fetch.ts` 的
+ * `request()` 產生、429 重試沿用），優先用它配對。舊 log 檔沒有 callId，
+ * 退回 method+path。兩種 key 加前綴分開，混在同一個檔案裡也不會撞。
+ *
+ * 只用 method+path 的問題：同一個 reqId 底下兩個同時在跑、打同一路徑的
+ * 呼叫（例如同一個 DB 的 query 都是 `POST /databases/{id}/query`，不管
+ * 查詢條件）會被當成同一次呼叫的重試，第二個的 payload 蓋掉第一個、多出
+ * 一筆配不到的 response。
+ */
 function notionKey(e: LogEntry): string {
-  return `${String(e['method'])} ${String(e['path'])}`;
+  const callId = e['callId'];
+  if (typeof callId === 'string' && callId !== '') return `call:${callId}`;
+  return `path:${String(e['method'])} ${String(e['path'])}`;
 }
 
 /**
- * A retried Notion call re-emits 'Notion API request' with the *same*
- * method+path as the attempt(s) before it (see notion-fetch.ts's recursive
- * retry-on-429). Keying purely on method+path — without checking whether the
- * previous call for that key already resolved — would misattribute a later
- * response to an earlier, still-open (never-resolved) attempt whenever a
- * call is retried. Each bucket below is processed as its own reqId scope
- * specifically to keep unrelated concurrent calls to the same path (e.g. two
- * different events fetching the same Notion page) from cross-pairing.
+ * A retried Notion call re-emits 'Notion API request' with the *same* key
+ * (same callId; or, for old callId-less logs, the same method+path) as the
+ * attempt(s) before it (see notion-fetch.ts's recursive retry-on-429). Keying
+ * without checking whether the previous call for that key already resolved
+ * would misattribute a later response to an earlier, still-open
+ * (never-resolved) attempt whenever a call is retried. Each bucket below is
+ * processed as its own reqId scope specifically to keep unrelated concurrent
+ * calls to the same path (e.g. two different events fetching the same Notion
+ * page) from cross-pairing in old callId-less logs.
  */
 function processBucket(bucketEntries: LogEntry[], output: DisplayRow[]): void {
   const sorted = [...bucketEntries].sort((a, b) => (a.time ?? 0) - (b.time ?? 0));

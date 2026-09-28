@@ -190,7 +190,7 @@ describe('notion-fetch', () => {
       await notionPost('/pages', { sensitive: 'payload' });
 
       expect(logger.info).toHaveBeenCalledWith(
-        { method: 'POST', path: '/pages', db: undefined },
+        { method: 'POST', path: '/pages', db: undefined, callId: expect.any(String) },
         'Notion API request',
       );
       expect(logger.info).toHaveBeenCalledWith(
@@ -216,6 +216,56 @@ describe('notion-fetch', () => {
         expect.objectContaining({ method: 'POST', path: '/pages', result: { id: 'page-1' } }),
         'Notion API response payload',
       );
+    });
+  });
+
+  describe('callId', () => {
+    function callIdsOf(mock: ReturnType<typeof vi.fn>, msg: string): unknown[] {
+      return mock.mock.calls.filter((c) => c[1] === msg).map((c) => (c[0] as { callId?: unknown }).callId);
+    }
+
+    it('tags every log line of one call with the same callId, and gives separate calls different callIds', async () => {
+      fetchMock.mockResolvedValue(jsonResponse(200, { ok: true }));
+
+      await notionPost('/databases/x/query', { filter: 1 });
+      await notionPost('/databases/x/query', { filter: 2 });
+
+      const requestIds = callIdsOf(vi.mocked(logger.info), 'Notion API request');
+      expect(requestIds).toHaveLength(2);
+      expect(requestIds[0]).toMatch(/^[0-9a-f]{6}$/);
+      expect(requestIds[0]).not.toBe(requestIds[1]);
+      expect(callIdsOf(vi.mocked(logger.debug), 'Notion API request payload')).toEqual(requestIds);
+      expect(callIdsOf(vi.mocked(logger.info), 'Notion API response')).toEqual(requestIds);
+      expect(callIdsOf(vi.mocked(logger.debug), 'Notion API response payload')).toEqual(requestIds);
+    });
+
+    it('keeps the same callId across 429 retries (including the rate-limited warn and the final error)', async () => {
+      fetchMock.mockResolvedValue(jsonResponse(429, { message: 'rate limited' }, { 'Retry-After': '0' }));
+      vi.useFakeTimers();
+      try {
+        const p = notionGet('/pages/abc').catch((e: unknown) => e);
+        await vi.runAllTimersAsync();
+        await p;
+      } finally {
+        vi.useRealTimers();
+      }
+
+      const requestIds = callIdsOf(vi.mocked(logger.info), 'Notion API request');
+      expect(requestIds).toHaveLength(4);
+      expect(new Set(requestIds).size).toBe(1);
+      const [id] = requestIds;
+      expect(callIdsOf(vi.mocked(logger.warn), 'Notion API rate limited, retrying')).toEqual([id, id, id]);
+      expect(callIdsOf(vi.mocked(logger.error), 'Notion API error')).toEqual([id]);
+    });
+
+    it('tags the network-error line with the callId of its request', async () => {
+      fetchMock.mockRejectedValue(new TypeError('fetch failed'));
+
+      await expect(notionGet('/pages/abc')).rejects.toThrow('fetch failed');
+
+      const [id] = callIdsOf(vi.mocked(logger.info), 'Notion API request');
+      expect(id).toEqual(expect.any(String));
+      expect(callIdsOf(vi.mocked(logger.error), 'Notion API error')).toEqual([id]);
     });
   });
 
