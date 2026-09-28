@@ -1,5 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { withMutex, isLocked, MutexTimeoutError } from '../mutex.js';
+import { logger } from '../../utils/logger.js';
+import { runWithContext, getReqId } from '../../utils/request-context.js';
+
+vi.mock('../../utils/logger.js', () => ({
+  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
 
 describe('mutex', () => {
   it('acquires lock and runs fn', async () => {
@@ -244,5 +250,182 @@ describe('mutex', () => {
     resolveStuck();
     await vi.advanceTimersByTimeAsync(0);
     vi.useRealTimers();
+  });
+
+  describe('task summary log', () => {
+    const SUMMARY = 'Mutex task finished';
+
+    function summaryCalls(level: 'info' | 'debug') {
+      return vi.mocked(logger[level]).mock.calls.filter(([, msg]) => msg === SUMMARY).map(([obj]) => obj);
+    }
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('logs one info summary with the real hold time once fn settles', async () => {
+      const p = withMutex('2026-10-03', async () => {
+        await new Promise((r) => setTimeout(r, 300));
+        return 'ok';
+      });
+      await vi.advanceTimersByTimeAsync(300);
+      await expect(p).resolves.toBe('ok');
+
+      expect(summaryCalls('info')).toEqual([
+        { key: '2026-10-03', queuedAhead: 0, waitMs: 0, heldMs: 300, callerTimedOut: false, fnFailed: false },
+      ]);
+      expect(summaryCalls('debug')).toEqual([]);
+    });
+
+    it('reports how many tasks were ahead and how long the queued one waited', async () => {
+      const first = withMutex('2026-10-04', () => new Promise<void>((r) => setTimeout(r, 500)));
+      await vi.advanceTimersByTimeAsync(100);
+      const second = withMutex('2026-10-04', () => new Promise<void>((r) => setTimeout(r, 200)));
+
+      await vi.advanceTimersByTimeAsync(600);
+      await first;
+      await second;
+
+      expect(summaryCalls('info')).toEqual([
+        { key: '2026-10-04', queuedAhead: 0, waitMs: 0, heldMs: 500, callerTimedOut: false, fnFailed: false },
+        // Arrived at t=100, started when the first finished at t=500.
+        { key: '2026-10-04', queuedAhead: 1, waitMs: 400, heldMs: 200, callerTimedOut: false, fnFailed: false },
+      ]);
+    });
+
+    it('marks fnFailed when fn rejects and the caller was still waiting', async () => {
+      await expect(withMutex('2026-10-05', async () => { throw new Error('boom'); })).rejects.toThrow('boom');
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(summaryCalls('info')).toEqual([
+        expect.objectContaining({ key: '2026-10-05', callerTimedOut: false, fnFailed: true }),
+      ]);
+    });
+
+    it('after a caller timeout, logs the summary only when the background fn really finishes, with the true hold time', async () => {
+      let resolveStuck!: () => void;
+      const a = withMutex('2026-10-06', () => new Promise<void>((r) => { resolveStuck = r; }));
+      const aAssertion = expect(a).rejects.toBeInstanceOf(MutexTimeoutError);
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      await aAssertion;
+      expect(logger.warn).toHaveBeenCalledWith(
+        { key: '2026-10-06', queuedAhead: 0 },
+        expect.stringContaining('timed out')
+      );
+      // The caller has gone, but fn() is still running: no summary yet.
+      expect(summaryCalls('info')).toEqual([]);
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      resolveStuck();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(summaryCalls('info')).toEqual([
+        { key: '2026-10-06', queuedAhead: 0, waitMs: 0, heldMs: 15_000, callerTimedOut: true, fnFailed: false },
+      ]);
+    });
+
+    it('records a background failure after a caller timeout, which is otherwise swallowed', async () => {
+      let rejectStuck!: (err: Error) => void;
+      const a = withMutex('2026-10-07', () => new Promise<void>((_, rej) => { rejectStuck = rej; }));
+      const aAssertion = expect(a).rejects.toBeInstanceOf(MutexTimeoutError);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await aAssertion;
+
+      rejectStuck(new Error('background failure'));
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(summaryCalls('info')).toEqual([
+        expect.objectContaining({ key: '2026-10-07', callerTimedOut: true, fnFailed: true }),
+      ]);
+    });
+
+    it('counts a timed-out task that is still running in queuedAhead, without changing isLocked', async () => {
+      let resolveStuck!: () => void;
+      const a = withMutex('2026-10-08', () => new Promise<void>((r) => { resolveStuck = r; }));
+      const aAssertion = expect(a).rejects.toBeInstanceOf(MutexTimeoutError);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await aAssertion;
+
+      // pending is back to zero, so isLocked keeps its caller-waiting semantics...
+      expect(isLocked('2026-10-08')).toBe(false);
+
+      const c = withMutex('2026-10-08', async () => 'c');
+      await vi.advanceTimersByTimeAsync(1_000);
+      resolveStuck();
+      await expect(c).resolves.toBe('c');
+
+      // ...but the new call still sees the background task ahead of it.
+      const [, cSummary] = summaryCalls('info');
+      expect(cSummary).toEqual({
+        key: '2026-10-08', queuedAhead: 1, waitMs: 1_000, heldMs: 0, callerTimedOut: false, fnFailed: false,
+      });
+    });
+
+    it('includes the timed-out task in queuedAhead on the next caller timeout warning', async () => {
+      let resolveStuck!: () => void;
+      const a = withMutex('2026-10-09', () => new Promise<void>((r) => { resolveStuck = r; }));
+      const aAssertion = expect(a).rejects.toBeInstanceOf(MutexTimeoutError);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await aAssertion;
+
+      const b = withMutex('2026-10-09', async () => 'b');
+      const bAssertion = expect(b).rejects.toBeInstanceOf(MutexTimeoutError);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await bAssertion;
+
+      expect(logger.warn).toHaveBeenLastCalledWith(
+        { key: '2026-10-09', queuedAhead: 1 },
+        expect.stringContaining('timed out')
+      );
+
+      resolveStuck();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    it('keeps keys that are not a bare date (e.g. user-track-<userId>) out of info', async () => {
+      await withMutex('user-track-U123', async () => undefined);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(summaryCalls('info')).toEqual([]);
+      expect(summaryCalls('debug')).toEqual([
+        expect.objectContaining({ key: 'user-track-U123', queuedAhead: 0 }),
+      ]);
+    });
+
+    it("keeps the caller's reqId on a summary written after the caller timed out, even when fn is finished from another context", async () => {
+      // The real logger reads reqId from AsyncLocalStorage at call time; capture it the same way.
+      const reqIds: Array<string | undefined> = [];
+      vi.mocked(logger.info).mockImplementation(((_obj: unknown, msg?: string) => {
+        if (msg === SUMMARY) reqIds.push(getReqId());
+      }) as never);
+
+      let resolveStuck!: () => void;
+      let callerReqId: string | undefined;
+      const caller = runWithContext(async () => {
+        callerReqId = getReqId();
+        await withMutex('2026-10-10', () => new Promise<void>((r) => { resolveStuck = r; }));
+      });
+      const callerAssertion = expect(caller).rejects.toBeInstanceOf(MutexTimeoutError);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await callerAssertion;
+
+      // Finish the background task from inside a different request's context.
+      let otherReqId: string | undefined;
+      await runWithContext(async () => {
+        otherReqId = getReqId();
+        resolveStuck();
+      });
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(callerReqId).toBeDefined();
+      expect(otherReqId).not.toBe(callerReqId);
+      expect(reqIds).toEqual([callerReqId]);
+    });
   });
 });

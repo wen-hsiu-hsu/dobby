@@ -73,7 +73,7 @@
    出現這些訊息時，詳情頁標題下方會有一塊黃色的降級原因說明。這個判定故意跟 log level 分開處理——`buildMemberJoinedWelcome error, using fallback` 是 `logger.error`，但歡迎訊息其實正常送出了，全部算「失敗」會蓋掉「其實有正常運作，只是走了備援路徑」這個更重要的訊息。
 4. 剩下的才照這個事件底下所有 log 行的最高等級（warn → 警告，error/fatal → 失敗）判定；都沒有就是「完成」。
 
-**報名／請假 mutex 逾時的事件，狀態會從「警告」變成「失敗」。** 逾時當下，`withFreshCalendarEvent` 記一筆 warn（`… timed out; result unknown to the user`），並回覆使用者「這次操作可能已經完成，請勿重複操作」，所以事件先顯示「警告」。之後背景任務跑完，它自己的回覆會因為 replyToken 已被用掉而被 LINE 拒絕（`Reply failed, no fallback available`），套用規則 1 改判「失敗」。這時 Notion 寫入其實可能已經成功，要看時間軸裡的 PATCH 才能確認結果。背景設計見 [ADR 0002](adr/0002-mutex-timeout-does-not-cancel-task.md)。
+**報名／請假 mutex 逾時的事件，狀態會從「警告」變成「失敗」。** 逾時當下，`withFreshCalendarEvent` 記一筆 warn（`… timed out; result unknown to the user`），並回覆使用者「這次操作可能已經完成，請勿重複操作」，所以事件先顯示「警告」。之後背景任務跑完，它自己的回覆會因為 replyToken 已被用掉而被 LINE 拒絕（`Reply failed, no fallback available`），套用規則 1 改判「失敗」。這時 Notion 寫入其實可能已經成功，要看時間軸裡的 PATCH 才能確認結果。時間軸最後面的 `Mutex task finished`（背景任務真正結束才寫出，`callerTimedOut: true`）可以看出實際持有鎖多久、前面排了幾個、背景任務有沒有丟錯（`fnFailed`），欄位說明見 `docs/registration.md`「從 log 看鎖競爭」。背景設計見 [ADR 0002](adr/0002-mutex-timeout-does-not-cancel-task.md)。
 
 ## 處理過程時間軸
 

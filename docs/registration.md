@@ -92,6 +92,23 @@ Mutex 以活動日期字串為 key（不是 calendar 頁面 ID，這樣不用多
 
 逾時時使用者會收到「處理時間較長，這次操作可能已經完成，請勿重複操作。如需確認，請洽管理員。」，而不是「系統錯誤」。因為背景的讀寫之後仍可能成功，而 `+N`／`-N` 不是冪等的，重試會重複報名或多取消一筆。訊息不引導使用者用 `next` 自己確認，因為 `next` 限管理員使用。細節與這個設計取捨的原因見 `docs/adr/0002-mutex-timeout-does-not-cancel-task.md`。
 
+### 從 log 看鎖競爭
+
+每個 `withMutex` 任務在 `fn()` **真正結束**時記一行 `Mutex task finished`，同一個 reqId，欄位：
+
+| 欄位 | 意思 |
+|------|------|
+| `key` | 鎖的 key（報名／請假是活動日期） |
+| `queuedAhead` | 這次呼叫進來時，同一個 key 前面還沒真正結束的任務數（排隊中＋執行中）。前一個呼叫端已逾時、但 `fn()` 還在背景跑的任務也算在內 |
+| `waitMs` | 從呼叫 `withMutex` 到 `fn()` 開始，也就是排隊等前面任務的時間 |
+| `heldMs` | `fn()` 從開始到真正結束的時間，就是實際持有鎖的時間；呼叫端逾時後仍會量到背景跑完為止 |
+| `callerTimedOut` | 呼叫端是否已經因 10 秒逾時放棄等待 |
+| `fnFailed` | `fn()` 是否丟出錯誤。呼叫端逾時後，背景任務失敗只有這個欄位看得到，錯誤本身不會再被任何人記下 |
+
+看法：`queuedAhead > 0` 表示有人同時操作同一場活動；`waitMs` 大而 `heldMs` 正常是被前面的人拖住，`heldMs` 本身就大則是鎖內的 Notion 呼叫或 LINE 回覆慢（對照同一 reqId 時間軸上的各步 `durationMs`）。逾時時，呼叫端那一行 warn 也帶 `queuedAhead`，摘要則要等背景任務跑完才寫出，會排在該事件 `Event processed` 之後。
+
+等級依 key 格式決定：key 是純日期（`YYYY-MM-DD`）才記 info，其他 key 一律 debug。`user-track-${userId}` 這種含 userId 的 key 因此不會把 userId 寫進 info 層（ADR 0005）；之後新增的 key 格式預設也走 debug，要放 info 得先確認 key 不含身分資訊，再改 `mutex.ts` 的 `INFO_SUMMARY_KEY`。
+
 ```
 src/services/mutex.ts
 ```
