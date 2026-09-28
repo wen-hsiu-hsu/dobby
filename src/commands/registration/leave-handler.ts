@@ -9,6 +9,7 @@ import { parseRegistrationTarget } from './registration-parser.js';
 import { buildEventStatusMessage } from './event-status-message.js';
 import { formatDate, getNextSaturday, getSeasonNameForDate } from '../../utils/date-utils.js';
 import { withFreshCalendarEvent } from './with-fresh-calendar-event.js';
+import type { NotionUser } from '../../types/notion-models.js';
 
 interface MessageEvent {
   replyToken: string;
@@ -19,7 +20,8 @@ interface MessageEvent {
 export async function handleLeave(
   event: MessageEvent,
   isCancel: boolean,
-  isAdmin = false
+  isAdmin = false,
+  actorUser?: NotionUser | null
 ): Promise<void> {
   const target = parseRegistrationTarget(event as any);
 
@@ -33,18 +35,20 @@ export async function handleLeave(
     return;
   }
 
-  const resolved = await resolveTarget(target, event.source.userId);
+  const nextSaturday = formatDate(getNextSaturday());
+
+  // Season of the event date, not today's — see getSeasonNameForDate
+  const seasonName = getSeasonNameForDate(nextSaturday);
+  // Independent lookups, run in parallel; the "not found" reply still takes precedence.
+  const [resolved, activeSeason] = await Promise.all([
+    resolveTarget(target, event.source.userId, actorUser),
+    seasonRepo.findByName(seasonName),
+  ]);
 
   if (!resolved) {
     await replyMessage(event.replyToken, [{ type: 'text', text: '找不到您的資料' }]);
     return;
   }
-
-  const nextSaturday = formatDate(getNextSaturday());
-
-  // Season of the event date, not today's — see getSeasonNameForDate
-  const seasonName = getSeasonNameForDate(nextSaturday);
-  const activeSeason = await seasonRepo.findByName(seasonName);
   if (!activeSeason) {
     // Checked separately from membership: in the last week of a quarter the next season's
     // record may not exist yet, and "僅限季租成員" would wrongly tell a real member they aren't one.

@@ -63,11 +63,13 @@ describe('handleMessage', () => {
     });
 
     it('does not wait on tracking for a known user', async () => {
-      vi.mocked(findByUserId).mockResolvedValue({ isAdmin: false } as any);
+      const knownUser = { isAdmin: false } as any;
+      vi.mocked(findByUserId).mockResolvedValue(knownUser);
 
       const handling = handleMessage(textEvent('@Dobby +1'));
       await flush();
-      expect(routeCommand).toHaveBeenCalled();
+      // The snapshot is handed down so resolveTarget doesn't query USERS again
+      expect(routeCommand).toHaveBeenCalledWith(expect.anything(), expect.anything(), false, knownUser);
 
       finishTracking();
       await handling;

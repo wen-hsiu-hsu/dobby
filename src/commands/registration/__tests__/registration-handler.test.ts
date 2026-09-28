@@ -187,6 +187,30 @@ describe('handleRegistration', () => {
     expect(calendarRepo.updateGuests).not.toHaveBeenCalled();
   });
 
+  it('still replies "account not found" (not the season error) when both lookups come back empty', async () => {
+    vi.mocked(resolveTarget).mockResolvedValue(null);
+    vi.mocked(seasonRepo.findByName).mockResolvedValue(null);
+
+    await handleRegistration(makeEvent('@Dobby +1'), 1, false);
+
+    expect(replyText()).toBe('找不到您的帳號，請先向管理員登記');
+  });
+
+  it('passes the actor snapshot to resolveTarget and looks up the season without waiting for it', async () => {
+    let finishResolve!: (v: { personPageId: string; displayName: string }) => void;
+    vi.mocked(resolveTarget).mockReturnValue(new Promise((r) => { finishResolve = r; }));
+    const actorUser = { userId: 'user-alice' } as any;
+
+    const handling = handleRegistration(makeEvent('@Dobby +1'), 1, false, actorUser);
+    await Promise.resolve();
+    expect(resolveTarget).toHaveBeenCalledWith(expect.objectContaining({ isSelf: true }), 'user-alice', actorUser);
+    expect(seasonRepo.findByName).toHaveBeenCalled();
+
+    finishResolve({ personPageId: 'person-1', displayName: 'Alice' });
+    await handling;
+    expect(calendarRepo.updateGuests).toHaveBeenCalled();
+  });
+
   it('replies when the event season cannot be found, without touching the calendar', async () => {
     vi.mocked(seasonRepo.findByName).mockResolvedValue(null);
     const event = makeEvent('@Dobby +1');

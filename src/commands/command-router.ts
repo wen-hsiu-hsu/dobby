@@ -10,6 +10,7 @@ import { handlePayment } from './payment.js';
 import { handleSeasonAnnouncement } from './season-announcement.js';
 import { handleRegistration } from './registration/registration-handler.js';
 import { handleLeave } from './registration/leave-handler.js';
+import type { NotionUser } from '../types/notion-models.js';
 
 interface CommandEvent {
   replyToken: string;
@@ -20,7 +21,8 @@ interface CommandEvent {
 export async function routeCommand(
   command: ParsedCommand,
   event: CommandEvent,
-  isAdmin: boolean
+  isAdmin: boolean,
+  actorUser?: NotionUser | null
 ): Promise<void> {
   switch (command.type) {
     case CommandType.INTRODUCE:
@@ -49,14 +51,14 @@ export async function routeCommand(
       break;
     case CommandType.REGISTRATION: {
       const delta = parseInt(command.delta ?? '+1', 10);
-      await handleRegistration(event as any, delta, isAdmin);
+      await handleRegistration(event as any, delta, isAdmin, actorUser);
       break;
     }
     case CommandType.LEAVE:
-      await handleLeave(event as any, false, isAdmin);
+      await handleLeave(event as any, false, isAdmin, actorUser);
       break;
     case CommandType.CANCEL_LEAVE:
-      await handleLeave(event as any, true, isAdmin);
+      await handleLeave(event as any, true, isAdmin, actorUser);
       break;
     default:
       // Unknown command - ignore

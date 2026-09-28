@@ -46,7 +46,7 @@ export async function handleMessage(event: MessageEvent): Promise<void> {
       return;
     }
     logger.debug({ command, isAdmin }, 'Routing command');
-    await routeCommand(command, event as any, isAdmin);
+    await routeCommand(command, event as any, isAdmin, notionUser);
     return;
   }
 

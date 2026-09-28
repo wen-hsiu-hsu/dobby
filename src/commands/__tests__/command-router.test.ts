@@ -138,7 +138,7 @@ describe('routeCommand dispatch', () => {
     const event = makeEvent({ replyToken: 'rt-8' });
     await routeCommand(makeCommand(CommandType.REGISTRATION, '+3'), event, true);
 
-    expect(handleRegistration).toHaveBeenCalledWith(event, 3, true);
+    expect(handleRegistration).toHaveBeenCalledWith(event, 3, true, undefined);
     expectOnlyCalled(handleRegistration);
   });
 
@@ -146,7 +146,7 @@ describe('routeCommand dispatch', () => {
     const event = makeEvent({ replyToken: 'rt-9' });
     await routeCommand(makeCommand(CommandType.LEAVE), event, true);
 
-    expect(handleLeave).toHaveBeenCalledWith(event, false, true);
+    expect(handleLeave).toHaveBeenCalledWith(event, false, true, undefined);
     expectOnlyCalled(handleLeave);
   });
 
@@ -154,8 +154,21 @@ describe('routeCommand dispatch', () => {
     const event = makeEvent({ replyToken: 'rt-10' });
     await routeCommand(makeCommand(CommandType.CANCEL_LEAVE), event, false);
 
-    expect(handleLeave).toHaveBeenCalledWith(event, true, false);
+    expect(handleLeave).toHaveBeenCalledWith(event, true, false, undefined);
     expectOnlyCalled(handleLeave);
+  });
+
+  it('forwards the actor USERS snapshot to the registration and leave handlers', async () => {
+    const event = makeEvent();
+    const actorUser = { userId: 'user-alice' } as any;
+
+    await routeCommand(makeCommand(CommandType.REGISTRATION, '+1'), event, false, actorUser);
+    await routeCommand(makeCommand(CommandType.LEAVE), event, false, actorUser);
+    await routeCommand(makeCommand(CommandType.CANCEL_LEAVE), event, false, actorUser);
+
+    expect(handleRegistration).toHaveBeenCalledWith(event, 1, false, actorUser);
+    expect(handleLeave).toHaveBeenCalledWith(event, false, false, actorUser);
+    expect(handleLeave).toHaveBeenCalledWith(event, true, false, actorUser);
   });
 
   it('does not call any handler and does not throw for UNKNOWN', async () => {
@@ -175,21 +188,21 @@ describe('routeCommand dispatch', () => {
       const event = makeEvent();
       await routeCommand(makeCommand(CommandType.REGISTRATION, '+3'), event, false);
 
-      expect(handleRegistration).toHaveBeenCalledWith(event, 3, false);
+      expect(handleRegistration).toHaveBeenCalledWith(event, 3, false, undefined);
     });
 
     it('parses a negative delta string like "-2" to -2', async () => {
       const event = makeEvent();
       await routeCommand(makeCommand(CommandType.REGISTRATION, '-2'), event, false);
 
-      expect(handleRegistration).toHaveBeenCalledWith(event, -2, false);
+      expect(handleRegistration).toHaveBeenCalledWith(event, -2, false, undefined);
     });
 
     it('falls back to +1 when delta is undefined', async () => {
       const event = makeEvent();
       await routeCommand(makeCommand(CommandType.REGISTRATION, undefined), event, false);
 
-      expect(handleRegistration).toHaveBeenCalledWith(event, 1, false);
+      expect(handleRegistration).toHaveBeenCalledWith(event, 1, false, undefined);
     });
   });
 });

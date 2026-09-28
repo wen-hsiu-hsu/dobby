@@ -112,6 +112,31 @@ describe('handleLeave', () => {
     });
   });
 
+  it('still replies "not found" (not the season error) when both lookups come back empty', async () => {
+    vi.mocked(resolveTarget).mockResolvedValue(null);
+    vi.mocked(seasonRepo.findByName).mockResolvedValue(null);
+
+    await handleLeave(event, false, false);
+
+    const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
+    expect((messages[0] as { text: string }).text).toBe('找不到您的資料');
+  });
+
+  it('passes the actor snapshot to resolveTarget and looks up the season without waiting for it', async () => {
+    let finishResolve!: (v: { personPageId: string; displayName: string }) => void;
+    vi.mocked(resolveTarget).mockReturnValue(new Promise((r) => { finishResolve = r; }));
+    const actorUser = { userId: 'user-alice' } as any;
+
+    const handling = handleLeave(event, false, false, actorUser);
+    await Promise.resolve();
+    expect(resolveTarget).toHaveBeenCalledWith(expect.objectContaining({ isSelf: true }), 'user-alice', actorUser);
+    expect(seasonRepo.findByName).toHaveBeenCalled();
+
+    finishResolve({ personPageId: 'person-1', displayName: 'Alice' });
+    await handling;
+    expect(calendarRepo.updateAbsentees).toHaveBeenCalled();
+  });
+
   it('wraps the read-modify-write in withMutex using the event date as key', async () => {
     await handleLeave(event, false, false);
 

@@ -9,6 +9,7 @@ import { calculateAddCapacity, calculateRemoveCapacity } from './capacity-calcul
 import { parseRegistrationTarget } from './registration-parser.js';
 import { buildEventStatusMessage } from './event-status-message.js';
 import { formatDate, getNextSaturday, getSeasonNameForDate } from '../../utils/date-utils.js';
+import type { NotionUser } from '../../types/notion-models.js';
 
 interface MessageEvent {
   replyToken: string;
@@ -19,7 +20,8 @@ interface MessageEvent {
 export async function handleRegistration(
   event: MessageEvent,
   delta: number,
-  isAdmin = false
+  isAdmin = false,
+  actorUser?: NotionUser | null
 ): Promise<void> {
   const target = parseRegistrationTarget(event as any);
 
@@ -33,17 +35,19 @@ export async function handleRegistration(
     return;
   }
 
-  const resolved = await resolveTarget(target, event.source.userId);
-  if (!resolved) {
-    await replyMessage(event.replyToken, [{ type: 'text', text: '找不到您的帳號，請先向管理員登記' }]);
-    return;
-  }
-
   const nextSaturday = formatDate(getNextSaturday());
 
   // Season of the event date (e.g. "2026-Q4"), not today's — see getSeasonNameForDate
   const seasonName = getSeasonNameForDate(nextSaturday);
-  const activeSeason = await seasonRepo.findByName(seasonName);
+  // Independent lookups, run in parallel; the "account not found" reply still takes precedence.
+  const [resolved, activeSeason] = await Promise.all([
+    resolveTarget(target, event.source.userId, actorUser),
+    seasonRepo.findByName(seasonName),
+  ]);
+  if (!resolved) {
+    await replyMessage(event.replyToken, [{ type: 'text', text: '找不到您的帳號，請先向管理員登記' }]);
+    return;
+  }
   if (!activeSeason) {
     await replyMessage(event.replyToken, [{ type: 'text', text: `找不到 ${seasonName} 季租資料` }]);
     return;

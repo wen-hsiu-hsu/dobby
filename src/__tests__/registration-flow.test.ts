@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createTestBot } from '../test-utils/index.js';
+import { notionPost } from '../services/notion/notion-fetch.js';
 
 vi.mock('../services/notion/notion-fetch.js');
 vi.mock('../config/line.js');
@@ -20,6 +21,14 @@ describe('Registration flow', () => {
     expect(msg.text).toContain('報名成功');
     // Notion PATCH should have been called once to update guests
     expect(bot.notionPatchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['@Dobby +1', '@Dobby 假'])('%s 只查一次 USERS（沿用 message-handler 查到的資料）', async (text) => {
+    const bot = createTestBot();
+    await bot.run(text, { userId: 'user-alice' });
+
+    const usersQueries = vi.mocked(notionPost).mock.calls.filter(([path]) => path.includes('test-db-users'));
+    expect(usersQueries).toHaveLength(1);
   });
 
   it('@Dobby +1 → 找不到活動（calendar empty）', async () => {
