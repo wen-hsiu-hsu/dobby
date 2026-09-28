@@ -106,7 +106,7 @@
 
 這代表**之後新增一種 log 訊息或幫既有 log 多加一個欄位，`/logs` 頁面完全不用改**——只要程式碼裡呼叫 `logger.info({...})`/`logger.debug({...})`，畫面上就會自動有對應的顯示，不需要像 Notion 呼叫/LINE 收發那樣額外寫一份專屬的顯示邏輯。這個通用機制只是單純把值印出來，不會做欄位語意上的解讀（例如布林值就是印 `true`/`false`，物件會印成 JSON 字串），所以想要更精緻的呈現方式（自訂標題、狀態顏色）還是要走 Notion 呼叫/LINE 收發那種專屬顯示。
 
-排程事件的預覽文字（列表卡片上那行）也是靠這個通用機制：沒有 LINE 回覆/推播可以摘要時，會拿這個事件裡「最後一筆」通用 log 的訊息名稱＋欄位當預覽（例如顯示名稱批次更新結束時的 `Display name update complete` 摘要），不用為每種排程作業寫專屬的預覽文案。
+排程事件的預覽文字（列表卡片上那行）也是靠這個通用機制：沒有 LINE 回覆/推播可以摘要時，會拿這個事件裡「最後一筆」通用 log 的訊息名稱＋欄位當預覽（例如顯示名稱批次更新結束時的 `Display name update complete` 摘要），不用為每種排程作業寫專屬的預覽文案。例外是 `Mutex task finished`（`services/mutex.ts` 的鎖摘要）不會被選來當預覽：fire-and-forget 的 `trackUser` 會讓它排在 `Event processed` 之後，而它的 key 可能是 `user-track-${userId}`，當預覽會把列表上本該遮蔽的 userId 明文露出（排除清單是 `src/routes/logs.ts` 的 `PREVIEW_EXCLUDED_MSGS`）。
 
 ## 排程事件的批次結果圖
 

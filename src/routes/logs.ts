@@ -713,6 +713,9 @@ function formatMessagesForPreview(messages: string[]): string {
   return messages.length > 1 ? `（共 ${messages.length} 則訊息）\n${annotated.join('\n')}` : annotated.join('\n');
 }
 
+// 跟 `services/mutex.ts` 的 log 訊息字面量一致。
+const PREVIEW_EXCLUDED_MSGS = new Set(['Mutex task finished']);
+
 function groupPreview(group: FlowGroup): string {
   if (group.end) {
     if (group.end.failure) {
@@ -735,7 +738,13 @@ function groupPreview(group: FlowGroup): string {
   // 沒有 LINE 回覆/推播可用時，用這個流程裡最後一筆通用單行 log（例如排程
   // 作業結束時的摘要 log）當預覽，比固定公式更能反映實際發生了什麼——不用
   // 為新的摘要 log 訊息另外寫規則，通用渲染器的欄位一樣會自動出現。
-  const singles = group.misc.filter((r): r is { kind: 'single'; entry: LogEntry } => r.kind === 'single');
+  // `Mutex task finished` 不當預覽：它在任務真正結束時才寫出，fire-and-forget 的
+  // trackUser 會讓它排在 `Event processed` 後面、變成群組閒聊的最後一筆；它的
+  // key 又可能是 `user-track-${userId}`，當預覽會把卡片上本該遮蔽的 userId 明文
+  // 露出來（mutex.ts 的 logSummary）。
+  const singles = group.misc.filter(
+    (r): r is { kind: 'single'; entry: LogEntry } => r.kind === 'single' && !PREVIEW_EXCLUDED_MSGS.has(String(r.entry.msg ?? ''))
+  );
   const lastSingle = singles.at(-1)?.entry;
   if (lastSingle) {
     const { level: _level, time: _time, msg, reqId: _reqId, pid: _pid, hostname: _hostname, ...extra } = lastSingle;

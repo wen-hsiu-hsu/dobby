@@ -632,6 +632,26 @@ describe('createLogsRouter', () => {
   // logger.error，但歡迎訊息有正常送出，要維持「完成（有降級）」而不是
   // 「失敗」。上面那個測試用的是 info 等級的降級訊息，抓不到「error 判斷
   // 被搬到降級判斷之前、卻忘了排除降級訊息」這種回歸。
+  // trackUser 是 fire-and-forget，它的 mutex 摘要（key 帶 userId）會在
+  // `Event processed` 之後才寫出；不能讓它變成卡片預覽，否則列表上會明文露出
+  // 本該遮蔽的 userId。
+  it('does not use the trailing Mutex task finished line (userId in key) as the card preview', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'message', sourceType: 'group', reqId: 'req-chat', msg: 'Processing event' },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 1), reqId: 'req-chat', msg: 'Message classified', isCommand: false },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 2), reqId: 'req-chat', msg: 'Event processed', type: 'message', durationMs: 5 },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 3), reqId: 'req-chat', msg: 'Notion API request', method: 'PATCH', path: '/pages/p1', db: 'users', callId: 'c1' },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 4), reqId: 'req-chat', msg: 'Notion API response', method: 'PATCH', path: '/pages/p1', db: 'users', callId: 'c1', durationMs: 300 },
+      { level: 20, time: Date.UTC(2024, 0, 1, 0, 0, 5), reqId: 'req-chat', msg: 'Mutex task finished', key: 'user-track-Uabcdef1234567890', queuedAhead: 0, waitMs: 0, heldMs: 900, callerTimedOut: false, fnFailed: false },
+    ]);
+
+    const html = await getLogsHtml();
+
+    const preview = html.match(/<div class="ev-preview[^"]*">([^<]*)<\/div>/)?.[1] ?? '';
+    expect(preview).toContain('Event processed');
+    expect(preview).not.toContain('Uabcdef1234567890');
+  });
+
   it('keeps an error-level degradation message (buildMemberJoinedWelcome fallback) as "degraded", not "error"', async () => {
     vi.mocked(readRecentLogs).mockResolvedValueOnce([
       { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'memberJoined', sourceType: 'group', reqId: 'req-welcome', msg: 'Processing event' },
