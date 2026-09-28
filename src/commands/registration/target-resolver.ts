@@ -35,7 +35,7 @@ export async function resolveTarget(
   }
 
   if (target.targetUserId) {
-    const user = await usersRepo.findByUserId(target.targetUserId);
+    const user = await usersRepo.findByUserId(target.targetUserId, 'mention-target');
     if (user) {
       const person = user.registeredPersonPageId
         ? (await peopleRepo.findByPageIds([user.registeredPersonPageId]))[0] ?? null

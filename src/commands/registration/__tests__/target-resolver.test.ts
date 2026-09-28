@@ -68,6 +68,6 @@ describe('resolveTarget (someone else)', () => {
 
     await resolveTarget({ isSelf: false, targetUserId: 'u-bob' } as any, 'user-alice', makeUser());
 
-    expect(usersRepo.findByUserId).toHaveBeenCalledWith('u-bob');
+    expect(usersRepo.findByUserId).toHaveBeenCalledWith('u-bob', 'mention-target');
   });
 });

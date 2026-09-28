@@ -114,7 +114,7 @@ describe('trackUser new user creation', () => {
     trackUser('user-1', { groupId: 'group-1' }, null);
     await flush();
 
-    expect(usersRepo.findByUserId).toHaveBeenCalledWith('user-1');
+    expect(usersRepo.findByUserId).toHaveBeenCalledWith('user-1', 'track-user');
     expect(usersRepo.create).not.toHaveBeenCalled();
     expect(usersRepo.incrementMessageCount).toHaveBeenCalledWith('page-1', 3);
   });

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { notionPost, notionPatch } from '../notion-fetch.js';
 import { findByUserId, findAll, create, update, incrementMessageCount } from '../users-repository.js';
+import { getPurpose } from '../../../utils/request-context.js';
 
 vi.mock('../notion-fetch.js');
 
@@ -72,6 +73,24 @@ describe('users-repository', () => {
       const user = await findByUserId('missing');
 
       expect(user).toBeNull();
+    });
+
+    it('labels the query by why it was looked up (defaults to the message sender)', async () => {
+      const purposes: Array<string | undefined> = [];
+      notionPostMock.mockImplementation(async () => {
+        purposes.push(getPurpose());
+        return { results: [] };
+      });
+
+      await findByUserId('user-alice');
+      await findByUserId('u-bob', 'mention-target');
+      await findByUserId('user-new', 'track-user');
+
+      expect(purposes).toEqual([
+        '查詢發話者的 bot 使用者帳號',
+        '查詢被 @ 的對象的 bot 使用者帳號',
+        '追蹤使用者時重查 bot 使用者帳號（發話者或新加入的成員）',
+      ]);
     });
   });
 

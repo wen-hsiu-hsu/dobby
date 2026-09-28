@@ -86,7 +86,7 @@ async function _trackUserAsync(
   const trustKnownUser = knownUser != null && !isLocked(key);
 
   await withMutex(key, async () => {
-    const existing = trustKnownUser ? knownUser : await usersRepo.findByUserId(userId);
+    const existing = trustKnownUser ? knownUser : await usersRepo.findByUserId(userId, 'track-user');
 
     if (!existing) {
       const customName = await resolveNewUserName(userId, context, options.displayName);

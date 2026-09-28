@@ -26,8 +26,22 @@ function pageToUser(page: PageObjectResponse): NotionUser {
   };
 }
 
-export async function findByUserId(userId: string): Promise<NotionUser | null> {
-  return withPurpose('查詢發話者的 bot 使用者帳號', async () => {
+/**
+ * Why this lookup happens, so the /logs timeline labels it correctly. Not a free-form
+ * string: withPurpose is innermost-wins (request-context.ts), so a caller can't relabel
+ * the query by wrapping this call in its own withPurpose — the label has to be chosen here.
+ */
+export type UserLookupReason = 'actor' | 'mention-target' | 'track-user';
+
+const USER_LOOKUP_PURPOSES: Record<UserLookupReason, string> = {
+  actor: '查詢發話者的 bot 使用者帳號',
+  'mention-target': '查詢被 @ 的對象的 bot 使用者帳號',
+  // trackUser (message sender) and trackJoinedMember (a newly joined member) share this path.
+  'track-user': '追蹤使用者時重查 bot 使用者帳號（發話者或新加入的成員）',
+};
+
+export async function findByUserId(userId: string, reason: UserLookupReason = 'actor'): Promise<NotionUser | null> {
+  return withPurpose(USER_LOOKUP_PURPOSES[reason], async () => {
     const response = await notionPost(`/databases/${env.NOTION_DB_USERS}/query`, {
       filter: { property: 'user_id', title: { equals: userId } },
     }) as any;
