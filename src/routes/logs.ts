@@ -483,8 +483,15 @@ function groupTitle(group: FlowGroup, kind: EventKind): string {
     const label = group.end.kind === 'line-reply' ? 'LINE 回覆' : 'LINE 推播';
     return group.end.failure ? `${label}失敗` : `${label}記錄`;
   }
-  const firstSingle = group.misc.find((r): r is { kind: 'single'; entry: LogEntry } => r.kind === 'single');
-  if (firstSingle) return String(firstSingle.entry.msg ?? '背景作業');
+  const singles = group.misc.filter((r): r is { kind: 'single'; entry: LogEntry } => r.kind === 'single');
+  // 排程事件優先用排程自己的摘要行當標題：共用的 service 也可能在摘要之前記
+  // info（例如 `getEventOccupancy` 的 `Event occupancy unavailable…`），直接取
+  // 第一筆的話週報中止事件的標題會變成那一行。
+  const scheduleSummary = singles.find((r) =>
+    SCHEDULE_ORIGIN_MARKERS.some(([marker]) => matchesScheduleMarker(String(r.entry.msg ?? ''), marker))
+  );
+  const titleEntry = scheduleSummary ?? singles[0];
+  if (titleEntry) return String(titleEntry.entry.msg ?? '背景作業');
   if (group.steps.length > 0) return 'Notion API 批次作業';
   if (group.misc.some((r) => r.kind === 'line-push')) return 'LINE 推播作業';
   return kind === 'system' ? '系統事件' : group.reqId ? '背景作業' : '背景/未關聯事件';
@@ -580,6 +587,14 @@ const SCHEDULE_ORIGIN_MARKERS: Array<[string, string]> = [
 ];
 
 /**
+ * 訊息等於標記，或以「標記 + `:`」開頭（`Weekly push aborted: DOBBY_GROUP_IDS is not set`
+ * 這類把原因接在冒號後面的訊息）。只用 `===` 的話帶原因的訊息永遠配不到。
+ */
+function matchesScheduleMarker(msg: string, marker: string): boolean {
+  return msg === marker || msg.startsWith(`${marker}:`);
+}
+
+/**
  * 列表上可以「連續幾筆折疊成一列」的事件種類——只有純雜訊、又高頻的才收
  * （目前只有 R2 同步：`LOG_LEVEL=debug` 下每 15 分鐘一輪、每輪都記一行
  * `R2 log sync complete`，一天近百張卡片會把真正的指令淹掉）。折疊只發生在
@@ -613,9 +628,9 @@ function groupOrigin(group: FlowGroup, kind: EventKind): string {
   if (kind === 'chat') return '自動回覆（非指令）';
   if (kind === 'join') return String(group.start?.['type'] ?? 'memberJoined');
   // schedule
-  const msgs = new Set(flattenEntries(group).map((e) => String(e.msg ?? '')));
+  const msgs = flattenEntries(group).map((e) => String(e.msg ?? ''));
   for (const [marker, slug] of SCHEDULE_ORIGIN_MARKERS) {
-    if (msgs.has(marker)) return slug;
+    if (msgs.some((m) => matchesScheduleMarker(m, marker))) return slug;
   }
   return '排程作業';
 }

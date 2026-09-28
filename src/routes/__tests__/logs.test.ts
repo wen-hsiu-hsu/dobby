@@ -727,6 +727,21 @@ describe('createLogsRouter', () => {
     expect(html).not.toContain('class="batch-section"');
   });
 
+  // 週報中止的訊息把原因接在冒號後面，「來自」要用前綴比對才認得出是 weekly-push；
+  // getEventOccupancy 在摘要行之前記的 info 也不能搶走標題。
+  it('titles an aborted weekly push by its own summary line and attributes it to weekly-push', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 30, time: Date.UTC(2024, 0, 1, 4, 0, 0), reqId: 'sched-abort', msg: 'Event occupancy unavailable: no event or season for date', date: '2024-01-06', hasEvent: false, hasSeason: true },
+      { level: 50, time: Date.UTC(2024, 0, 1, 4, 0, 1), reqId: 'sched-abort', msg: 'Weekly push aborted: no calendar/season data for date', nextSaturday: '2024-01-06' },
+    ]);
+
+    const { text } = await getLogsText({ reqId: 'sched-abort' });
+
+    expect(text).toContain('# Weekly push aborted: no calendar/season data for date');
+    expect(text).not.toContain('# Event occupancy unavailable');
+    expect(text).toContain('來自: weekly-push');
+  });
+
   it('classifies a reqId-less HTTP-layer failure (e.g. webhook signature validation) as its own "system" event, separate from server lifecycle logs', async () => {
     vi.mocked(readRecentLogs).mockResolvedValueOnce([
       { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), msg: 'Server started', port: 3000 },
