@@ -46,6 +46,46 @@
   - 另一種做法是在 `message-handler.ts:71` 對 `routeCommand` 統一 catch，以後新增的指令也不會漏。但同樣不能讓 `MutexTimeoutError` 落到這裡被回成「系統錯誤」；已經回覆過的 handler 若之後才 throw，再回一次會因 replyToken 已用過而被 LINE 拒絕（無害，但 `/logs` 會多一筆 `Reply failed`）。
   - 測試不能用 `createTestBot`（fixture 不會 throw），要手動 mock repository 讓它 reject，寫法參考 `src/commands/registration/__tests__/registration-handler.test.ts` 開頭。
 
+- [ ] **`trackUser` 可能用過時的 USERS 快照寫回，少算一次發言數，少數情況會弄丟一個群組 ID。**（2026-09-28 code review 發現，是既有問題，不是當天 log 改動造成的）
+
+  **嚴重度：低優先、不是急件。** 這是 bug，但沒有觀察到實際發生（見下方「有沒有發生過」）。`message_counts` 目前沒有任何程式讀取，成就規則也不用它；groups 只有暱稱排程在讀，而且弄丟群組需要很少見的時序。
+
+  機制：`src/services/user-management.ts:95` 的 `trustKnownUser = knownUser != null && !isLocked(key)` 決定要不要沿用快照 `knownUser`。快照是 `src/handlers/message-handler.ts:49` 的 `findByUserId` 讀的，第 59 行再把它傳給 `trackUser`。沿用快照的話，鎖內就不重查 USERS，直接拿快照算更新：
+  - `groups`／`multiChats`：只有「這次的群組／聊天室不在快照裡」時，才把「快照的陣列＋這次的 ID」整包寫回（第 129-138 行）。
+  - `message_counts`：寫的是絕對值。`incrementMessageCount(pageId, existing.messageCount)` 寫入「快照的數字＋1」（`services/notion/users-repository.ts:124-130`），不是 Notion 端自己加一。
+
+  快照過時的話，前一次寫入的結果會被蓋掉。「前一次」可能是 `trackUser`，也可能是 `trackJoinedMember`（`handlers/member-joined-handler.ts:27`，用同一把 `user-track-${userId}` 鎖，也會寫 groups／multiChats）。有兩種情況會讓過時的快照被信任：
+  1. **前一次呼叫逾時、但背景還在跑。** `isLocked()`（`services/mutex.ts:158-160`）讀的是 `pending`，也就是「還有沒有呼叫端在等」，在 `withMutex` 的 `finally` 裡減一（`mutex.ts:105-111`），逾時的呼叫端也會走到這裡。呼叫端 10 秒逾時放棄後，只要沒有其他呼叫端還在排隊，`pending` 就歸零；但 `fn()` 還在背景持鎖寫入（ADR 0002）。這時同一人的下一則訊息會信任快照。鎖的 FIFO 仍然成立，它會等前一個 `fn()` 寫完才執行，但拿的是寫入前的快照去算。要 Notion 卡住超過 10 秒才會發生。
+  2. **快照在前一次寫入生效前讀取，但檢查 `isLocked` 時前一次已經結束。** 第 95 行在 `_trackUserAsync` 第一個 await 之前同步執行，所以檢查點是「呼叫 `trackUser` 那一刻」，不是「讀快照那一刻」。`trackUser` 是 fire-and-forget（只有「新使用者＋指令」才 await，`message-handler.ts:62`），同一人快速連發兩則時，第二則的 `findByUserId` 會和第一則的 `fn()` 重疊。如果 Notion 處理第二則查詢時第一則的 PATCH 還沒生效，而查詢的回應在第一則 `fn()` 結束後才回來，第二則就會信任舊快照。不需要逾時，但時間窗很窄。
+
+  影響：
+  - **`message_counts` 少算 1**，不會自己修正。目前沒有任何程式讀這個欄位。規劃中的成就系統也不會用它：`docs/achievements-rulebook.md:30` 寫發話類成就「不看訊息數量」，第 107 行規定發話要算貼圖，但 `message_counts` 不算貼圖（`docs/notion/databases.md:32`）。
+  - **群組 ID 遺失，條件很窄**：同一人要在時間窗內，先後在兩個「他從沒講過話的群組」X、Y 發言（Y ≠ X）。後一次拿不含 X 的快照寫回 `[...快照, Y]`，X 就被洗掉。只是「從不同群組發言」不會觸發，因為群組已經在快照裡就不寫 groups。multiChats 同理。
+    - 遺失的 ID 要等這個人之後又在那個群組發言（或再觸發一次 memberJoined）才會加回去，不再發言就永久遺失。
+    - groups 目前唯一的讀取者是 `schedulers/display-name-update.ts:47-55`，靠它查 LINE 暱稱。少一個群組，只有在其他群組都查不到 profile 時才會影響暱稱更新。
+  - **不會建出重複的 USERS 頁**：`null` 快照從來不被信任（第 92-94 行註解），鎖內會重查。
+
+  有沒有發生過：
+  - 本機 `logs/` 有一筆看起來像的紀錄，但**不是這個 bug**：`/pages/2e44dbf2-…93d7` 在 2026-09-22 01:00:33 被寫了兩次 `message_counts: 515`（reqId `bd613b`、`77151d`，相差 120ms）。兩個 PATCH 是同時送出的，那是 `_trackUserAsync` 還沒加鎖時的舊 race，commit `78ce9cf`（2026-09-25）加了 `withMutex` 之後就不會再這樣。
+  - `78ce9cf` 之後的 log 沒有觀察到這條描述的情況。
+  - 要檢查的話：找「`累加使用者發言次數`」的 PATCH，看同一個 page 有沒有兩次寫入同一個數字，而且兩次 PATCH 沒有重疊（有鎖之後應該一前一後）。PATCH body 只在 `LOG_LEVEL=debug` 才有記錄（`services/notion/notion-fetch.ts` 的 `Notion API request payload`）；info 等級下只看得到 path 裡的 pageId，看不到寫了什麼數字。
+
+  如果要處理：
+  - **只修第 1 種**：新增一個讀 `inFlight` 的函式（例如 `isBusy(key)`）。`inFlight` 是 `mutex.ts` 為 `Mutex task finished` 摘要加的計數，只在 `fn()` 真正結束時才減一。`user-management.ts:95` 改用它。
+    - **檢查位置不能動**：必須跟現在一樣，在呼叫 `withMutex` **之前**同步檢查（第 89-91 行註解說明了原因）。`withMutex` 一被呼叫就會把這次算進 `inFlight`，之後才檢查的話永遠回 true。
+    - **不要直接改 `isLocked()` 讀的東西**：`services/__tests__/mutex.test.ts:235` 的測試鎖住的就是「`isLocked` 反映呼叫端有沒有在等」這個語意，ADR 0002 第 11 行也寫了 `trackUser` 依賴它。要改就要連同測試、ADR 一起改，並說明語意變更的理由。
+    - `inFlight` 的註解（`mutex.ts:5-8`）目前寫「只給 log 用」，拿來做判斷時要一起改。
+  - **要連第 2 種一起修**：檢查點要移到讀快照之前，例如在讀快照前記下這個 key「已完成幾次」，`trackUser` 時比對。陷阱：
+    - 快照是在 `message-handler.ts:49` 讀的，所以要在那之前記下計數，再傳給 `trackUser`。這要改 `trackUser` 的簽名，`message-handler` 也要拿得到 key，而 `user-track-${userId}` 目前是 `user-management.ts` 內部的格式。
+    - 比對計數之外，仍然要檢查 `inFlight`（或上面的 `isBusy`）：前一個任務如果讀快照時已經在跑、到呼叫 `trackUser` 時還沒結束，已完成次數不會變，只比計數會漏掉。
+    - 計數不能照抄 `inFlight` 的清理方式（歸零就 `delete`）：刪掉再重建的計數可能剛好回到一樣的數字，就會錯誤地信任快照。計數也要在 `tail` 完成時遞增，不是在呼叫端的 `finally`，否則第 1 種還是存在。
+  - **另一個做法是拿掉快照優化，鎖內一律重查 USERS**：每則群組訊息多一次 Notion 查詢（約 0.45 秒，見 ADR 0009；在 fire-and-forget 裡，使用者感覺不到），但會多吃 rate limit。會弄壞 `services/__tests__/user-management.test.ts:69`（斷言 `findByUserId` 沒被呼叫）和 `:308`（斷言只呼叫 1 次），`docs/adr/0009-actor-users-snapshot-non-null-only.md` 第 7 行附近提到 `trustKnownUser` 的地方也要同步。
+  - **沒驗證過的前提**：不管哪種做法，最後都靠「鎖內重查拿到最新值」。重查用的是 database query（`findByUserId` → `/databases/…/query`），`docs/architecture.md:75` 只實測過「新建的頁面立刻查得到」，沒測過「PATCH 更新數字屬性後，query 立刻拿到新值」。如果 Notion 在這裡有延遲，連現在不信任快照的路徑也會少算。改用 `GET /pages/{pageId}` 讀會比較穩。
+  - `message_counts` 更根本的修法是不寫絕對值，但 Notion API 沒有原子加一，還是要靠「鎖內讀最新值」。
+  - 測試：`createTestBot` 把 `withMutex` mock 掉了（`test-utils/create-test-bot.ts:196-199`），重現不了。要加在 `services/__tests__/user-management.test.ts` 既有的 `describe('trackUser concurrency')`（第 270 行起，用的是真的 mutex），不要另外寫一套。
+    - 第 2 種很好重現：拿同一份舊快照，先 `await trackUser(A)`，再呼叫 `trackUser(B)`，不需要手動控制 resolve 時機。
+    - 第 1 種要用 fake timers 觸發 10 秒逾時。該檔的 `flush()` 用 `setImmediate`，vitest 的 fake timers 可能連 `setImmediate` 也假掉，讓 `flush()` 卡住，寫之前先確認。
+
 ---
 
 ## 已評估、不採納
