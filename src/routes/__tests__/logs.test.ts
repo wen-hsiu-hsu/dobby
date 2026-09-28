@@ -1428,4 +1428,80 @@ describe('createLogsRouter', () => {
       expect(html).toContain(`const POLL_IGNORED_LINE_SUFFIX = ${JSON.stringify(suffix)};`);
     });
   });
+
+  // 報名／請假 mutex 逾時（`with-fresh-calendar-event.ts`）：先成功回覆逾時訊
+  // 息，背景任務跑完後再用同一個 replyToken 回覆一次、被 LINE 拒絕。之前
+  // buildFlowGroups() 讓第二次回覆覆蓋第一次，使用者實際收到的逾時訊息從時間
+  // 軸消失，卡片預覽也只剩「回覆失敗」。狀態仍要是「失敗」（docs/logging.md
+  // 狀態判定規則 1 與 mutex 逾時那段）。
+  describe('event with two LINE replies (mutex timeout: first reply delivered, second rejected)', () => {
+    const TIMEOUT_TEXT = '處理時間較長，這次操作可能已經完成，請勿重複操作。如需確認，請洽管理員。';
+    const at = (s: number) => Date.UTC(2024, 0, 1, 0, 0, s);
+    const timeoutEntries = [
+      { level: 30, time: at(0), type: 'message', sourceType: 'group', reqId: 'req-timeout', msg: 'Processing event' },
+      { level: 30, time: at(1), reqId: 'req-timeout', msg: 'Message classified', isCommand: true, parsed: true, commandType: 'registration' },
+      { level: 40, time: at(11), reqId: 'req-timeout', msg: 'Registration timed out; result unknown to the user', err: { message: 'Mutex timeout' } },
+      { level: 30, time: at(12), reqId: 'req-timeout', msg: 'LINE reply', method: 'POST', path: '/v2/bot/message/reply', sendId: 's-t1' },
+      { level: 20, time: at(12), reqId: 'req-timeout', msg: 'LINE reply payload', sendId: 's-t1', messages: [TIMEOUT_TEXT] },
+      { level: 30, time: at(13), reqId: 'req-timeout', msg: 'LINE reply sent', sendId: 's-t1' },
+      { level: 30, time: at(20), reqId: 'req-timeout', msg: 'LINE reply', method: 'POST', path: '/v2/bot/message/reply', sendId: 's-t2' },
+      { level: 20, time: at(20), reqId: 'req-timeout', msg: 'LINE reply payload', sendId: 's-t2', messages: ['已報名 5/9'] },
+      { level: 40, time: at(21), reqId: 'req-timeout', msg: 'Reply failed', method: 'POST', path: '/v2/bot/message/reply', sendId: 's-t2', err: { message: 'Invalid reply token' } },
+    ];
+
+    it('keeps the status at 失敗 and the LINE 回覆失敗 flag, but previews the timeout message the user actually received', async () => {
+      vi.mocked(readRecentLogs).mockResolvedValueOnce(timeoutEntries);
+
+      const html = await getLogsHtml();
+
+      expect(html).toContain('data-key="req-timeout" data-status="error"');
+      expect(html).toContain('LINE 回覆失敗');
+      const preview = html.match(/<div class="ev-preview[^"]*">([^<]*)<\/div>/)?.[1] ?? '';
+      expect(preview).toContain('處理時間較長');
+      expect(preview).not.toContain('回覆失敗');
+    });
+
+    it('shows both replies in the ?format=text detail: the delivered timeout message and the rejected second reply', async () => {
+      vi.mocked(readRecentLogs).mockResolvedValueOnce(timeoutEntries);
+
+      const { text } = await getLogsText({ reqId: 'req-timeout' });
+
+      expect(text).toContain('狀態: 失敗');
+      expect(text).toContain('flag: LINE 回覆失敗');
+      expect(text).toMatch(/- \[info\] LINE 回覆已送出  POST \/v2\/bot\/message\/reply/);
+      expect(text).toContain(`Dobby 送給使用者的訊息: ${TIMEOUT_TEXT}`);
+      expect(text).toMatch(/- \[warn\] 終點  LINE 回覆失敗  POST \/v2\/bot\/message\/reply/);
+      expect(text).toContain('這則訊息沒有送出: 已報名 5/9');
+      expect(text.indexOf('LINE 回覆已送出')).toBeLessThan(text.indexOf('LINE 回覆失敗  POST'));
+    });
+
+    it('shows both replies in the HTML detail timeline', async () => {
+      vi.mocked(readRecentLogs).mockResolvedValueOnce(timeoutEntries);
+
+      const html = await getEventDetailHtml('req-timeout');
+
+      expect(html).toContain('LINE 回覆已送出');
+      expect(html).toContain(TIMEOUT_TEXT);
+      expect(html).toContain('LINE 回覆失敗');
+      expect(html).toContain('這則訊息沒有送出');
+    });
+
+    // 規則 1 是「LINE 回覆失敗就算失敗」，不是「最後一次回覆失敗才算」：先失
+    // 敗、後成功的順序也不能因為終點是成功的那次就被判成完成。
+    it('still counts an earlier failed reply as 失敗 when a later reply succeeded', async () => {
+      vi.mocked(readRecentLogs).mockResolvedValueOnce([
+        { level: 30, time: at(0), type: 'message', sourceType: 'group', reqId: 'req-fail-then-ok', msg: 'Processing event' },
+        { level: 30, time: at(1), reqId: 'req-fail-then-ok', msg: 'LINE reply', method: 'POST', path: '/v2/bot/message/reply', sendId: 's-f1' },
+        { level: 40, time: at(2), reqId: 'req-fail-then-ok', msg: 'Reply failed', method: 'POST', path: '/v2/bot/message/reply', sendId: 's-f1', err: { message: 'socket hang up' } },
+        { level: 30, time: at(3), reqId: 'req-fail-then-ok', msg: 'LINE reply', method: 'POST', path: '/v2/bot/message/reply', sendId: 's-f2' },
+        { level: 20, time: at(3), reqId: 'req-fail-then-ok', msg: 'LINE reply payload', sendId: 's-f2', messages: ['第二次送出的內容'] },
+        { level: 30, time: at(4), reqId: 'req-fail-then-ok', msg: 'LINE reply sent', sendId: 's-f2' },
+      ]);
+
+      const { text } = await getLogsText({ reqId: 'req-fail-then-ok' });
+
+      expect(text).toContain('狀態: 失敗');
+      expect(text).toContain('flag: LINE 回覆失敗');
+    });
+  });
 });

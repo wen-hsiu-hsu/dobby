@@ -396,6 +396,22 @@ function flattenEntries(group: FlowGroup): LogEntry[] {
   return out;
 }
 
+/**
+ * 這個流程所有的 LINE 回覆，依時間順序：`group.end` 只是最後一次，mutex 逾時
+ * 這類回覆兩次的事件，前面的回覆留在 `group.misc`（見 `log-grouping.ts` 的
+ * `FlowGroup.end` 說明）。要問「有沒有回覆失敗」「使用者實際收到哪一則」時
+ * 用這個，不要只看 `group.end`。
+ */
+function replyRows(group: FlowGroup): LineSendRow[] {
+  const replies = group.misc.filter((m): m is LineSendRow => m.kind === 'line-reply');
+  if (group.end) replies.push(group.end);
+  return replies;
+}
+
+function hasReplyFailure(group: FlowGroup): boolean {
+  return replyRows(group).some((r) => !!r.failure);
+}
+
 const SOURCE_LABELS: Record<string, string> = { group: '群組', room: '多人聊天室', user: '1 對 1' };
 const EVENT_TYPE_LABELS: Record<string, string> = {
   join: '加入群組事件',
@@ -481,7 +497,7 @@ function groupTitle(group: FlowGroup, kind: EventKind): string {
   }
   if (group.end) {
     const label = group.end.kind === 'line-reply' ? 'LINE 回覆' : 'LINE 推播';
-    return group.end.failure ? `${label}失敗` : `${label}記錄`;
+    return hasReplyFailure(group) ? `${label}失敗` : `${label}記錄`;
   }
   const singles = group.misc.filter((r): r is { kind: 'single'; entry: LogEntry } => r.kind === 'single');
   // 排程事件優先用排程自己的摘要行當標題：共用的 service 也可能在摘要之前記
@@ -642,7 +658,7 @@ function isDegradationEntry(entry: LogEntry): boolean {
 function groupStatus(group: FlowGroup, kind: EventKind): EventStatus {
   const hasDomainError =
     group.steps.some((s) => !!s.error) ||
-    !!group.end?.failure ||
+    hasReplyFailure(group) ||
     group.misc.some((m) => m.kind === 'line-push' && !!m.failure);
   if (hasDomainError) return 'error';
   const flat = flattenEntries(group);
@@ -681,7 +697,7 @@ function groupDegradedText(group: FlowGroup): string {
 }
 
 function groupFlag(group: FlowGroup): string | null {
-  if (group.end?.failure) return 'LINE 回覆失敗';
+  if (hasReplyFailure(group)) return 'LINE 回覆失敗';
   if (group.misc.some((m) => m.kind === 'line-push' && m.failure)) return 'LINE 推播失敗';
   if (group.steps.some((s) => !!s.error)) return 'Notion API 失敗';
   const totalRetries = group.steps.reduce((sum, s) => sum + (s.attempts > 1 ? s.attempts - 1 : 0), 0);
@@ -718,12 +734,20 @@ const PREVIEW_EXCLUDED_MSGS = new Set(['Mutex task finished']);
 
 function groupPreview(group: FlowGroup): string {
   if (group.end) {
-    if (group.end.failure) {
-      return `回覆失敗\n${errorMessageOf(group.end.failure) ?? String(group.end.failure.msg ?? '傳送失敗')}`;
+    // 預覽顯示使用者實際收到的那則：mutex 逾時時第一次回覆（逾時訊息）送出
+    // 成功、最後一次被 LINE 拒絕，直接拿 group.end 會讓卡片只剩「回覆失敗」，
+    // 看起來像使用者什麼都沒收到。狀態跟 flag 仍然反映那次失敗。都沒送出成
+    // 功才退回最後一次。同一個 replyToken 只能成功用一次，實務上不會有兩則
+    // 都送出成功；真的有就取最後一則。
+    const replies = replyRows(group);
+    let reply = group.end;
+    for (const r of replies) if (r.sent) reply = r;
+    if (reply.failure) {
+      return `回覆失敗\n${errorMessageOf(reply.failure) ?? String(reply.failure.msg ?? '傳送失敗')}`;
     }
-    const messages = lineMessagesOf(group.end.payload);
+    const messages = lineMessagesOf(reply.payload);
     if (messages) return formatMessagesForPreview(messages);
-    if (group.end.sent) return '回覆已送出（開 LOG_LEVEL=debug 才能看到訊息內容）';
+    if (reply.sent) return '回覆已送出（開 LOG_LEVEL=debug 才能看到訊息內容）';
     return '尚無回覆結果記錄';
   }
   const push = group.misc.find((m) => m.kind === 'line-push');

@@ -303,6 +303,29 @@ describe('buildFlowGroups', () => {
     expect(group!.end?.kind).toBe('line-reply');
   });
 
+  // 報名／請假 mutex 逾時：先成功回覆逾時訊息，背景任務完成後再用同一個
+  // replyToken 回覆一次、被 LINE 拒絕。之前第二次回覆直接覆蓋 end，第一次
+  // （使用者實際收到的那則）既不在 end 也不在 misc，整列消失。
+  it('keeps every LINE reply when an event replies twice: the last one is end, earlier ones stay in misc in time order', () => {
+    const entries = [
+      entry({ msg: 'LINE reply', method: 'POST', path: '/v2/bot/message/reply', sendId: 'a', reqId: 'r1' }),
+      entry({ msg: 'LINE reply sent', sendId: 'a', reqId: 'r1' }),
+      entry({ msg: 'between replies', reqId: 'r1' }),
+      entry({ msg: 'LINE reply', method: 'POST', path: '/v2/bot/message/reply', sendId: 'b', reqId: 'r1' }),
+      entry({ level: 40, msg: 'Reply failed', sendId: 'b', reqId: 'r1' }),
+    ];
+    const rows = groupPairedEntries(entries);
+    const [group] = buildFlowGroups(rows);
+    expect(group!.end?.start['sendId']).toBe('b');
+    expect(group!.end?.failure).toBeDefined();
+    expect(group!.misc.map((r) => (r.kind === 'line-reply' ? `reply:${String(r.start['sendId'])}` : r.kind === 'single' ? r.entry.msg : r.kind))).toEqual([
+      'reply:a',
+      'between replies',
+    ]);
+    const first = group!.misc[0] as LineSendRow;
+    expect(first.sent).toBeDefined();
+  });
+
   it('keeps an unmatched single row (e.g. handleMessage) in misc, preserving original ascending time order', () => {
     const entries = [
       entry({ msg: 'Notion API request', method: 'GET', path: '/pages/abc', reqId: 'r1' }),

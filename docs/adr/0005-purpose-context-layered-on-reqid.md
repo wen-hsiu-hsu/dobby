@@ -45,6 +45,12 @@ Notion 呼叫原本在 `log-grouping.ts` 用 method+path 配對，同一個 key 
 
 `callId` 是隨機值、不含使用者資料，留在 info 行沒有 PII 問題。
 
+## 補充（2026-09-29）：`/logs` 時間軸的回覆、終點與排序
+
+`sendId` 讓每次回覆各自配對成一列之後，`buildFlowGroups()`（`routes/log-grouping.ts`）再把一個 reqId 的列分成起點／步驟／雜項／終點。以下幾點看起來可以「簡化」，但簡化回去會壞：
+
+- **一個事件可能有兩次 LINE 回覆，`FlowGroup.end` 只放最後一次，前面的留在 `misc`**。報名／請假 mutex 逾時時，`with-fresh-calendar-event.ts` 先成功回覆逾時訊息，背景任務跑完再用同一個 replyToken 回覆、被 LINE 拒絕（[ADR 0002](0002-mutex-timeout-does-not-cancel-task.md)）。原本 `end = row` 讓後一次覆蓋前一次，使用者實際收到的逾時訊息從時間軸消失、卡片預覽只剩「回覆失敗」。沒有改成 `end` 陣列，是因為讀 `end` 的地方大多只需要「有沒有回覆」（規則 3 的「指令沒回覆 → 警告」）或「終點是哪一步」，陣列會讓每個呼叫端都多一層處理；代價是「所有回覆」要看 `misc` 裡的 line-reply 加上 `end`——`routes/logs.ts` 的 `replyRows()`／`hasReplyFailure()`。狀態、flag、卡片預覽都走它，不要改回只看 `group.end`：狀態規則 1 是「任何一次回覆失敗」（先失敗後成功也算失敗），預覽則要顯示送出成功的那則（使用者實際收到的），不是最後一則。
+
 ## 現況（2026-09-28）：正式環境常駐 debug
 
 上面的理由都建立在「正式環境預設 `info`，診斷時才暫時開 `debug`」這個前提上。實際上正式環境（Pi）一直都跑 `LOG_LEVEL=debug`，2026-09-28 決定維持這個做法、把文件改成符合現況，不改回 `info`。取捨是：Notion payload、LINE 訊息全文、userId/groupId 這些 PII 會常駐寫進 `logs/` 與 R2 備份；換到的是出問題時不用重現就能直接從 log 查出原因（見 `docs/overview.md`「日誌」小節）。

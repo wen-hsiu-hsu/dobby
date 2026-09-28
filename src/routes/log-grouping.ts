@@ -246,11 +246,21 @@ export interface FlowGroup {
   start?: LogEntry;
   /** 'Processing event detail'（debug）——起點的配對明細，可能不存在（LOG_LEVEL=info 時不會捕捉到）。 */
   startDetail?: LogEntry;
-  /** 這個 reqId 流程裡的 LINE reply（回覆），一個流程最多一筆。line-push 不算終點，見下方 misc 的說明。 */
+  /**
+   * 這個 reqId 流程裡「最後一次」LINE reply（回覆）。line-push 不算終點，見下方 misc 的說明。
+   *
+   * 一個流程可能回覆兩次：報名／請假 mutex 逾時時，`with-fresh-calendar-event.ts`
+   * 先成功回覆逾時訊息，背景任務跑完再用同一個 replyToken 回覆一次、被 LINE
+   * 拒絕。只有最後一次當 end，前面的回覆照時間順序留在 misc——不能讓後一次
+   * 直接覆蓋前一次，那會讓使用者實際收到的那則從時間軸上消失。所以「這個流
+   * 程所有的回覆」要看 misc 裡的 line-reply 加上 end，不能只看 end（例如判斷
+   * 有沒有回覆失敗、卡片預覽要顯示哪一則，見 `routes/logs.ts` 的 `replyRows()`）。
+   * 有任何一次回覆時 end 一定存在。
+   */
   end?: LineSendRow;
   /** 這個 reqId 流程裡依序發生的 Notion API 呼叫。 */
   steps: NotionCallRow[];
-  /** 除了 start/startDetail/end/steps 以外的所有東西，依原順序（時間升冪）保留，包含 line-push（背景推播沒有終點的敘事位置，跟現有 renderFlowMisc 的處理方式一致）跟通用渲染器要處理的 single 行。 */
+  /** 除了 start/startDetail/end/steps 以外的所有東西，依原順序（時間升冪）保留，包含 line-push（背景推播沒有終點的敘事位置，跟現有 renderFlowMisc 的處理方式一致）、最後一次以外的 line-reply（見上方 end 的說明）跟通用渲染器要處理的 single 行。 */
   misc: DisplayRow[];
 }
 
@@ -293,10 +303,12 @@ export function buildFlowGroups(displayRows: DisplayRow[]): FlowGroup[] {
   const groups: FlowGroup[] = [];
   for (const [reqId, rows] of buckets) {
     const group: FlowGroup = { reqId, firstTime: rows.length > 0 ? representativeTime(rows[0]) : 0, steps: [], misc: [] };
+    let lastReply: DisplayRow | undefined;
+    for (const row of rows) if (row.kind === 'line-reply') lastReply = row;
     for (const row of rows) {
       if (row.kind === 'single' && row.entry.msg === 'Processing event') { group.start = row.entry; continue; }
       if (row.kind === 'single' && row.entry.msg === 'Processing event detail') { group.startDetail = row.entry; continue; }
-      if (row.kind === 'line-reply') { group.end = row; continue; }
+      if (row.kind === 'line-reply' && row === lastReply) { group.end = row; continue; }
       if (row.kind === 'notion-call') { group.steps.push(row); continue; }
       group.misc.push(row);
     }
