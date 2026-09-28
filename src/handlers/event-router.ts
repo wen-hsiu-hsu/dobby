@@ -14,8 +14,20 @@ export async function processEvents(events: WebhookEvent[]): Promise<void> {
     // and the user's raw message text) so the flow-table view always has a
     // starting point to show, and a debug-level line with the full detail
     // for when someone actually needs to see what was sent.
+    //
+    // lagMs = 現在 − LINE 記錄的事件發生時間，用來判斷 replyToken 會不會
+    // 在處理完之前失效（看 lagMs + Event processed 的 durationMs）。它混了
+    // LINE→Pi 的送達延遲、Pi 的時鐘偏差（沒校時可能是負值或固定偏移），
+    // 以及同一個 webhook 多筆事件依序處理時後面事件的排隊時間；重送事件
+    // （isRedelivery）的 timestamp 是原始發生時間，lagMs 本來就會很大。
     logger.info(
-      { type: event.type, sourceType: event.source?.type, webhookEventId: event.webhookEventId, isRedelivery: event.deliveryContext.isRedelivery },
+      {
+        type: event.type,
+        sourceType: event.source?.type,
+        webhookEventId: event.webhookEventId,
+        isRedelivery: event.deliveryContext.isRedelivery,
+        lagMs: Date.now() - event.timestamp,
+      },
       'Processing event'
     );
     logger.debug({ type: event.type, source: event.source, message: 'message' in event ? event.message : undefined }, 'Processing event detail');

@@ -64,6 +64,7 @@ describe('processEvents', () => {
       source: { type: 'group', groupId: 'g1' },
       message: { type: 'text', id: 'm1', text: '@Dobby +1' },
       webhookEventId: '01M31BEND6EPJ7FSWMDHC7BGRQ',
+      timestamp: Date.now(),
       deliveryContext: { isRedelivery: true },
     };
 
@@ -75,9 +76,36 @@ describe('processEvents', () => {
         sourceType: 'group',
         webhookEventId: '01M31BEND6EPJ7FSWMDHC7BGRQ',
         isRedelivery: true,
+        lagMs: expect.any(Number),
       },
       'Processing event',
     );
+  });
+
+  it('logs lagMs as the time between LINE\'s event timestamp and when processing starts', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-09-28T10:00:05.000Z'));
+      vi.mocked(handleMessage).mockResolvedValue(undefined);
+
+      const event = {
+        type: 'message',
+        replyToken: 'token',
+        source: { type: 'group', groupId: 'g1' },
+        message: { type: 'text', id: 'm1', text: '@Dobby +1' },
+        timestamp: Date.parse('2026-09-28T10:00:03.500Z'),
+        deliveryContext: { isRedelivery: false },
+      };
+
+      await processEvents([event as any]);
+
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.objectContaining({ lagMs: 1500 }),
+        'Processing event',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('logs "Event processed" with durationMs when handleMessage completes normally', async () => {

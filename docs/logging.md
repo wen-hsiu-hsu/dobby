@@ -96,6 +96,8 @@
 
 「起點」（收到訊息）這一步現在也帶 LINE 遞送層級的兩個欄位——`webhookEventId`（這次 webhook 事件的唯一識別碼）跟 `isRedelivery`（LINE 是不是在重送同一筆事件）。這兩個都是 info 層，不用開 `LOG_LEVEL=debug` 就看得到；它們本來記在 `webhook.ts` 收到整批 webhook payload 時的一行獨立摘要（`'Webhook received'`），但因為一次 webhook 幾乎永遠只有一筆事件，那行摘要跟緊接著的「起點」幾乎是重複資訊，還沒有 `reqId` 可用，所以直接搬進「起點」這一步；只有在 LINE 真的一次遞送兩筆以上事件時（極少見），才會另外看到一行 `Webhook received multiple events`。
 
+`Processing event` 另外帶一個 `lagMs`（info 層，不含 PII）：`Date.now() - event.timestamp`，也就是 LINE 記錄的事件發生時間到 Pi 開始處理這筆事件之間隔了多久。replyToken 會不會在回覆前失效，要看 `lagMs` 加上 `Event processed` 的 `durationMs`。判讀時注意它不是純網路延遲，混了三樣東西：LINE→Pi 的送達延遲、Pi 的時鐘偏差（Pi 沒校時的話可能出現負值或固定偏移），以及同一個 webhook 有多筆事件時，後面的事件等前面處理完的排隊時間（`event-router.ts` 逐筆 `await`）。重送事件（`isRedelivery=true`）的 `timestamp` 是原始發生時間，`lagMs` 本來就會很大，要搭配 `isRedelivery` 看。這個欄位目前沒有顯示在「起點」的摘要文字裡，要點開「起點」看原始欄位。
+
 點擊「起點」這一步可以展開看這次 webhook 事件的完整原始內容（`Processing event`/`Processing event detail`——後者是 debug 層才有的完整 `source`/`message` 物件）。沒開 `LOG_LEVEL=debug` 時，展開後只看得到 `Processing event` 的欄位跟一句「開 LOG_LEVEL=debug 才能看到完整 webhook event 內容」的提示，不是不能點開、也不是空白。
 
 ## 其他類型 log 的通用顯示
