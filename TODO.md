@@ -135,24 +135,11 @@
 ## Log 可觀測性（2026-09-28 評估，尚未處理）
 
 > 2026-09-28 用 subagent 評估「只靠 log 能不能 debug」，逐一檢查這些情境：報名結果不對、bot 沒回、同時報名、換季、排程失敗、USERS 重複建頁、Notion 錯誤或變慢。
-> - **前提：正式環境（Pi）一直跑 `LOG_LEVEL=debug`**（2026-09-28 向使用者確認；之後可看 Pi `/logs` footer 的 LOG_LEVEL 徽章複查，見 `docs/logging.md`「訊息內容跟身分識別資訊只在 debug 層」段）。所以 Notion request/response 全文、LINE 回覆全文、`Routing command`、userId 都有記錄，大部分「為什麼這樣判斷」可以從 debug 行反推。下面的優先順序以 debug 為前提；若改成 info，見第一項。
+> - **前提：正式環境（Pi）一直跑 `LOG_LEVEL=debug`**（2026-09-28 決定維持，理由與 PII 取捨見 `docs/overview.md`「日誌」小節、ADR 0005「現況」段；可看 Pi `/logs` footer 的 LOG_LEVEL 徽章複查）。所以 Notion request/response 全文、LINE 回覆全文、`Routing command`、userId 都有記錄，大部分「為什麼這樣判斷」可以從 debug 行反推。下面的優先順序以 debug 為前提；之後若要改回 info，先看 ADR 0005「現況」段列的前置事項。
 > - 做得好的部分不用動：reqId 分組、每次 Notion 呼叫的 purpose 和 durationMs、429 重試的 warn、Notion HTTP 錯誤的 status 和 body、LINE 回覆失敗的 `err`、報名／請假成功的摘要、排程每條路徑結尾都有 log。
 > - 本機 `logs/` 是本機 docker 測試產生的，不是 Pi 的 log。Pi 上的實際狀態（例如 R2 有沒有啟用）要到 Pi 的 `/logs` 確認。
 >
 > 以下都不是急件：正式環境是 debug，除了「Notion 網路錯誤…」那一項以外，都只影響 `/logs` 的呈現或除錯效率，不影響使用者。
-
-- [ ] **正式環境一直開 `debug`，跟文件設計的前提相反，需要決定以哪邊為準。** 文件的設計是「預設 info，診斷時才暫時開 debug」：
-  - `docs/overview.md:106` 寫「診斷完務必改回 `info`，否則這些 PII 會持續寫進 `/logs` 可查到的檔案」。
-  - `docs/adr/0005-purpose-context-layered-on-reqid.md` 第 11、21、25 行的分層理由，也建立在「正式環境預設 info」上。
-  - `src/config/env.ts:16` 預設是 `info`，`docker-compose.yml` 沒有覆寫，所以 Pi 上的 `debug` 是在 `.env` 設的。
-
-  現在沒有功能上的問題，開 debug 反而讓除錯更容易。但文件跟實際不一致，而且有兩個具體風險：
-  - PII 常駐：成員姓名、LINE userId、groupId、使用者訊息原文都一直寫進 `logs/`，有啟用 R2 的話也會上傳備份，而且 R2 不受 7 天保留限制。
-  - 之後有人照 `overview.md:106` 改回 `info`，會立刻觸發下面「只有 `LOG_LEVEL=info` 才會發生：…」那一項的 bug，而且報名被拒的原因、寫入內容、季度名稱在 info 層都看不到，要先做完「報名／請假只有成功路徑有 info 摘要…」那一項才不會失去這些資訊。
-
-  如果要處理，有兩個方向，要由使用者決定：
-  - **維持 debug**：改 `docs/overview.md:106`、`docs/development.md:80`（`LOG_LEVEL` 那列）、`docs/logging.md:115,123,137`（「預設 `LOG_LEVEL=info`」的敘述）、`docs/adr/0006-log-r2-sync-is-periodic-full-directory-not-rotation-hook.md:17`，並在 ADR 0005 補一段現況，明講正式環境常駐 debug、接受 PII 寫入 log 與 R2。ADR 0005 的分層仍然有用（切到 info 時畫面不會空白），不用拆掉。
-  - **改回 info**：先做下面「只有 `LOG_LEVEL=info` 才會發生：…」那一項，以及「報名／請假只有成功路徑有 info 摘要…」那一項。另外，以下 info／warn／error 行直接帶 userId 或 groupId，違反 ADR 0005 補充段「摘要級留 info、載荷級／身分識別資訊留 debug」的原則（第 19、21 行；第 25 行說明 warn/error 不受 `LOG_LEVEL` 篩選，放在這些行的欄位在任何等級都會寫出），要一併改成 USERS pageId 或搬到 debug：`display-name-update.ts:40,47,58`、`user-management.ts:24,57,62`、`member-joined-handler.ts:29`、`welcome-message.ts:79`、`weekly-push.ts:46`。這份清單是單行 grep 的結果，改之前要再搜一次跨多行的 logger 呼叫。`registration-handler.ts:94`、`leave-handler.ts:112` 的 `targetDisplayName`（姓名）也在 info，要決定是寫進 ADR 當例外還是搬走。
 
 - [ ] **Notion 網路錯誤、或錯誤回應不是 JSON 時，`Notion API error` 那一行不會寫出來。** `src/services/notion/notion-fetch.ts`：
   - 第 57 行的 `fetch` 沒有 try/catch。DNS 失敗、連線中斷、逾時這類網路錯誤會直接丟出，不會記任何 Notion 層的錯誤 log。
@@ -186,7 +173,7 @@
 
 - [ ] **只有 `LOG_LEVEL=info` 才會發生：所有文字訊息都被判成「指令」，其中沒命中自動回覆的（多數閒聊）再被標成「警告」。** `src/routes/logs.ts:448` 的 `groupKind()`，在沒有 debug 層的 `Routing command`／`Auto-reply lookup` 時，改用「這個事件有沒有 Notion 呼叫」判斷是不是指令。但 `handlers/message-handler.ts:24` 對每則文字訊息都會 `findByUserId`，群組訊息還會觸發 `trackUser` 的累加發言數 PATCH，所以閒聊一定有 Notion 呼叫，被判成指令；沒命中自動回覆的閒聊沒有回覆，再被第 568 行標成 `warn`。命中自動回覆的有送出回覆，不會是警告，但「來自」欄位會顯示未知。
 
-  正式環境是 debug，現在**不會發生**，因為第 444-447 行會先命中 debug 訊息。風險是依第一項改回 info 的那一刻，「需要注意」分頁會被閒聊洗版。另外，`logs.ts:433` 的註解和 `docs/logging.md:45` 都寫「單純聊天不會查 Notion」，這句與程式不符：程式從第一版（commit `23c32a1`）起就對每則訊息查 USERS，所以這句註解寫下時就不成立。
+  正式環境是 debug，現在**不會發生**，因為第 444-447 行會先命中 debug 訊息。風險是之後改回 info 的那一刻（ADR 0005「現況」段），「需要注意」分頁會被閒聊洗版。另外，`logs.ts:433` 的註解寫「單純聊天不會查 Notion」，這句與程式不符（`docs/logging.md` 同一句已在 2026-09-28 修正）：程式從第一版（commit `23c32a1`）起就對每則訊息查 USERS，所以這句註解寫下時就不成立。
 
   如果要處理：可以在 `message-handler.ts` 加一行 info 摘要，例如 `{isCommand, commandType, parsed}`，不含訊息原文（ADR 0005），`groupKind()` 改看這一行。舊的 log 檔沒有這行，所以第 448 行的 fallback 要保留給舊檔。
 
@@ -210,7 +197,7 @@
 
   在正式環境（debug）**不是缺口**：被拒原因看 `LINE reply payload`，季度看 Season query 的 request body，寫入內容看 Notion PATCH body，大多可以反推，只是要一個一個點開 debug 行，比較費工。
 
-  以下情況價值會提高：改回 info 時（見本段第一項「正式環境一直開 `debug`…」），或想用封存的 log 做季末對帳時。
+  以下情況價值會提高：之後改回 info 時（見 ADR 0005「現況」段），或想用封存的 log 做季末對帳時。
 
   如果要處理：
   - 可以在每個結束分支記一行 info 決策摘要，欄位如：
@@ -221,7 +208,7 @@
     - 只放本次新增／移除的條目
   - 容量數字都在 `occupancy` 裡，不用改 calculator。
   - 想記目標是怎麼解析出來的（本人／mention／姓名 fallback），`resolveTarget` 要多回傳一個欄位，`target-resolver.ts` 的三條路徑都要改，測試也要跟著改。
-  - 完整名單和姓名要不要放 info，看本段第一項的 PII 決定。
+  - 完整名單和姓名放 debug 就好；目前正式環境是 debug，放 info 沒有額外好處，只會讓改回 info 時多一處要處理的 PII。
 
 - [ ] **小項彙整（低優先，各自獨立，不是 bug 或影響很小）：**
   - **週報中止分不出原因。** `services/notion/event-occupancy.ts:27` 在「沒有活動」或「沒有季資料」時都回 `null`，`weekly-push.ts:30` 只記 `Weekly push aborted: no calendar/season data for date`。debug 層可以從 Calendar／Season query 的 response 看出哪個是空的，所以正式環境查得到。如果要處理：可以在第 27 行 return 前記 `{date, hasEvent, hasSeason}`。這也能解釋 ADR 0008 最後一段 `@Dobby next` 誤導訊息的那個情況。

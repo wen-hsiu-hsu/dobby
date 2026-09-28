@@ -23,3 +23,15 @@
 **push/reply 的配對機制從內容比對改成專屬 `sendId`**：`log-grouping.ts` 原本用 `pushSignature()`（對 `to`/`messages` 做 `JSON.stringify` 比對）配對同一次呼叫的「準備送出」跟「已送出/失敗」兩行，因為 push 呼叫來自背景排程、沒有 `reqId` 可用。但內容搬到 debug 後，info 層級的行不再帶 `to`/`messages`，content-based 配對在預設 `LOG_LEVEL=info` 下會永遠算出同一個空簽名，導致兩個不相關的 push 被誤配對。解法是 `pushMessage()`/`replyMessage()` 呼叫時各自產生一個短隨機 `sendId`（`randomBytes(3).toString('hex')`，手法跟 `request-context.ts` 產生 `reqId` 一樣），寫進該次呼叫的所有 log 行（info 的 start/sent/failure + debug 的 payload），`log-grouping.ts` 用 `sendId` 精確配對取代內容比對。這同時修掉一個潛在 bug：兩個併發、內容完全相同的 push 呼叫，舊版用 `findIndex` 找第一個符合簽名的，理論上可能配對錯誤；`sendId` 保證每次呼叫獨一無二，不受內容是否相同影響。
 
 **error/warn log 不受 `LOG_LEVEL` 篩選，訊息內容不能直接放在 error/warn 那一行**：pino 的 level 排序是 debug < info < warn < error，設定 `LOG_LEVEL=info` 只是把 debug 以下的行濾掉，warn/error 不管設定多少一定會輸出。所以失敗時「補訊息內容方便除錯」不能直接加在 `logger.warn(...)`/`logger.error(...)` 那一行的物件裡——那樣訊息全文會不管 `LOG_LEVEL` 設定、在正式環境預設就外洩，違背這整套分層的目的。正確做法是另開一行**debug** 層級的「failure payload」log（例如 `'Reply failed payload'`/`'Push message failed payload'`），跟對應的 warn/error 行用同一個 `sendId` 綁在一起；warn/error 行本身只留 `err`/`method`/`path`/`sendId`，永遠可見但不含訊息內容，要看失敗當下實際送的是什麼還是得開 `LOG_LEVEL=debug`。這是「新增任何會被流程表用到的 log 呼叫時，先檢查分層」這條既有提醒的一個新案例，之後遇到 warn/error 想補內容時直接抄這個模式，不要重新踩一次。
+
+## 現況（2026-09-28）：正式環境常駐 debug
+
+上面的理由都建立在「正式環境預設 `info`，診斷時才暫時開 `debug`」這個前提上。實際上正式環境（Pi）一直都跑 `LOG_LEVEL=debug`，2026-09-28 決定維持這個做法、把文件改成符合現況，不改回 `info`。取捨是：Notion payload、LINE 訊息全文、userId/groupId 這些 PII 會常駐寫進 `logs/` 與 R2 備份；換到的是出問題時不用重現就能直接從 log 查出原因（見 `docs/overview.md`「日誌」小節）。
+
+**分層不拆掉**：這份 ADR 的 info/debug 分層仍然照做。它讓 `/logs` 在 `info` 下不會一片空白，也讓之後要改回 `info` 時不用重新整理每一行 log。新增 log 時仍然要把摘要級跟載荷級分成兩行。
+
+**之後如果要改回 `info`，要先處理這些**（細節見 `TODO.md`「Log 可觀測性」段）：
+
+- `/logs` 在 `info` 下會把所有文字訊息判成「指令」，沒回覆的閒聊標成「警告」（`src/routes/logs.ts` 的 `groupKind()` fallback）。
+- 報名／請假被拒絕、no-op 的分支只有 debug 層的回覆全文，info 層看不出原因；要先補每個結束分支的 info 決策摘要。
+- 以下 info／warn／error 行直接帶 userId 或 groupId，違反上面「身分識別資訊留 debug」的原則（warn/error 不受 `LOG_LEVEL` 篩選，任何等級都會寫出），要改成 USERS pageId 或搬到 debug：`display-name-update.ts:40,47,58`、`user-management.ts:24,57,62`、`member-joined-handler.ts:29`、`welcome-message.ts:79`、`weekly-push.ts:46`（2026-09-28 單行 grep 的結果，改之前要再搜一次跨多行的 logger 呼叫）。`registration-handler.ts:94`、`leave-handler.ts:112` 的 `targetDisplayName`（姓名）也在 info，要決定是當例外還是搬走。

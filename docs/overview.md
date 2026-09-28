@@ -103,7 +103,7 @@ Pi 上另外跑了一套通用的監控 stack（跟 Cloudflare Tunnel、pi-deplo
 
 上述 7 天保留只管得到 app 自己寫進 `logs/` 的檔案。`logger.ts` 同時用 `multistream` 把同一份 log 輸出到 `process.stdout`，這份輸出會被 Docker 的 `json-file` log driver 另外存一份，**預設沒有大小上限**，配合 `restart: unless-stopped` 長期常駐不重啟，理論上會在 host 磁碟上無限長大——尤其是在 Pi 這類儲存空間有限的機器上風險較高。`docker-compose.yml` 已加上 `logging.options`（`max-size: 10m` / `max-file: 3`，共上限約 30MB）避免這個問題，這層限制跟 app 自己的 7 天保留機制是分開的兩件事，改動其中一邊不會影響另一邊。
 
-預設 log level 是 `info`；`notion-fetch.ts` 打 Notion API 的完整 request/response（含成員姓名、LINE user_id 等 PII）只在 `debug` level 才會被記錄。要臨時診斷正式環境問題時，把 `LOG_LEVEL` 環境變數改成 `debug` 並重啟服務即可看到完整內容，不用改程式碼重新部署；**診斷完務必改回 `info`**，否則這些 PII 會持續寫進 `/logs` 可查到的檔案。為什麼要拆成 info/debug 兩個 level 記、而不是把整行都升到 info，見 `docs/adr/0005-purpose-context-layered-on-reqid.md`。
+**正式環境（Pi）常駐 `LOG_LEVEL=debug`**（2026-09-28 決定，在 Pi 的 `.env` 設定；`src/config/env.ts` 的程式預設值仍是 `info`）。`notion-fetch.ts` 打 Notion API 的完整 request/response、LINE 回覆/推播全文、userId/groupId、使用者訊息原文都只在 `debug` level 才會記錄，常駐 debug 代表這些內容（含成員姓名、LINE user_id 等 PII）會一直寫進 `logs/`，有啟用 R2 時也會上傳備份。這是刻意接受的取捨：社團規模小、`/logs` 需要 `LOGS_ACCESS_TOKEN`，換到的是出問題時不用重現就能直接從 log 查出原因。程式裡 info/debug 的分層仍然保留，切到 `info` 時 `/logs` 畫面不會空白；但改回 `info` 前要先看 [ADR 0005](adr/0005-purpose-context-layered-on-reqid.md) 的「現況」段，有幾個在 info 層才會出現的問題要先處理。
 
 **千萬不要對正在跑的容器直接 `rm` log 檔案。** `pino-roll` 在 `initLogger()`（`app.listen()` 之前就跑）就已經開好檔案控制代碼在寫入；在 Linux 上刪除一個程式還握著在寫的檔案，只會拿掉目錄裡的檔名，process 完全不知道、還是會繼續往那個已經沒有名字的 inode 寫下去。結果是：`docker compose logs app` 明明看得到 bot 還在正常處理流量，但 `logs/` 資料夾用 `ls` 看是空的，`/logs` 頁面也是空的——因為它是靠掃檔名找資料，掃到的是空資料夾。想確認是不是踩到這個雷，進容器看一下 process 手上還握著哪些檔案：
 

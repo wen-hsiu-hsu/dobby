@@ -37,3 +37,7 @@ Dobby 準備部署到 Zeabur 這類容器檔案系統是 ephemeral 的平台，�
 2. **卡片洗版**：這行在 `runWithContext` 裡（有 reqId），是 info 的話正式環境的 `/logs` 每 15 分鐘就會冒出一張背景作業卡片，正是上面徽章段落想避免的情況。
 
 真的要追某一輪同步的細節，把 `LOG_LEVEL` 調成 debug 就看得到（帶 `succeeded`/`skipped`/`failed`/`total`）；個別檔案失敗的 warn 不受影響，正式環境一樣會記錄。
+
+## 現況（2026-09-28）：正式環境常駐 debug
+
+上文幾處以「正式環境 `LOG_LEVEL=info`」為前提（第 15、17、36 行）。正式環境實際常駐 `debug`（見 ADR 0005「現況」段），所以實際行為是第 36 行括號裡描述的那一種：`R2 log sync complete` 每輪都會寫進今天的 log 檔，今天的檔案每輪都會重傳一次；`/logs` 每 15 分鐘多一張排程卡片，由列表的「連續 R2 同步折疊成一列」收起來（見 `docs/logging.md`）。這是已知、可接受的代價，不需要修改。

@@ -77,7 +77,7 @@ npm run dev:docker
 | `PORT` | ❌ | 伺服器 port（預設 `3000`，須為正整數，非數字字串會讓服務啟動失敗） |
 | `NODE_ENV` | ❌ | `development` 或 `production` |
 | `DOBBY_GROUP_IDS` | ❌ | 每週打球推播訊息的目標 LINE 群組 ID，可用逗號分隔多個群組 ID，見 `docs/schedulers.md`。沒設定的話該排程會記一行 error log 並跳過，不會讓 app 啟動失敗 |
-| `LOG_LEVEL` | ❌ | pino log level（`trace`/`debug`/`info`/`warn`/`error`/`fatal`，預設 `info`）。要臨時診斷正式環境問題（例如看 Notion API 完整 request/response）時，把 Pi 上 `.env` 的這個變數改成 `debug` 並重啟服務（`docker compose up -d --force-recreate`，因為 `env_file` 只在建立容器時讀取，`restart` 不會重讀）即可，不用改程式碼重新部署；診斷完記得改回 `info`，否則 debug log 會把 Notion 回傳的完整資料（含姓名、LINE user_id 等）持續寫進 `/logs` 可查到的檔案。 |
+| `LOG_LEVEL` | ❌ | pino log level（`trace`/`debug`/`info`/`warn`/`error`/`fatal`，程式預設 `info`）。**正式環境（Pi）常駐 `debug`**，理由與 PII 取捨見 `docs/overview.md`「日誌」小節。改這個值要 `docker compose up -d --force-recreate`，因為 `env_file` 只在建立容器時讀取，`restart` 不會重讀。本機開發環境（`NODE_ENV` 不是 `production`）不管設什麼，實際生效的都是 `debug`。 |
 | `R2_ACCOUNT_ID` | ❌ | Cloudflare R2 帳號 ID，跟下面三個變數必須「全部有值」或「全部沒值」（`src/config/env.ts` 有驗證，中間狀態會讓服務啟動失敗），見 `docs/adr/0006-log-r2-sync-is-periodic-full-directory-not-rotation-hook.md` |
 | `R2_ACCESS_KEY_ID` | ❌ | R2 S3 相容 API 的 access key ID |
 | `R2_SECRET_ACCESS_KEY` | ❌ | R2 S3 相容 API 的 secret access key |

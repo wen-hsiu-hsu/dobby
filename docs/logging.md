@@ -42,7 +42,7 @@
 | 排程 | 沒有 `Processing event`，但有 `reqId`——`weekly-push.ts`/`display-name-update.ts` 各自用 `runWithContext` 包住整次執行；R2 同步的 `uploadAllLogs()`（`log-upload.ts`，含 graceful shutdown 那次）也一樣（見下方「排程事件的 reqId」） | 排程 |
 | 系統 | 完全沒有 `reqId`，且不是伺服器生命週期訊息（見下方「服務重啟分隔線」；兩個排程啟動時各記一次的 `... scheduler started` 也算生命週期訊息，不會變成卡片）。有專屬文案的有三種：LINE webhook 簽章驗證失敗（`index.ts` 的全域錯誤處理，發生在事件處理、也就是 reqId 產生之前，真正的異常）、`webhook.ts` 一次收到兩筆以上事件時的批次提示（正常、預期內的情況，不是錯誤）、`log-upload.ts` 在 R2 未設定時於啟動時記一次的提示（debug 層，非錯誤）。其他沒有 reqId 的訊息——例如 `log-cleanup.ts` 的 `Deleted old log file`、錯誤處理的 `.catch` 記下的 `Log cleanup run failed`/`R2 log sync run failed`/`R2 log sync on shutdown failed`/`Error processing events`、`index.ts` 的 `Unhandled request error`——會退回通用文案：「來自」顯示「（未知系統來源）」，「來源」顯示中性的「未知」 | 系統 |
 
-**指令 vs 對話只有在 `LOG_LEVEL=debug` 才能準確判斷**——`Routing command`/`Auto-reply lookup`/`Skipping auto-reply for admin` 全部是 debug 層。`LOG_LEVEL=info` 下這些線都不存在，程式碼退而用「這個流程有沒有 Notion API 呼叫」猜測（指令通常會查/寫 Notion，單純聊天不會），可能誤判，不是決定性的依據。
+**指令 vs 對話只有在 `LOG_LEVEL=debug` 才能準確判斷**——`Routing command`/`Auto-reply lookup`/`Skipping auto-reply for admin` 全部是 debug 層。`LOG_LEVEL=info` 下這些線都不存在，程式碼退而用「這個流程有沒有 Notion API 呼叫」猜測。但 `message-handler.ts` 對每則文字訊息都會查一次 USERS，所以 `info` 下所有文字訊息都會被判成指令，沒回覆的閒聊還會被標成「警告」（見 `TODO.md`「Log 可觀測性」）。正式環境常駐 `debug`（見 `docs/overview.md`「日誌」小節），不受影響。
 
 ## 每個事件卡片顯示什麼
 
@@ -112,7 +112,7 @@
 
 頁面底部 footer 有一個徽章，顯示目前**實際生效**的等級（例如 `debug`）——不是 `.env` 裡 `LOG_LEVEL` 設定值本身，本機開發環境不管設定值是什麼，實際生效的都會是 `debug`。徽章文字只顯示等級值本身，完整的 `LOG_LEVEL` 標籤收在滑鼠 hover 才看得到的 title 提示。等於 `debug` 時徽章用強調色，其他等級（`info`/`warn`/`error` 等）用警示色，提醒你這節講的這些內容現在看不看得到。
 
-LINE 回覆/推播的訊息全文，以及 userId 這類身分識別資訊，比照 Notion API 的 body 一樣搬到 `debug` 層記錄。預設 `LOG_LEVEL=info` 下，時間軸只會看到 method/path 跟「開 `LOG_LEVEL=debug` 才能看到訊息內容」的提示，看不到訊息原文——**這是刻意的設計，不是 bug**。要看訊息實際內容（除錯用），把環境變數 `LOG_LEVEL` 設成 `debug` 再重啟服務即可。
+LINE 回覆/推播的訊息全文，以及 userId 這類身分識別資訊，比照 Notion API 的 body 一樣搬到 `debug` 層記錄。正式環境常駐 `LOG_LEVEL=debug`，所以平常就看得到訊息原文；如果切到 `info`，時間軸只會看到 method/path 跟「開 `LOG_LEVEL=debug` 才能看到訊息內容」的提示——**這是刻意的分層，不是 bug**。
 
 `profile-service.ts` 的 `getProfile()` 現在也有一行摘要 log（`'LINE get profile'`，成功/失敗都有），沒有被時間軸特別合併/配對顯示，會以通用渲染器的樣子出現在時間軸上。
 
@@ -120,7 +120,7 @@ LINE 回覆/推播的訊息全文，以及 userId 這類身分識別資訊，比
 
 Footer 的 LOG_LEVEL 徽章旁邊還有一個「R2 備份」徽章，顯示 log 檔案同步到 Cloudflare R2 的狀態（背景說明見 `docs/overview.md`「日誌」小節、`docs/adr/0006-log-r2-sync-is-periodic-full-directory-not-rotation-hook.md`）。三種語意：
 
-- 灰色「R2 備份：未啟用」或「R2 備份：尚未同步」——功能沒開，或開了但還沒跑過第一次。沒開時完全不排程同步，只在啟動時記一行 debug `R2 not configured, log sync disabled`（沒有 reqId，所以在事件列表是一筆「系統」事件，「來自」顯示 `log-upload.ts`、「來源」顯示「啟動 · log-upload.ts」，非錯誤）。因為是 debug 層，只有正式環境＋`LOG_LEVEL=debug` 時才會出現在 /logs；預設 `LOG_LEVEL=info` 或本機開發環境（不寫 log 檔）都看不到這筆事件。
+- 灰色「R2 備份：未啟用」或「R2 備份：尚未同步」——功能沒開，或開了但還沒跑過第一次。沒開時完全不排程同步，只在啟動時記一行 debug `R2 not configured, log sync disabled`（沒有 reqId，所以在事件列表是一筆「系統」事件，「來自」顯示 `log-upload.ts`、「來源」顯示「啟動 · log-upload.ts」，非錯誤）。因為是 debug 層，只有正式環境＋`LOG_LEVEL=debug`（正式環境的常駐設定）時才會出現在 /logs；切到 `info` 或本機開發環境（不寫 log 檔）都看不到這筆事件。
 - 綠色「R2 備份 · `<時間>` 成功」——最近一次同步成功。同步只會上傳有變動的檔案，一整輪所有檔案都沒變動、實際沒傳任何檔案也算成功，所以閒置時時間仍會持續更新。
 - 琥珀色「R2 備份 · `<時間>` 失敗，等待下次重試」——最近一次同步失敗，滑鼠 hover 可以看到簡短的失敗原因；不需要手動處理，下一次週期性同步（或下次 graceful shutdown）會自動重試。
 
@@ -134,7 +134,7 @@ Notion API 回應 429（rate limit）時程式會自動重試，同一次呼叫�
 
 事件分組底層是 `request-context.ts` 的 `runWithContext`：同一次事件處理過程中所有 log 都會自動帶上同一個 `reqId`（見 `docs/architecture.md` 的「Request Correlation ID」小節）。`weekly-push.ts`/`display-name-update.ts` 這兩個排程也各自用 `runWithContext` 包住整次執行，所以每次排程執行也會有自己專屬的 reqId、在 `/logs` 頁面上變成一個獨立的「排程」事件，不會跟其他次執行、或其他排程的 log 混在同一組。
 
-R2 同步的 `uploadAllLogs()`（`src/utils/log-upload.ts`）也包在 `runWithContext` 裡，週期性同步跟 graceful shutdown 前多跑的那一次都一樣。只要那一輪有寫出 log——失敗時的 warn/error（例如 `Failed to upload log file to R2, skipping`、`R2 log sync failed: ...`），或 `LOG_LEVEL=debug` 下每輪都會記的 `R2 log sync complete`——就會變成一個「排程」事件：來源顯示「排程 · cron」，「來自」顯示 `log-upload`（`SCHEDULE_ORIGIN_MARKERS` 收錄了 `R2 log sync complete` 跟上面幾種失敗訊息；在 `runWithContext` 外面記的 `R2 log sync run failed`（`log-upload.ts` 的 `.catch`）跟 `R2 log sync on shutdown failed`（`index.ts`）沒有 reqId，歸在「系統」）。成功的那幾輪在列表上會被折疊，見下方「連續 R2 同步折疊成一列」。預設 `LOG_LEVEL=info` 且同步成功時這一輪不寫任何 log，不會出現卡片。
+R2 同步的 `uploadAllLogs()`（`src/utils/log-upload.ts`）也包在 `runWithContext` 裡，週期性同步跟 graceful shutdown 前多跑的那一次都一樣。只要那一輪有寫出 log——失敗時的 warn/error（例如 `Failed to upload log file to R2, skipping`、`R2 log sync failed: ...`），或 `LOG_LEVEL=debug` 下每輪都會記的 `R2 log sync complete`——就會變成一個「排程」事件：來源顯示「排程 · cron」，「來自」顯示 `log-upload`（`SCHEDULE_ORIGIN_MARKERS` 收錄了 `R2 log sync complete` 跟上面幾種失敗訊息；在 `runWithContext` 外面記的 `R2 log sync run failed`（`log-upload.ts` 的 `.catch`）跟 `R2 log sync on shutdown failed`（`index.ts`）沒有 reqId，歸在「系統」）。成功的那幾輪在列表上會被折疊，見下方「連續 R2 同步折疊成一列」。切到 `LOG_LEVEL=info` 時，同步成功的那一輪不寫任何 log，不會出現卡片。
 
 完全沒有 reqId 的 log 分兩種處理：伺服器生命週期訊息（`Server started`/`Received shutdown signal, closing server`/`Server closed, exiting`/`Graceful shutdown timed out, forcing exit`/`Weekly push scheduler started`/`Display name update scheduler started`）不會列成事件，其中重啟相關的會被拼成下面說的「服務重啟」分隔線；其餘的每一筆各自獨立變成一個「系統」事件，不會因為都沒有 reqId 就被合併成同一筆——有專屬文案的是 webhook 簽章驗證失敗、webhook 一次收到多筆事件、R2 未設定的啟動提示三種，其他（log-cleanup、錯誤處理的 `.catch` 等）退回通用文案，見上方分類表。
 
