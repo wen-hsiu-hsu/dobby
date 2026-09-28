@@ -53,7 +53,7 @@
 列表裡每張卡片顯示：狀態圓點（綠/黃/紅）、種類標籤、標題、時間、使用者顯示名稱與 userId（有才顯示，userId 預設遮蔽，見下方）、報名／請假的「對象」（有才顯示）、內容預覽、來源、總耗時、以及重試次數/失敗種類的小標記（如果有）。
 
 - **使用者**：觸發這次事件的人，只有 LINE 事件（有 `Processing event`）才有。userId 依序取 `message-handler.ts` 的 debug `handleMessage`（發話者）→ `Processing event detail` 的 `source.userId` → 第一筆帶 `userId` 的 log（`memberJoined` 這類 source 是群組的事件）。顯示名稱**只從同一筆 log 也帶著這個 userId 的 log 取**（目前是 `profile-service.ts` 的 `LINE get profile detail`），找不到就只顯示 userId，不會拿同一事件裡別人的名字湊——一般指令不會查 profile，所以大部分指令卡片只有 userId 沒有名字，這是預期的。排程（例如 display-name 批次更新會連續處理好幾個人）沒有單一使用者，不顯示這欄。
-- **對象**：報名／請假改到的人，來自 `registration-handler.ts`／`leave-handler.ts` 的 info log（`Registration updated`／`Leave status updated`）的 `targetDisplayName`，是人員清單上的名字。log 分不出是自己報名還是管理員代報 `+1 @X`，所以自己報名時也會顯示（就是自己在人員清單上的名字，可能跟 LINE 顯示名稱不同），不會併進「使用者」的名字。對應程式碼是 `src/routes/logs.ts` 的 `groupWho()`／`groupTargetName()`。
+- **對象**：報名／請假改到的人，來自 `registration-handler.ts`／`leave-handler.ts` 的 info log（`Registration handler outcome`／`Leave handler outcome` 成功那一行）的 `targetDisplayName`，是人員清單上的名字。log 分不出是自己報名還是管理員代報 `+1 @X`，所以自己報名時也會顯示（就是自己在人員清單上的名字，可能跟 LINE 顯示名稱不同），不會併進「使用者」的名字。對應程式碼是 `src/routes/logs.ts` 的 `groupWho()`／`groupTargetName()`。
 
 - **標題**：訊息類事件用 `Processing event detail`（debug 層）解析出的指令/對話文字加引號；加入事件顯示事件類型；排程/系統事件用它自己第一筆摘要 log 的訊息名稱當標題。
 - **來源**：訊息類事件顯示群組／多人聊天室／1 對 1；排程顯示「排程 · cron」；系統事件依訊息各自顯示（對照 `src/routes/logs.ts` 的 `SYSTEM_EVENT_INFO`）：webhook 簽章驗證失敗跟批次提示是「HTTP · POST /webhook」，R2 未設定的啟動提示是「啟動 · log-upload.ts」，其他沒有專屬文案的訊息顯示中性的「未知」（這類訊息多半不是 HTTP 請求來的，例如 log-cleanup 或背景作業的 `.catch`，不猜成 `POST /webhook`）。

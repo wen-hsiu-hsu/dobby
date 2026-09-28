@@ -537,7 +537,7 @@ function groupWho(group: FlowGroup): { userId: string; name: string | null } {
 
 /**
  * 報名／請假改到的人（`registration-handler.ts`／`leave-handler.ts` 的 info
- * log `Registration updated`／`Leave status updated` 的 `targetDisplayName`）。
+ * log `Registration handler outcome`／`Leave handler outcome` 成功那一行的 `targetDisplayName`）。
  * 自己報名時也會有，這時就是發話者本人在人員清單上的名字（可能跟 LINE 顯
  * 示名稱不同）；log 裡分不出是自己還是代報，所以一律標成「對象」，不當成
  * 發話者的名字。

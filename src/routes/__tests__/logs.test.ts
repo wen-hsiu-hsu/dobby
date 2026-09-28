@@ -342,15 +342,15 @@ describe('createLogsRouter', () => {
   describe('使用者／對象欄位', () => {
     const ADMIN = 'Uadmin0000000000000000000000000001';
     // 管理員代報 `+1 @小華`：userId 來自 handleMessage（管理員本人），
-    // targetDisplayName 來自 Registration updated（被報名的小華）。
-    // Registration updated 故意排在 profile detail 前面——舊做法抓「第一筆
+    // targetDisplayName 來自 Registration handler outcome（被報名的小華）。
+    // Registration handler outcome 故意排在 profile detail 前面——舊做法抓「第一筆
     // 有 targetDisplayName ?? displayName 的 log」，會把小華的名字接在管理員
     // 的 userId 後面。
     const proxyRegistration = [
       { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'message', sourceType: 'group', reqId: 'req-proxy', msg: 'Processing event' },
       { level: 20, time: Date.UTC(2024, 0, 1, 0, 0, 1), reqId: 'req-proxy', msg: 'Processing event detail', source: { type: 'group', groupId: 'C1', userId: ADMIN }, message: { type: 'text', text: '@Dobby +1 @小華' } },
       { level: 20, time: Date.UTC(2024, 0, 1, 0, 0, 2), reqId: 'req-proxy', msg: 'handleMessage', userId: ADMIN, text: '@Dobby +1 @小華', isAdmin: true },
-      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 3), reqId: 'req-proxy', msg: 'Registration updated', date: '2024-01-06', delta: 1, targetDisplayName: '小華' },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 3), reqId: 'req-proxy', msg: 'Registration handler outcome', outcome: 'added', date: '2024-01-06', requestedDelta: 1, targetDisplayName: '小華' },
       { level: 20, time: Date.UTC(2024, 0, 1, 0, 0, 4), reqId: 'req-proxy', msg: 'LINE get profile detail', userId: ADMIN, groupId: 'C1', displayName: '管理員阿明' },
     ];
 

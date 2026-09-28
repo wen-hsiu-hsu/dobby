@@ -55,4 +55,4 @@ Notion 呼叫原本在 `log-grouping.ts` 用 method+path 配對，同一個 key 
 
 **之後如果要改回 `info`，要先處理這些**（細節見 `TODO.md`「Log 可觀測性」段）：
 
-- 以下 info／warn／error 行直接帶 userId 或 groupId，違反上面「身分識別資訊留 debug」的原則（warn/error 不受 `LOG_LEVEL` 篩選，任何等級都會寫出），要改成 USERS pageId 或搬到 debug：`display-name-update.ts:40,47,58`、`user-management.ts:24,57,62`、`member-joined-handler.ts:29`、`welcome-message.ts:79`、`weekly-push.ts:46`（2026-09-28 單行 grep 的結果，改之前要再搜一次跨多行的 logger 呼叫）。`registration-handler.ts:94`、`leave-handler.ts:112` 的 `targetDisplayName`（姓名）也在 info，要決定是當例外還是搬走。
+- 以下 info／warn／error 行直接帶 userId 或 groupId，違反上面「身分識別資訊留 debug」的原則（warn/error 不受 `LOG_LEVEL` 篩選，任何等級都會寫出），要改成 USERS pageId 或搬到 debug：`display-name-update.ts:48,55,68`、`user-management.ts:24,66,71`、`member-joined-handler.ts:29`、`welcome-message.ts:79`、`weekly-push.ts:46`、`mutex.ts:148` 的逾時 warn（key 為 `user-track-${userId}` 時）（2026-09-28 單行 grep 的結果，行號已在同日 log 可觀測性改動後更新，改之前要再搜一次跨多行的 logger 呼叫）。`registration-handler.ts:121`、`leave-handler.ts:145` 的 `targetDisplayName`（姓名）也在 info，要決定是當例外還是搬走。
