@@ -85,7 +85,7 @@
 
 ## 處理過程時間軸
 
-點開一個事件，右側依時間順序畫出這個事件的完整處理過程（`stepsHeading` 依種類略有不同：訊息類是「處理過程」，排程是「執行過程」；系統類則不是固定值，依訊息各自設定——`src/routes/logs.ts` 的 `SYSTEM_EVENT_INFO` 裡，`Webhook received multiple events` 跟 `R2 not configured, log sync disabled` 用「說明」，`LINE signature validation failed` 跟其餘沒有專屬文案的 fallback 才用「發生了什麼」），每一步左側有跟等級對應的色點（綠 info、藍 debug、黃 warn、紅 error），不用點開也看得出哪一步異常。時間軸嚴格依時間排序（Notion 呼叫、其他 log、LINE 收發全部混在一起排，不是先列完所有 Notion 呼叫、再列雜項）。只有「起點」固定是第一步；標成「終點」的 LINE 回覆（一個事件回覆兩次時是最後一次）也照實際送出的時間排，不一定是最後一步——fire-and-forget 的 `trackUser`（USERS 重查、累加發言數 PATCH、`Mutex task finished`）常在回覆送出之後才完成，會排在終點後面。
+點開一個事件，右側依時間順序畫出這個事件的完整處理過程（`stepsHeading` 依種類略有不同：訊息類是「處理過程」，排程是「執行過程」；系統類則不是固定值，依訊息各自設定——`src/routes/logs.ts` 的 `SYSTEM_EVENT_INFO` 裡，`Webhook received multiple events` 跟 `R2 not configured, log sync disabled` 用「說明」，`LINE signature validation failed` 跟其餘沒有專屬文案的 fallback 才用「發生了什麼」），每一步左側有跟等級對應的色點（綠 info、藍 debug、黃 warn、紅 error），不用點開也看得出哪一步異常。時間軸嚴格依時間排序（Notion 呼叫、其他 log、LINE 收發全部混在一起排，不是先列完所有 Notion 呼叫、再列雜項）；log 的時間只到毫秒，同一毫秒的幾步（例如 `Message classified` 跟緊接著的 USERS 查詢）照 log 檔裡的寫入順序排。Notion 呼叫、LINE 回覆/推播這種合併成一步的，排序用的是第一行（request／「準備送出」）的時間跟位置。只有「起點」固定是第一步；標成「終點」的 LINE 回覆（一個事件回覆兩次時是最後一次）也照實際送出的時間排，不一定是最後一步——fire-and-forget 的 `trackUser`（USERS 重查、累加發言數 PATCH、`Mutex task finished`）常在回覆送出之後才完成，會排在終點後面。
 
 同一次 Notion API 呼叫底層會產生好幾行 log（輕量 info 摘要 + 完整內容的 debug payload，request 跟 response 各一組），LINE 回覆/推播也是「準備送出」跟「已送出/失敗」各一行；時間軸會把這些自動合併成一步：
 

@@ -1,7 +1,19 @@
 import type { LogEntry } from '../utils/log-reader.js';
 
+/**
+ * 每個 DisplayRow 的 `seq` 是它代表的那一行 log 在 `groupPairedEntries()` 輸入
+ * 陣列裡的位置（全域，不是 reqId bucket 內的位置）：Notion 呼叫取 request 那行、
+ * LINE 收發取「準備送出」那行，跟 `representativeTime()` 取的是同一行。只拿來
+ * 在時間相同時排序（見 `compareDisplayRows()`）——log 的 `time` 只到毫秒，同一
+ * 毫秒常有好幾行（例如 `Message classified` 跟緊接著的 USERS query）。
+ *
+ * 輸入陣列來自 `readRecentLogs()`，它依 `time` 由新到舊做穩定排序，同毫秒的行
+ * 維持 log 檔裡的寫入順序，所以時間相同時 seq 小的就是先寫的。不需要 log 檔
+ * 帶額外欄位，舊 log 檔一樣適用。
+ */
 export interface NotionCallRow {
   kind: 'notion-call';
+  seq: number;
   request: LogEntry;
   requestPayload?: LogEntry;
   response?: LogEntry;
@@ -16,6 +28,7 @@ export interface NotionCallRow {
 
 export interface LineSendRow {
   kind: 'line-reply' | 'line-push';
+  seq: number;
   method: string;
   path: string;
   start: LogEntry;
@@ -25,7 +38,18 @@ export interface LineSendRow {
   failurePayload?: LogEntry;
 }
 
-export type DisplayRow = { kind: 'single'; entry: LogEntry } | NotionCallRow | LineSendRow;
+export interface SingleRow {
+  kind: 'single';
+  seq: number;
+  entry: LogEntry;
+}
+
+export type DisplayRow = SingleRow | NotionCallRow | LineSendRow;
+
+interface SeqEntry {
+  entry: LogEntry;
+  seq: number;
+}
 
 const LINE_REPLY_FAILURE_MSG = 'Reply failed';
 // 2026-09 以前 reply-service.ts 用的舊字串（暗示有 push 備援，但實際上永遠
@@ -63,15 +87,16 @@ function notionKey(e: LogEntry): string {
  * calls to the same path (e.g. two different events fetching the same Notion
  * page) from cross-pairing in old callId-less logs.
  */
-function processBucket(bucketEntries: LogEntry[], output: DisplayRow[]): void {
-  const sorted = [...bucketEntries].sort((a, b) => (a.time ?? 0) - (b.time ?? 0));
+function processBucket(bucketEntries: SeqEntry[], output: DisplayRow[]): void {
+  const sorted = [...bucketEntries].sort((a, b) => (a.entry.time ?? 0) - (b.entry.time ?? 0) || a.seq - b.seq);
 
   const openNotionByKey = new Map<string, NotionCallRow>();
   const lastResolvedNotionByKey = new Map<string, NotionCallRow>();
   const openLineSendBySendId = new Map<string, LineSendRow>();
   const lastResolvedLineSendBySendId = new Map<string, LineSendRow>();
 
-  for (const e of sorted) {
+  for (const { entry: e, seq } of sorted) {
+    const single = (): SingleRow => ({ kind: 'single', seq, entry: e });
     switch (e.msg) {
       case 'Notion API request': {
         const key = notionKey(e);
@@ -81,6 +106,7 @@ function processBucket(bucketEntries: LogEntry[], output: DisplayRow[]): void {
         } else {
           const row: NotionCallRow = {
             kind: 'notion-call',
+            seq,
             request: e,
             attempts: 1,
             purpose: typeof e['purpose'] === 'string' ? (e['purpose'] as string) : undefined,
@@ -96,7 +122,7 @@ function processBucket(bucketEntries: LogEntry[], output: DisplayRow[]): void {
       case 'Notion API request payload': {
         const row = openNotionByKey.get(notionKey(e));
         if (row) row.requestPayload = e;
-        else output.push({ kind: 'single', entry: e });
+        else output.push(single());
         break;
       }
       case 'Notion API response': {
@@ -107,14 +133,14 @@ function processBucket(bucketEntries: LogEntry[], output: DisplayRow[]): void {
           lastResolvedNotionByKey.set(key, row);
           openNotionByKey.delete(key);
         } else {
-          output.push({ kind: 'single', entry: e });
+          output.push(single());
         }
         break;
       }
       case 'Notion API response payload': {
         const row = lastResolvedNotionByKey.get(notionKey(e));
         if (row && !row.responsePayload) row.responsePayload = e;
-        else output.push({ kind: 'single', entry: e });
+        else output.push(single());
         break;
       }
       case 'Notion API error': {
@@ -124,7 +150,7 @@ function processBucket(bucketEntries: LogEntry[], output: DisplayRow[]): void {
           row.error = e;
           openNotionByKey.delete(key);
         } else {
-          output.push({ kind: 'single', entry: e });
+          output.push(single());
         }
         break;
       }
@@ -133,6 +159,7 @@ function processBucket(bucketEntries: LogEntry[], output: DisplayRow[]): void {
         const sendId = String(e['sendId']);
         const row: LineSendRow = {
           kind: e.msg === 'LINE reply' ? 'line-reply' : 'line-push',
+          seq,
           method: String(e['method']),
           path: String(e['path']),
           start: e,
@@ -146,7 +173,7 @@ function processBucket(bucketEntries: LogEntry[], output: DisplayRow[]): void {
         const sendId = String(e['sendId']);
         const row = openLineSendBySendId.get(sendId);
         if (row) row.payload = e;
-        else output.push({ kind: 'single', entry: e });
+        else output.push(single());
         break;
       }
       case 'LINE reply sent':
@@ -158,7 +185,7 @@ function processBucket(bucketEntries: LogEntry[], output: DisplayRow[]): void {
           lastResolvedLineSendBySendId.set(sendId, row);
           openLineSendBySendId.delete(sendId);
         } else {
-          output.push({ kind: 'single', entry: e });
+          output.push(single());
         }
         break;
       }
@@ -172,7 +199,7 @@ function processBucket(bucketEntries: LogEntry[], output: DisplayRow[]): void {
           lastResolvedLineSendBySendId.set(sendId, row);
           openLineSendBySendId.delete(sendId);
         } else {
-          output.push({ kind: 'single', entry: e });
+          output.push(single());
         }
         break;
       }
@@ -181,13 +208,18 @@ function processBucket(bucketEntries: LogEntry[], output: DisplayRow[]): void {
         const sendId = String(e['sendId']);
         const row = lastResolvedLineSendBySendId.get(sendId);
         if (row && !row.failurePayload) row.failurePayload = e;
-        else output.push({ kind: 'single', entry: e });
+        else output.push(single());
         break;
       }
       default:
-        output.push({ kind: 'single', entry: e });
+        output.push(single());
     }
   }
+}
+
+/** 依 `representativeTime()` 升冪，時間相同時依 log 檔原始順序（`seq`，見 `NotionCallRow` 上方說明）。 */
+export function compareDisplayRows(a: DisplayRow, b: DisplayRow): number {
+  return representativeTime(a) - representativeTime(b) || a.seq - b.seq;
 }
 
 export function representativeTime(row: DisplayRow): number {
@@ -215,27 +247,27 @@ export function representativeTime(row: DisplayRow): number {
  * failures like a signature-validation error, which happen before any reqId
  * exists) so two unrelated concurrent calls to the same Notion path never
  * cross-pair. Returned rows are always sorted ascending by representative
- * time; callers that want newest-first (routes/logs.ts's event-list
+ * time, ties broken by original input order (`compareDisplayRows()`); callers that want newest-first (routes/logs.ts's event-list
  * convention) should reverse the result themselves.
  */
 export function groupPairedEntries(entries: LogEntry[]): DisplayRow[] {
-  const buckets = new Map<string, LogEntry[]>();
-  for (const e of entries) {
+  const buckets = new Map<string, SeqEntry[]>();
+  entries.forEach((e, seq) => {
     const key = typeof e.reqId === 'string' ? e.reqId : '';
     let bucket = buckets.get(key);
     if (!bucket) {
       bucket = [];
       buckets.set(key, bucket);
     }
-    bucket.push(e);
-  }
+    bucket.push({ entry: e, seq });
+  });
 
   const output: DisplayRow[] = [];
   for (const bucketEntries of buckets.values()) {
     processBucket(bucketEntries, output);
   }
 
-  output.sort((a, b) => representativeTime(a) - representativeTime(b));
+  output.sort(compareDisplayRows);
   return output;
 }
 

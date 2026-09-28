@@ -262,6 +262,24 @@ describe('groupPairedEntries', () => {
     const rows = groupPairedEntries([b, a]);
     expect(rows.map((r) => (r.kind === 'single' ? r.entry.msg : ''))).toEqual(['hello a', 'hello b']);
   });
+
+  // 同毫秒排序的依據：seq 是輸入陣列（readRecentLogs 的輸出，依 time 由新到舊、
+  // 同毫秒維持檔案順序）裡的全域位置，不是 reqId bucket 內的位置；合併後的
+  // Notion 呼叫／LINE 收發取 request／「準備送出」那一行的位置。
+  it('tags each row with the global input position of its representative line and breaks same-time ties by it', () => {
+    const now = 1_000;
+    const input: LogEntry[] = [
+      { level: 30, time: now + 1, msg: 'Notion API response', method: 'POST', path: '/q', callId: 'c1', reqId: 'r1' },
+      { level: 30, time: now, msg: 'other bucket', reqId: 'r2' },
+      { level: 30, time: now, msg: 'Message classified', reqId: 'r1' },
+      { level: 30, time: now, msg: 'Notion API request', method: 'POST', path: '/q', callId: 'c1', reqId: 'r1' },
+    ];
+
+    const rows = groupPairedEntries(input);
+
+    expect(rows.map((r) => (r.kind === 'single' ? r.entry.msg : r.kind))).toEqual(['other bucket', 'Message classified', 'notion-call']);
+    expect(rows.map((r) => r.seq)).toEqual([1, 2, 3]);
+  });
 });
 
 describe('buildFlowGroups', () => {

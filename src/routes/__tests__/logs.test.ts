@@ -1552,4 +1552,46 @@ describe('createLogsRouter', () => {
       expect(endTagAt).toBeLessThan(html.indexOf('累加使用者發言次數'));
     });
   });
+
+  // 本機 log 裡 `Message classified` 跟緊接著的 USERS query 常是同一毫秒（例如
+  // reqId c25fac）。之前 buildTimeline() 把 [...steps, ...misc] 做穩定排序，同
+  // 毫秒一律 Notion 步驟在前，畫面順序跟 log 檔相反。同毫秒要照 log 檔裡的原
+  // 始順序，不是單純換成「雜項在前」。
+  describe('same-millisecond ordering in the timeline', () => {
+    const at = (s: number) => Date.UTC(2024, 0, 1, 0, 0, s);
+    // log 檔裡的寫入順序；readRecentLogs 會依 time 由新到舊穩定排序，同毫秒維持檔案順序。
+    const fileOrder = [
+      { level: 30, time: at(0), type: 'message', sourceType: 'group', reqId: 'req-same-ms', msg: 'Processing event' },
+      { level: 30, time: at(1), reqId: 'req-same-ms', msg: 'Message classified', isCommand: true, parsed: true, commandType: 'registration' },
+      { level: 30, time: at(1), reqId: 'req-same-ms', msg: 'Notion API request', method: 'POST', path: '/databases/users/query', db: 'users', callId: 'c-u', purpose: '查詢發話者' },
+      { level: 30, time: at(2), reqId: 'req-same-ms', msg: 'Notion API response', method: 'POST', path: '/databases/users/query', db: 'users', callId: 'c-u', durationMs: 500 },
+      { level: 30, time: at(3), reqId: 'req-same-ms', msg: 'Notion API request', method: 'GET', path: '/pages/m1', db: 'members', callId: 'c-m', purpose: '查詢成員' },
+      { level: 30, time: at(3), reqId: 'req-same-ms', msg: 'Registration handler outcome', outcome: 'ok' },
+      { level: 30, time: at(4), reqId: 'req-same-ms', msg: 'Notion API response', method: 'GET', path: '/pages/m1', db: 'members', callId: 'c-m', durationMs: 300 },
+      { level: 30, time: at(5), reqId: 'req-same-ms', msg: 'LINE reply', method: 'POST', path: '/v2/bot/message/reply', sendId: 's-sm' },
+      { level: 30, time: at(6), reqId: 'req-same-ms', msg: 'LINE reply sent', sendId: 's-sm' },
+      { level: 30, time: at(5), reqId: 'req-same-ms', msg: 'Mutex task finished', key: '2024-01-06', queuedAhead: 0, waitMs: 0, heldMs: 10, callerTimedOut: false, fnFailed: false },
+    ];
+    const asReadRecentLogsReturns = () => [...fileOrder].sort((a, b) => b.time - a.time);
+
+    it('keeps the original log-file order for steps logged in the same millisecond (in either direction)', async () => {
+      vi.mocked(readRecentLogs).mockResolvedValueOnce(asReadRecentLogsReturns());
+
+      const { text } = await getLogsText({ reqId: 'req-same-ms' });
+
+      const stepTitles = text
+        .split('\n')
+        .filter((l) => l.startsWith('- ['))
+        .map((l) => l.replace(/^- \[\w+\] /, '').split('  ').slice(0, 2).join(' '));
+      expect(stepTitles).toEqual([
+        '起點 收到訊息',
+        'Message classified',
+        '查詢發話者 POST /databases/users/query',
+        '查詢成員 GET /pages/m1',
+        'Registration handler outcome',
+        '終點 LINE 回覆已送出',
+        'Mutex task finished',
+      ]);
+    });
+  });
 });

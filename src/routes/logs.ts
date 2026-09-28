@@ -7,9 +7,10 @@ import { logsAuthMiddleware } from '../middleware/logs-auth.js';
 import {
   groupPairedEntries,
   buildFlowGroups,
-  representativeTime,
+  compareDisplayRows,
   type NotionCallRow,
   type LineSendRow,
+  type SingleRow,
   type FlowGroup,
   type DisplayRow,
 } from './log-grouping.js';
@@ -499,7 +500,7 @@ function groupTitle(group: FlowGroup, kind: EventKind): string {
     const label = group.end.kind === 'line-reply' ? 'LINE 回覆' : 'LINE 推播';
     return hasReplyFailure(group) ? `${label}失敗` : `${label}記錄`;
   }
-  const singles = group.misc.filter((r): r is { kind: 'single'; entry: LogEntry } => r.kind === 'single');
+  const singles = group.misc.filter((r): r is SingleRow => r.kind === 'single');
   // 排程事件優先用排程自己的摘要行當標題：共用的 service 也可能在摘要之前記
   // info（例如 `getEventOccupancy` 的 `Event occupancy unavailable…`），直接取
   // 第一筆的話週報中止事件的標題會變成那一行。
@@ -767,7 +768,7 @@ function groupPreview(group: FlowGroup): string {
   // key 又可能是 `user-track-${userId}`，當預覽會把卡片上本該遮蔽的 userId 明文
   // 露出來（mutex.ts 的 logSummary）。
   const singles = group.misc.filter(
-    (r): r is { kind: 'single'; entry: LogEntry } => r.kind === 'single' && !PREVIEW_EXCLUDED_MSGS.has(String(r.entry.msg ?? ''))
+    (r): r is SingleRow => r.kind === 'single' && !PREVIEW_EXCLUDED_MSGS.has(String(r.entry.msg ?? ''))
   );
   const lastSingle = singles.at(-1)?.entry;
   if (lastSingle) {
@@ -808,7 +809,7 @@ interface BatchStat {
  */
 function computeBatch(group: FlowGroup, kind: EventKind): BatchStat[] | null {
   if (kind !== 'schedule') return null;
-  const singles = group.misc.filter((r): r is { kind: 'single'; entry: LogEntry } => r.kind === 'single');
+  const singles = group.misc.filter((r): r is SingleRow => r.kind === 'single');
   const lastSingle = singles.at(-1)?.entry;
   if (!lastSingle) return null;
   const { level: _level, time: _time, msg: _msg, reqId: _reqId, pid: _pid, hostname: _hostname, ...extra } =
@@ -1028,10 +1029,9 @@ function singleStepTimeline(entry: LogEntry): TimelineStep {
 function buildTimeline(group: FlowGroup): TimelineStep[] {
   const rows: DisplayRow[] = [...group.steps, ...group.misc];
   if (group.end) rows.push(group.end);
-  const orderedRows = rows
-    .map((row) => ({ row, t: representativeTime(row) }))
-    .sort((a, b) => a.t - b.t)
-    .map((x) => x.row);
+  // 時間相同時照 log 檔原始順序（seq），不能靠穩定排序維持 rows 的串接順序——
+  // 那會變成同一毫秒一律「Notion 步驟在前、雜項在後、終點最後」。
+  const orderedRows = rows.sort(compareDisplayRows);
 
   const steps: TimelineStep[] = [];
   if (group.start) steps.push(startStepTimeline(group));

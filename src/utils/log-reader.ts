@@ -61,5 +61,7 @@ export async function readRecentLogs(logDir: string, windowDays: number = DEFAUL
     }
   }
 
+  // 只比 time、靠 Array.prototype.sort 的穩定性讓同毫秒的行維持檔案內的寫入順序——
+  // `/logs` 時間軸同毫秒的排序仰賴這點（`routes/log-grouping.ts` 的 `DisplayRow.seq`）。
   return entries.filter((e) => (e.time ?? 0) >= cutoffMs).sort((a, b) => b.time - a.time);
 }
