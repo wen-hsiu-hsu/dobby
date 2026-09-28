@@ -2,9 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getEventOccupancy } from '../event-occupancy.js';
 import * as calendarRepo from '../calendar-repository.js';
 import * as seasonRepo from '../season-repository.js';
+import { logger } from '../../../utils/logger.js';
 
 vi.mock('../calendar-repository.js');
 vi.mock('../season-repository.js');
+vi.mock('../../../utils/logger.js', () => ({
+  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
 
 const event = {
   pageId: 'evt-1',
@@ -73,6 +77,26 @@ describe('getEventOccupancy', () => {
     vi.mocked(seasonRepo.findByName).mockResolvedValue(null);
 
     expect(await getEventOccupancy('2026-05-09')).toBeNull();
+  });
+
+  it('logs which lookup came back empty at info level, so callers that only see null can be told apart', async () => {
+    vi.mocked(seasonRepo.findByName).mockResolvedValue(null);
+
+    await getEventOccupancy('2026-05-09');
+
+    expect(logger.info).toHaveBeenCalledWith(
+      { date: '2026-05-09', hasEvent: true, hasSeason: false },
+      'Event occupancy unavailable: no event or season for date'
+    );
+    // warn 會讓報名「找不到活動」、next 事件在 /logs 被標成「警告」
+    expect(logger.warn).not.toHaveBeenCalled();
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('does not log the unavailable line when both event and season exist', async () => {
+    await getEventOccupancy('2026-05-09');
+
+    expect(logger.info).not.toHaveBeenCalled();
   });
 
   it('reuses a caller-provided season instead of re-querying Notion', async () => {
