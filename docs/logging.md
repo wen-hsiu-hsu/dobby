@@ -61,8 +61,9 @@
 狀態不是單純看 log level 最高到哪裡，判斷順序如下（愈前面優先權愈高）：
 
 1. **失敗**：Notion API 呼叫失敗，或 LINE 回覆/推播失敗——不論那筆失敗 log 實際記錄的 level 是 warn 還是 error，一律算失敗。Notion 這邊認的是 `notion-fetch.ts` 記的 `Notion API error`：HTTP 錯誤、錯誤回應不是 JSON（例如 proxy 回 HTML 的 502/503，`err` 記截斷後的原文）、網路錯誤（DNS 失敗、連線中斷、逾時）、成功回應的 body 讀不出來，都會記這一行。網路錯誤沒有 HTTP status，時間軸那一步只顯示「Notion API 呼叫失敗」，不帶 HTTP 碼。
-2. **警告**：看起來像指令（見上方「事件種類」），但整個流程從頭到尾沒有送出任何 LINE 回覆——通常代表指令解析失敗（例如日期格式不符），使用者完全沒收到反應。這種「安靜的失敗」跟真正的錯誤分開標示，方便定期檢查指令說明是不是不夠清楚。這個規則只套用在指令類事件，不套用在對話（自動回覆本來就常常沒有關鍵字命中、不回覆是正常行為，不該被標成警告）。
-3. **完成（有降級）**：流程仍然正常送出了回覆，但過程中出現已知的、不影響最終結果的降級訊息——目前認得六種：
+2. **失敗**：事件底下有 error/fatal 等級的 log 行，**但先逐行濾掉規則 4 表格裡的降級訊息**，再看剩下的行。例如指令處理中途丟出、沒被 handler 自己接住的例外，`handlers/event-router.ts` 會記一行 `Error handling event`，而且因為沒有回覆，要排在規則 3 前面，不然會跟「指令打錯字」一樣只顯示「警告」。濾掉降級訊息是因為 `buildMemberJoinedWelcome error, using fallback` 是 error 等級、但屬於降級（見規則 4）；濾的單位是「行」而不是「事件」——同時有 `User tracking failed (non-blocking)` 跟 `Error handling event` 的事件，後者仍然讓事件判成失敗。
+3. **警告**：看起來像指令（見上方「事件種類」），但整個流程從頭到尾沒有送出任何 LINE 回覆——通常代表指令解析失敗（例如日期格式不符），使用者完全沒收到反應。這種「安靜的失敗」跟真正的錯誤分開標示，方便定期檢查指令說明是不是不夠清楚。這個規則只套用在指令類事件，不套用在對話（自動回覆本來就常常沒有關鍵字命中、不回覆是正常行為，不該被標成警告）。
+4. **完成（有降級）**：流程仍然正常送出了回覆，但過程中出現已知的、不影響最終結果的降級訊息——目前認得六種：
 
    | 訊息 | 什麼情況 |
    |------|----------|
@@ -74,7 +75,7 @@
    | `Failed to create people record for new user (non-blocking)` | 新使用者的人員清單頁面建立失敗（非 Notion API 錯誤），USERS 照常建立但沒有連結，不會自動重試 |
 
    出現這些訊息時，詳情頁標題下方會有一塊黃色的降級原因說明。這個判定故意跟 log level 分開處理——`buildMemberJoinedWelcome error, using fallback` 是 `logger.error`，但歡迎訊息其實正常送出了，全部算「失敗」會蓋掉「其實有正常運作，只是走了備援路徑」這個更重要的訊息。
-4. 剩下的才照這個事件底下所有 log 行的最高等級（warn → 警告，error/fatal → 失敗）判定；都沒有就是「完成」。
+5. 剩下的有 warn 等級的 log 行就是「警告」；都沒有就是「完成」。（非降級的 error/fatal 已經在規則 2 判掉，走到這裡的 error 行只可能是降級訊息，而有降級訊息的事件已在規則 4 判定。）
 
 **報名／請假 mutex 逾時的事件，狀態會從「警告」變成「失敗」。** 逾時當下，`withFreshCalendarEvent` 記一筆 warn（`… timed out; result unknown to the user`），並回覆使用者「這次操作可能已經完成，請勿重複操作」，所以事件先顯示「警告」。之後背景任務跑完，它自己的回覆會因為 replyToken 已被用掉而被 LINE 拒絕（`Reply failed`；2026-09 以前的舊 log 是 `Reply failed, no fallback available (no groupId for push)`，兩者都認得），套用規則 1 改判「失敗」。這時 Notion 寫入其實可能已經成功，要看時間軸裡的 PATCH 才能確認結果。時間軸最後面的 `Mutex task finished`（背景任務真正結束才寫出，`callerTimedOut: true`）可以看出實際持有鎖多久、前面排了幾個、背景任務有沒有丟錯（`fnFailed`），欄位說明見 `docs/registration.md`「從 log 看鎖競爭」。背景設計見 [ADR 0002](adr/0002-mutex-timeout-does-not-cancel-task.md)。
 

@@ -594,22 +594,33 @@ function groupOrigin(group: FlowGroup, kind: EventKind): string {
   return '排程作業';
 }
 
+function isDegradationEntry(entry: LogEntry): boolean {
+  return Object.hasOwn(DEGRADATION_EXPLANATIONS, String(entry.msg ?? ''));
+}
+
 function groupStatus(group: FlowGroup, kind: EventKind): EventStatus {
   const hasDomainError =
     group.steps.some((s) => !!s.error) ||
     !!group.end?.failure ||
     group.misc.some((m) => m.kind === 'line-push' && !!m.failure);
   if (hasDomainError) return 'error';
+  const flat = flattenEntries(group);
+  // 真正的 error/fatal 要排在下面「指令沒回覆 → 警告」之前：沒被 handler 接
+  // 住的例外（event-router.ts 的 `Error handling event`）一定沒有回覆，排在
+  // 後面會被當成「指令打錯字」。降級訊息要「逐行」濾掉再看剩下的行——
+  // `buildMemberJoinedWelcome error, using fallback` 是 error 等級但屬於降級，
+  // 整段搬過來會把它改判成失敗；反過來也不能「事件裡有降級訊息就整個跳過
+  // 這個檢查」，否則同時有 `User tracking failed (non-blocking)` 跟
+  // `Error handling event` 的事件會漏掉後者。
+  if (flat.some((e) => !isDegradationEntry(e) && ['error', 'fatal'].includes(levelNameOf(e)))) return 'error';
   // 看起來像指令、但整個流程從頭到尾沒有送出任何 LINE 回覆——通常代表指令
   // 解析失敗（例如日期格式不符），使用者完全沒收到反應。這種「安靜的
   // 失敗」值得跟真正的錯誤分開標示，方便定期檢查是不是指令說明不夠清楚。
   if (kind === 'command' && !group.end) return 'warn';
-  const flat = flattenEntries(group);
-  const degradedMsgs = flat.map((e) => String(e.msg ?? '')).filter((m) => m in DEGRADATION_EXPLANATIONS);
-  if (degradedMsgs.length > 0) return 'degraded';
-  const levels = flat.map(levelNameOf);
-  if (levels.some((l) => l === 'error' || l === 'fatal')) return 'error';
-  if (levels.some((l) => l === 'warn')) return 'warn';
+  if (flat.some(isDegradationEntry)) return 'degraded';
+  // 走到這裡剩下的 error/fatal 只可能是降級訊息，而有降級訊息的事件上一步
+  // 已經回傳 degraded，所以只剩 warn 要看。
+  if (flat.some((e) => levelNameOf(e) === 'warn')) return 'warn';
   return 'ok';
 }
 

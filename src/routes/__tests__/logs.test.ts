@@ -554,6 +554,54 @@ describe('createLogsRouter', () => {
     expect(html).not.toContain('尚無回應記錄');
   });
 
+  // 降級訊息的 log level 不代表嚴重程度：buildMemberJoinedWelcome 那筆是
+  // logger.error，但歡迎訊息有正常送出，要維持「完成（有降級）」而不是
+  // 「失敗」。上面那個測試用的是 info 等級的降級訊息，抓不到「error 判斷
+  // 被搬到降級判斷之前、卻忘了排除降級訊息」這種回歸。
+  it('keeps an error-level degradation message (buildMemberJoinedWelcome fallback) as "degraded", not "error"', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'memberJoined', sourceType: 'group', reqId: 'req-welcome', msg: 'Processing event' },
+      { level: 50, time: Date.UTC(2024, 0, 1, 0, 0, 1), reqId: 'req-welcome', msg: 'buildMemberJoinedWelcome error, using fallback', err: { message: 'boom' } },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 2), reqId: 'req-welcome', msg: 'LINE reply', method: 'POST', path: '/v2/bot/message/reply', sendId: 's-w' },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 3), reqId: 'req-welcome', msg: 'LINE reply sent', sendId: 's-w' },
+    ]);
+
+    const html = await getLogsHtml();
+
+    expect(html).toContain('data-key="req-welcome" data-status="degraded"');
+  });
+
+  // 指令處理中途丟出、沒被 handler 自己接住的例外：event-router.ts 記一行
+  // error 等級的 `Error handling event`，而且因為沒有回覆，以前會先被「指令
+  // 沒回覆 → 警告」攔下，在「需要注意」裡看起來跟打錯字一樣。
+  it('treats a command that never replied but logged a non-degradation error as "error", not "warn"', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'message', sourceType: 'group', reqId: 'req-crash', msg: 'Processing event' },
+      { level: 20, time: Date.UTC(2024, 0, 1, 0, 0, 1), reqId: 'req-crash', msg: 'Routing command', command: { type: 'registration' }, isAdmin: false },
+      { level: 50, time: Date.UTC(2024, 0, 1, 0, 0, 2), reqId: 'req-crash', msg: 'Error handling event', err: { message: 'fetch failed' }, eventType: 'message' },
+    ]);
+
+    const html = await getLogsHtml();
+
+    expect(html).toContain('data-key="req-crash" data-status="error"');
+  });
+
+  // 降級訊息要「逐行」排除，不能「事件裡有降級訊息就跳過整個 error 檢查」：
+  // 同時有 `User tracking failed (non-blocking)` 跟 `Error handling event`
+  // 的指令事件，真正的錯誤是後者，要判成失敗。
+  it('treats an event with both a degradation message and a separate real error as "error"', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'message', sourceType: 'group', reqId: 'req-mixed', msg: 'Processing event' },
+      { level: 20, time: Date.UTC(2024, 0, 1, 0, 0, 1), reqId: 'req-mixed', msg: 'Routing command', command: { type: 'leave' }, isAdmin: false },
+      { level: 40, time: Date.UTC(2024, 0, 1, 0, 0, 2), reqId: 'req-mixed', msg: 'User tracking failed (non-blocking)', err: { message: 'timeout' } },
+      { level: 50, time: Date.UTC(2024, 0, 1, 0, 0, 3), reqId: 'req-mixed', msg: 'Error handling event', err: { message: 'fetch failed' }, eventType: 'message' },
+    ]);
+
+    const html = await getLogsHtml();
+
+    expect(html).toContain('data-key="req-mixed" data-status="error"');
+  });
+
   it('renders a proportional batch-result chart for a scheduled job summary with 2+ numeric fields, excluding "total"', async () => {
     vi.mocked(readRecentLogs).mockResolvedValueOnce([
       { level: 30, time: Date.UTC(2024, 0, 1, 4, 0, 0), reqId: 'sched-batch', msg: 'Starting display name batch update' },
