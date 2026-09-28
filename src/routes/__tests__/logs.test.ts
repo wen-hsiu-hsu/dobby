@@ -271,7 +271,12 @@ describe('createLogsRouter', () => {
     expect(html).toContain('data-status="ok"');
   });
 
-  it('treats a failed LINE reply as an "error" status event even though the underlying log level is warn', async () => {
+  // 'Reply failed, no fallback available (no groupId for push)' 是改名前的
+  // 字串，舊 log 檔（本機 7 天、R2 備份）裡還有，要照樣判成失敗。
+  it.each([
+    ['current', 'Reply failed'],
+    ['legacy', 'Reply failed, no fallback available (no groupId for push)'],
+  ])('treats a failed LINE reply (%s message) as an "error" status event even though the underlying log level is warn', async (_label, failureMsg) => {
     vi.mocked(readRecentLogs).mockResolvedValueOnce([
       { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'message', sourceType: 'group', reqId: 'req-fail', msg: 'Processing event' },
       {
@@ -286,8 +291,8 @@ describe('createLogsRouter', () => {
       {
         level: 40, // logged at warn, not error
         time: Date.UTC(2024, 0, 1, 0, 0, 2),
-        msg: 'Reply failed, no fallback available (no groupId for push)',
-        err: { message: 'no fallback available (no groupId for push)' },
+        msg: failureMsg,
+        err: { message: 'Invalid reply token' },
         sendId: 's-fail',
         reqId: 'req-fail',
       },
@@ -297,7 +302,7 @@ describe('createLogsRouter', () => {
 
     expect(html).toContain('data-status="error"');
     expect(html).toContain('LINE 回覆失敗');
-    expect(html).toContain('no fallback available (no groupId for push)');
+    expect(html).toContain('Invalid reply token');
   });
 
   it('marks an event with no "Processing event" start as scheduled (排程), and keeps distinct reqIds as separate events', async () => {

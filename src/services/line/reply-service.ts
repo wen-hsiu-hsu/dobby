@@ -40,7 +40,9 @@ export async function replyMessage(
     await lineClient.replyMessage({ replyToken, messages: messagesToSend });
     logger.info({ method: METHOD, path: PATH, sendId }, 'LINE reply sent');
   } catch (err) {
-    logger.warn({ err, method: METHOD, path: PATH, sendId }, 'Reply failed, no fallback available (no groupId for push)');
+    // No push fallback by design (LINE free-plan push quota; see CLAUDE.md) —
+    // a failed reply (e.g. replyToken already used or expired) is just logged.
+    logger.warn({ err, method: METHOD, path: PATH, sendId }, 'Reply failed');
     logger.debug({ method: METHOD, path: PATH, sendId, messages: messageContents }, 'Reply failed payload');
   }
 }

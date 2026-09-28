@@ -165,7 +165,7 @@ describe('groupPairedEntries', () => {
     const entries = [
       entry({ msg: 'LINE reply', method: 'POST', path: '/v2/bot/message/reply', sendId: 's1', reqId: 'r1' }),
       entry({ level: 20, msg: 'LINE reply payload', sendId: 's1', messages: ['ok'], reqId: 'r1' }),
-      entry({ level: 40, msg: 'Reply failed, no fallback available (no groupId for push)', sendId: 's1', reqId: 'r1' }),
+      entry({ level: 40, msg: 'Reply failed', sendId: 's1', reqId: 'r1' }),
     ];
 
     const rows = groupPairedEntries(entries);
@@ -174,6 +174,22 @@ describe('groupPairedEntries', () => {
     expect(row.kind).toBe('line-reply');
     expect(row.failure).toBeDefined();
     expect(row.sent).toBeUndefined();
+  });
+
+  // 舊 log 檔（本機保留 7 天、R2 備份）還是改名前的字串，要照樣配對成失敗。
+  it('still pairs the legacy "Reply failed, no fallback available (no groupId for push)" line as a reply failure', () => {
+    const entries = [
+      entry({ msg: 'LINE reply', method: 'POST', path: '/v2/bot/message/reply', sendId: 's1', reqId: 'r1' }),
+      entry({ level: 40, msg: 'Reply failed, no fallback available (no groupId for push)', sendId: 's1', reqId: 'r1' }),
+      entry({ level: 20, msg: 'Reply failed payload', sendId: 's1', messages: ['ok'], reqId: 'r1' }),
+    ];
+
+    const rows = groupPairedEntries(entries);
+    expect(rows).toHaveLength(1);
+    const row = rows[0] as LineSendRow;
+    expect(row.kind).toBe('line-reply');
+    expect(row.failure?.msg).toBe('Reply failed, no fallback available (no groupId for push)');
+    expect(row.failurePayload?.['messages']).toEqual(['ok']);
   });
 
   it('pairs LINE push by sendId, not content, without cross-matching two pushes with identical to/messages', () => {
@@ -217,7 +233,7 @@ describe('groupPairedEntries', () => {
     const entries = [
       entry({ msg: 'LINE reply', method: 'POST', path: '/v2/bot/message/reply', sendId: 's1', reqId: 'r1' }),
       entry({ level: 20, msg: 'LINE reply payload', sendId: 's1', messages: ['ok'], reqId: 'r1' }),
-      entry({ level: 40, msg: 'Reply failed, no fallback available (no groupId for push)', sendId: 's1', reqId: 'r1' }),
+      entry({ level: 40, msg: 'Reply failed', sendId: 's1', reqId: 'r1' }),
       entry({ level: 20, msg: 'Reply failed payload', sendId: 's1', messages: ['ok'], reqId: 'r1' }),
     ];
 

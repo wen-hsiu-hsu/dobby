@@ -27,7 +27,11 @@ export interface LineSendRow {
 
 export type DisplayRow = { kind: 'single'; entry: LogEntry } | NotionCallRow | LineSendRow;
 
-const LINE_REPLY_FAILURE_MSG = 'Reply failed, no fallback available (no groupId for push)';
+const LINE_REPLY_FAILURE_MSG = 'Reply failed';
+// 2026-09 以前 reply-service.ts 用的舊字串（暗示有 push 備援，但實際上永遠
+// 不會用 push 補發，所以改名）。舊 log 檔本機保留 7 天、R2 也有備份，只認
+// 新字串的話舊事件的回覆失敗會配對不到，狀態從「失敗」降成「警告」。
+const LINE_REPLY_FAILURE_MSG_LEGACY = 'Reply failed, no fallback available (no groupId for push)';
 const LINE_PUSH_FAILURE_MSG = 'Push message failed';
 const LINE_REPLY_FAILURE_PAYLOAD_MSG = 'Reply failed payload';
 const LINE_PUSH_FAILURE_PAYLOAD_MSG = 'Push message failed payload';
@@ -159,6 +163,7 @@ function processBucket(bucketEntries: LogEntry[], output: DisplayRow[]): void {
         break;
       }
       case LINE_REPLY_FAILURE_MSG:
+      case LINE_REPLY_FAILURE_MSG_LEGACY:
       case LINE_PUSH_FAILURE_MSG: {
         const sendId = String(e['sendId']);
         const row = openLineSendBySendId.get(sendId);

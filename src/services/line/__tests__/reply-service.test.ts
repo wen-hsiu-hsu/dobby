@@ -121,7 +121,7 @@ describe('replyMessage', () => {
 
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({ err, method: 'POST', path: '/v2/bot/message/reply', sendId: expect.any(String) }),
-      'Reply failed, no fallback available (no groupId for push)',
+      'Reply failed',
     );
     const warnCall = vi.mocked(logger.warn).mock.calls[0]![0];
     expect(warnCall).not.toHaveProperty('messages');
