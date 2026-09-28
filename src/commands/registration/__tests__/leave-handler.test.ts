@@ -112,6 +112,15 @@ describe('handleLeave', () => {
     });
   });
 
+  it('names the missing target (not "your data") when an admin files leave for someone who cannot be resolved', async () => {
+    vi.mocked(resolveTarget).mockResolvedValue(null);
+
+    await handleLeave({ ...event, message: { text: '@Dobby 假 @Charlie' } }, false, true);
+
+    const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
+    expect((messages[0] as { text: string }).text).toBe('找不到「Charlie」的資料，請確認名稱與人員清單一致');
+  });
+
   it('still replies "not found" (not the season error) when both lookups come back empty', async () => {
     vi.mocked(resolveTarget).mockResolvedValue(null);
     vi.mocked(seasonRepo.findByName).mockResolvedValue(null);

@@ -187,6 +187,15 @@ describe('handleRegistration', () => {
     expect(calendarRepo.updateGuests).not.toHaveBeenCalled();
   });
 
+  it('names the missing target (not "your account") when an admin registers someone who cannot be resolved', async () => {
+    vi.mocked(resolveTarget).mockResolvedValue(null);
+
+    await handleRegistration(makeEvent('@Dobby +1 @Charlie'), 1, true);
+
+    expect(replyText()).toBe('找不到「Charlie」的資料，請確認名稱與人員清單一致');
+    expect(calendarRepo.updateGuests).not.toHaveBeenCalled();
+  });
+
   it('still replies "account not found" (not the season error) when both lookups come back empty', async () => {
     vi.mocked(resolveTarget).mockResolvedValue(null);
     vi.mocked(seasonRepo.findByName).mockResolvedValue(null);

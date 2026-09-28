@@ -57,7 +57,11 @@ export async function handleRegistration(
       { outcome: 'target-not-found', ...requestSummary, targetRequest: describeTargetRequest(target) },
       { actorUserId, targetUserId: target.targetUserId, targetName: target.targetName }
     );
-    await replyMessage(event.replyToken, [{ type: 'text', text: '找不到您的帳號，請先向管理員登記' }]);
+    // 代報時要講清楚是哪個對象查無；「找不到您的帳號」會讓管理員以為是自己的帳號有問題。
+    const text = target.isSelf
+      ? '找不到您的帳號，請先向管理員登記'
+      : `找不到「${target.targetName ?? '指定對象'}」的資料，請確認名稱與人員清單一致`;
+    await replyMessage(event.replyToken, [{ type: 'text', text }]);
     return;
   }
   const targetDetail = { actorUserId, targetPersonPageId: resolved.personPageId };

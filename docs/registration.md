@@ -16,7 +16,8 @@ Registration Parser
   ├── Target Resolver：判斷操作對象（self / mention userId / name 文字）
   └── 取得活動日（下週六）所屬季度的 Season 資料（供 isSelfSeasonMember 判斷）
   兩者都查無時，以找不到對象優先：報名回「找不到您的帳號，請先向管理員登記」、
-  請假回「找不到您的資料」；對象有找到但 Season 查無，才回「找不到 YYYY-QN 季租資料」
+  請假回「找不到您的資料」（管理員代報 @Name 時，兩者都改回「找不到「Name」的資料，請確認名稱與人員清單一致」）；
+  對象有找到但 Season 查無，才回「找不到 YYYY-QN 季租資料」
     │
     ▼
 獲取 Mutex 鎖（key = 下一個週六的日期字串，同 key FIFO 排隊，見下方「Mutex 保護」）
