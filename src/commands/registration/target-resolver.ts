@@ -6,6 +6,12 @@ import type { NotionUser } from '../../types/notion-models.js';
 export interface ResolvedTarget {
   personPageId: string;
   displayName: string;
+  /**
+   * How the target was found, for the outcome log: the actor themself, a mention's USERS
+   * record, a mention whose userId isn't in USERS so its text was looked up in People
+   * instead, or a typed/PC-version `@Name` looked up in People.
+   */
+  resolvedVia: 'self' | 'mention' | 'mention-name-fallback' | 'name';
 }
 
 /**
@@ -31,7 +37,7 @@ export async function resolveTarget(
     const person = user.registeredPersonPageId
       ? (await peopleRepo.findByPageIds([user.registeredPersonPageId]))[0] ?? null
       : null;
-    return { personPageId: person?.pageId ?? '', displayName: person?.name ?? user.customName };
+    return { personPageId: person?.pageId ?? '', displayName: person?.name ?? user.customName, resolvedVia: 'self' };
   }
 
   if (target.targetUserId) {
@@ -40,7 +46,7 @@ export async function resolveTarget(
       const person = user.registeredPersonPageId
         ? (await peopleRepo.findByPageIds([user.registeredPersonPageId]))[0] ?? null
         : null;
-      return { personPageId: person?.pageId ?? '', displayName: person?.name ?? user.customName };
+      return { personPageId: person?.pageId ?? '', displayName: person?.name ?? user.customName, resolvedVia: 'mention' };
     }
     // Fall through to name lookup if user not in Users DB
   }
@@ -48,7 +54,11 @@ export async function resolveTarget(
   if (target.targetName) {
     const person = await peopleRepo.findByName(target.targetName);
     if (!person) return null;
-    return { personPageId: person.pageId, displayName: person.name };
+    return {
+      personPageId: person.pageId,
+      displayName: person.name,
+      resolvedVia: target.targetUserId ? 'mention-name-fallback' : 'name',
+    };
   }
 
   return null;

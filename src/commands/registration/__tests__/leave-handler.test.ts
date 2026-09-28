@@ -42,7 +42,7 @@ const baseSeason = {
 
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.mocked(resolveTarget).mockResolvedValue({ personPageId: 'person-1', displayName: 'Alice' });
+  vi.mocked(resolveTarget).mockResolvedValue({ personPageId: 'person-1', displayName: 'Alice', resolvedVia: 'self' });
   vi.mocked(seasonRepo.findByName).mockResolvedValue(baseSeason);
   vi.mocked(calendarRepo.findByDate).mockResolvedValue({
     pageId: 'evt-1',
@@ -123,7 +123,7 @@ describe('handleLeave', () => {
   });
 
   it('passes the actor snapshot to resolveTarget and looks up the season without waiting for it', async () => {
-    let finishResolve!: (v: { personPageId: string; displayName: string }) => void;
+    let finishResolve!: (v: NonNullable<Awaited<ReturnType<typeof resolveTarget>>>) => void;
     vi.mocked(resolveTarget).mockReturnValue(new Promise((r) => { finishResolve = r; }));
     const actorUser = { userId: 'user-alice' } as any;
 
@@ -132,7 +132,7 @@ describe('handleLeave', () => {
     expect(resolveTarget).toHaveBeenCalledWith(expect.objectContaining({ isSelf: true }), 'user-alice', actorUser);
     expect(seasonRepo.findByName).toHaveBeenCalled();
 
-    finishResolve({ personPageId: 'person-1', displayName: 'Alice' });
+    finishResolve({ personPageId: 'person-1', displayName: 'Alice', resolvedVia: 'self' });
     await handling;
     expect(calendarRepo.updateAbsentees).toHaveBeenCalled();
   });
@@ -230,44 +230,6 @@ describe('handleLeave', () => {
     expect(text).toContain('剩餘名額：');
   });
 
-  it('logs a business summary after a successful leave write, with actorUserId only at debug level', async () => {
-    await handleLeave(event, false, false);
-
-    expect(logger.info).toHaveBeenCalledWith(
-      expect.objectContaining({
-        targetDisplayName: 'Alice',
-        isCancel: false,
-        absenteeCountAfter: 1,
-      }),
-      'Leave status updated',
-    );
-    const infoCall = vi.mocked(logger.info).mock.calls[0]![0];
-    expect(infoCall).not.toHaveProperty('actorUserId');
-
-    expect(logger.debug).toHaveBeenCalledWith(
-      expect.objectContaining({ actorUserId: 'user-alice', targetPersonPageId: 'person-1' }),
-      'Leave status updated detail',
-    );
-  });
-
-  it('logs a business summary after a successful cancel-leave write, with isCancel: true', async () => {
-    vi.mocked(calendarRepo.findByDate).mockResolvedValue({
-      pageId: 'evt-1',
-      date: '2026-05-09',
-      absentees: ['person-1'],
-      guests: [],
-      isPaused: false,
-      courts: null,
-    });
-
-    await handleLeave(event, true, false);
-
-    expect(logger.info).toHaveBeenCalledWith(
-      expect.objectContaining({ targetDisplayName: 'Alice', isCancel: true, absenteeCountAfter: 0 }),
-      'Leave status updated',
-    );
-  });
-
   it('replies with the parse error (not "你不是管理員") when a non-admin sends a malformed (non-@) target', async () => {
     // parseError is checked before the admin gate: a syntax mistake is not a permission
     // problem. leave-handler previously skipped this check entirely (registration-handler
@@ -309,18 +271,115 @@ describe('handleLeave', () => {
     expect(calendarRepo.updateAbsentees).not.toHaveBeenCalled();
   });
 
-  it('does not log a business summary on the early-return branches (already on leave / not on leave)', async () => {
-    vi.mocked(calendarRepo.findByDate).mockResolvedValue({
-      pageId: 'evt-1',
-      date: '2026-05-09',
-      absentees: ['person-1'],
-      guests: [],
-      isPaused: false,
-      courts: null,
+  describe('outcome log', () => {
+    function outcomeSummary(): Record<string, unknown> {
+      const calls = vi.mocked(logger.info).mock.calls.filter(([, msg]) => msg === 'Leave handler outcome');
+      expect(calls).toHaveLength(1);
+      return calls[0]![0] as Record<string, unknown>;
+    }
+
+    function withAbsentees(absentees: string[]) {
+      vi.mocked(calendarRepo.findByDate).mockResolvedValue({
+        pageId: 'evt-1',
+        date: '2026-05-09',
+        absentees,
+        guests: ['G1'],
+        isPaused: false,
+        courts: null,
+      });
+    }
+
+    it('logs "leave-recorded" with slot numbers before/after, with actorUserId only in the debug detail', async () => {
+      await handleLeave(event, false, false);
+
+      const date = formatDate(getNextSaturday());
+      expect(outcomeSummary()).toEqual({
+        outcome: 'leave-recorded',
+        date,
+        seasonName: getSeasonNameForDate(date),
+        isCancel: false,
+        isAdmin: false,
+        resolvedVia: 'self',
+        courts: 2,
+        guestCount: 0,
+        totalSlotsBefore: 13,
+        absenteeCountBefore: 0,
+        totalSlotsAfter: 14,
+        absenteeCountAfter: 1,
+        presentSeasonMembersAfter: 0,
+        targetDisplayName: 'Alice',
+      });
+      expect(logger.debug).toHaveBeenCalledWith(
+        { actorUserId: 'user-alice', targetPersonPageId: 'person-1' },
+        'Leave handler outcome detail',
+      );
     });
 
-    await handleLeave(event, false, false);
+    it('logs "leave-cancelled" after a successful cancel-leave write', async () => {
+      withAbsentees(['person-1']);
 
-    expect(logger.info).not.toHaveBeenCalled();
+      await handleLeave(event, true, false);
+
+      expect(outcomeSummary()).toMatchObject({
+        outcome: 'leave-cancelled',
+        isCancel: true,
+        totalSlotsBefore: 14,
+        totalSlotsAfter: 13,
+        absenteeCountBefore: 1,
+        absenteeCountAfter: 0,
+        guestCount: 1,
+      });
+    });
+
+    it('logs "already-absent" (info, not warn) without writing', async () => {
+      withAbsentees(['person-1']);
+
+      await handleLeave(event, false, false);
+
+      const summary = outcomeSummary();
+      expect(summary).toMatchObject({ outcome: 'already-absent', absenteeCountBefore: 1, totalSlotsBefore: 14 });
+      expect(summary).not.toHaveProperty('totalSlotsAfter');
+      expect(summary).not.toHaveProperty('targetDisplayName');
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it('logs "not-absent" when cancelling leave that was never recorded', async () => {
+      await handleLeave(event, true, false);
+
+      expect(outcomeSummary()).toMatchObject({ outcome: 'not-absent', isCancel: true, absenteeCountBefore: 0 });
+    });
+
+    it('logs "not-season-member" before fetching the event', async () => {
+      vi.mocked(resolveTarget).mockResolvedValue({ personPageId: 'person-2', displayName: 'Bob', resolvedVia: 'mention' });
+
+      await handleLeave(event, false, true);
+
+      expect(calendarRepo.findByDate).not.toHaveBeenCalled();
+      expect(outcomeSummary()).toMatchObject({ outcome: 'not-season-member', resolvedVia: 'mention', isAdmin: true });
+    });
+
+    it('logs "season-not-found" and "target-not-found"', async () => {
+      vi.mocked(seasonRepo.findByName).mockResolvedValue(null);
+      await handleLeave(event, false, false);
+      expect(outcomeSummary()).toMatchObject({ outcome: 'season-not-found', resolvedVia: 'self' });
+
+      vi.mocked(logger.info).mockClear();
+      vi.mocked(resolveTarget).mockResolvedValue(null);
+      await handleLeave(event, false, false);
+      expect(outcomeSummary()).toMatchObject({ outcome: 'target-not-found', targetRequest: 'self' });
+    });
+
+    it('logs "parse-error" and "not-admin" before date/season are known', async () => {
+      await handleLeave({ ...event, message: { text: '@Dobby 假 Charlie' } }, false, true);
+      expect(outcomeSummary()).toEqual({ outcome: 'parse-error', isCancel: false, isAdmin: true });
+
+      vi.mocked(logger.info).mockClear();
+      await handleLeave(
+        { ...event, message: { text: '@Dobby 假 @Bob', mention: { mentionees: [{ type: 'user', userId: 'u-bob', index: 10, length: 4 }] } } },
+        false,
+        false,
+      );
+      expect(outcomeSummary()).toEqual({ outcome: 'not-admin', isCancel: false, isAdmin: false });
+    });
   });
 });

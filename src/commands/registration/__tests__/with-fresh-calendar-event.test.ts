@@ -11,7 +11,7 @@ vi.mock('../../../services/mutex.js', async (importOriginal) => ({
 }));
 vi.mock('../../../services/line/reply-service.js');
 vi.mock('../../../utils/logger.js', () => ({
-  logger: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
 const calEvent = {
@@ -37,6 +37,9 @@ describe('withFreshCalendarEvent', () => {
     expect(replyMessage).toHaveBeenCalledWith('token', [{ type: 'text', text: '找不到 2026-05-09 的活動' }]);
     expect(mutation).not.toHaveBeenCalled();
     expect(logger.error).not.toHaveBeenCalled();
+    // An expected outcome, not a problem: info (not warn), under the caller's context.
+    expect(logger.info).toHaveBeenCalledWith({ outcome: 'event-not-found', date: '2026-05-09' }, 'ctx outcome');
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 
   it('locks by date and runs mutation with the refetched value', async () => {
@@ -62,6 +65,8 @@ describe('withFreshCalendarEvent', () => {
       'ctx timed out; result unknown to the user',
     );
     expect(logger.error).not.toHaveBeenCalled();
+    // The warn already says what happened; the background task logs its own outcome later.
+    expect(logger.info).not.toHaveBeenCalledWith(expect.anything(), 'ctx outcome');
   });
 
   it('replies with a generic error and logs when mutation throws', async () => {
@@ -71,5 +76,6 @@ describe('withFreshCalendarEvent', () => {
 
     expect(replyMessage).toHaveBeenCalledWith('token', [{ type: 'text', text: '系統錯誤，請稍後再試' }]);
     expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ err: expect.any(Error) }), 'my-context error');
+    expect(logger.info).not.toHaveBeenCalledWith(expect.anything(), 'my-context outcome');
   });
 });

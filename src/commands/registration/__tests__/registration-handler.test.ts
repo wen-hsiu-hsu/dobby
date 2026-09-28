@@ -64,7 +64,7 @@ function replyText(): string {
 
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.mocked(resolveTarget).mockResolvedValue({ personPageId: 'person-1', displayName: 'Alice' });
+  vi.mocked(resolveTarget).mockResolvedValue({ personPageId: 'person-1', displayName: 'Alice', resolvedVia: 'self' });
   vi.mocked(seasonRepo.findByName).mockResolvedValue(baseSeason());
   vi.mocked(calendarRepo.findByDate).mockResolvedValue(baseCalendarEvent());
   vi.mocked(peopleRepo.findByPageIds).mockImplementation(async (ids: string[]) =>
@@ -88,7 +88,7 @@ describe('handleRegistration', () => {
   });
 
   it('registers a guest for a non-season-member (零打) self sign-up without the 的朋友 suffix', async () => {
-    vi.mocked(resolveTarget).mockResolvedValue({ personPageId: 'person-2', displayName: 'Bob' });
+    vi.mocked(resolveTarget).mockResolvedValue({ personPageId: 'person-2', displayName: 'Bob', resolvedVia: 'mention' });
     vi.mocked(seasonRepo.findByName).mockResolvedValue(baseSeason({ members: ['person-1'] }));
     const event = makeEvent('@Dobby +1');
 
@@ -100,7 +100,7 @@ describe('handleRegistration', () => {
 
   it('caps a non-admin request that exceeds remaining capacity and reports cappedAt in the headline', async () => {
     // courts(1) * 7 - members(1) + absentees(0) = 6 available slots
-    vi.mocked(resolveTarget).mockResolvedValue({ personPageId: 'person-2', displayName: 'Bob' });
+    vi.mocked(resolveTarget).mockResolvedValue({ personPageId: 'person-2', displayName: 'Bob', resolvedVia: 'mention' });
     vi.mocked(seasonRepo.findByName).mockResolvedValue(baseSeason({ members: ['person-1'], courts: 1 }));
     const event = makeEvent('@Dobby +10');
 
@@ -117,7 +117,7 @@ describe('handleRegistration', () => {
   it('caps +N against the calendar 場地數 when set, and shows the same total in the reply', async () => {
     // calendar courts(1) * 7 - members(1) + absentees(0) = 6 slots;
     // the season default (2 courts) would have allowed 13 — must not be used for the gate
-    vi.mocked(resolveTarget).mockResolvedValue({ personPageId: 'person-2', displayName: 'Bob' });
+    vi.mocked(resolveTarget).mockResolvedValue({ personPageId: 'person-2', displayName: 'Bob', resolvedVia: 'mention' });
     vi.mocked(seasonRepo.findByName).mockResolvedValue(baseSeason({ members: ['person-1'], courts: 2 }));
     vi.mocked(calendarRepo.findByDate).mockResolvedValue(baseCalendarEvent({ courts: 1 }));
     const event = makeEvent('@Dobby +10');
@@ -134,7 +134,7 @@ describe('handleRegistration', () => {
   });
 
   it('lets an admin register on behalf of another target even though target.isSelf is false', async () => {
-    vi.mocked(resolveTarget).mockResolvedValue({ personPageId: 'person-2', displayName: 'Bob' });
+    vi.mocked(resolveTarget).mockResolvedValue({ personPageId: 'person-2', displayName: 'Bob', resolvedVia: 'mention' });
     const event = makeEvent('@Dobby +1 @Bob', [{ type: 'user', userId: 'u-bob', index: 0, length: 6 }]);
 
     await handleRegistration(event, 1, true);
@@ -197,7 +197,7 @@ describe('handleRegistration', () => {
   });
 
   it('passes the actor snapshot to resolveTarget and looks up the season without waiting for it', async () => {
-    let finishResolve!: (v: { personPageId: string; displayName: string }) => void;
+    let finishResolve!: (v: NonNullable<Awaited<ReturnType<typeof resolveTarget>>>) => void;
     vi.mocked(resolveTarget).mockReturnValue(new Promise((r) => { finishResolve = r; }));
     const actorUser = { userId: 'user-alice' } as any;
 
@@ -206,7 +206,7 @@ describe('handleRegistration', () => {
     expect(resolveTarget).toHaveBeenCalledWith(expect.objectContaining({ isSelf: true }), 'user-alice', actorUser);
     expect(seasonRepo.findByName).toHaveBeenCalled();
 
-    finishResolve({ personPageId: 'person-1', displayName: 'Alice' });
+    finishResolve({ personPageId: 'person-1', displayName: 'Alice', resolvedVia: 'self' });
     await handling;
     expect(calendarRepo.updateGuests).toHaveBeenCalled();
   });
@@ -279,33 +279,140 @@ describe('handleRegistration', () => {
     expect(replyText()).toContain('找不到 Alice 的報名紀錄');
   });
 
-  it('logs a business summary after a successful registration write, with actorUserId only at debug level', async () => {
-    const event = makeEvent('@Dobby +1');
+  describe('outcome log', () => {
+    function outcomeSummary(): Record<string, unknown> {
+      const calls = vi.mocked(logger.info).mock.calls.filter(([, msg]) => msg === 'Registration handler outcome');
+      expect(calls).toHaveLength(1);
+      return calls[0]![0] as Record<string, unknown>;
+    }
 
-    await handleRegistration(event, 1, false);
+    function outcomeDetail(): Record<string, unknown> | undefined {
+      return vi.mocked(logger.debug).mock.calls.find(([, msg]) => msg === 'Registration handler outcome detail')?.[0] as
+        | Record<string, unknown>
+        | undefined;
+    }
 
-    expect(logger.info).toHaveBeenCalledWith(
-      expect.objectContaining({
+    it('logs "added" after a successful write, with names/userIds and the new entries only in the debug detail', async () => {
+      vi.mocked(calendarRepo.findByDate).mockResolvedValue(baseCalendarEvent({ guests: ['Bob'] }));
+
+      await handleRegistration(makeEvent('@Dobby +2'), 2, false);
+
+      const date = formatDate(getNextSaturday());
+      expect(outcomeSummary()).toEqual({
+        outcome: 'added',
+        date,
+        seasonName: getSeasonNameForDate(date),
+        requestedDelta: 2,
+        isAdmin: false,
+        isSelfSeasonMember: true,
+        resolvedVia: 'self',
+        courts: 2,
+        totalSlots: 13,
+        guestCountBefore: 1,
+        guestCountAfter: 3,
+        cappedAt: undefined,
         targetDisplayName: 'Alice',
-        delta: 1,
-        guestCountAfter: 1,
-      }),
-      'Registration updated',
-    );
-    const infoCall = vi.mocked(logger.info).mock.calls[0]![0];
-    expect(infoCall).not.toHaveProperty('actorUserId');
+      });
+      expect(outcomeDetail()).toEqual({
+        actorUserId: 'user-alice',
+        targetPersonPageId: 'person-1',
+        addedGuests: ['Alice的朋友', 'Alice的朋友 (2)'],
+      });
+    });
 
-    expect(logger.debug).toHaveBeenCalledWith(
-      expect.objectContaining({ actorUserId: 'user-alice', targetPersonPageId: 'person-1' }),
-      'Registration updated detail',
-    );
-  });
+    it('logs "added" with cappedAt when a non-admin request is trimmed to the remaining slots', async () => {
+      // 1 court → 7 - 1 member = 6 slots; 5 taken → 1 left
+      vi.mocked(calendarRepo.findByDate).mockResolvedValue(
+        baseCalendarEvent({ courts: 1, guests: ['G1', 'G2', 'G3', 'G4', 'G5'] }),
+      );
 
-  it('does not log a business summary when the operation fails validation (!result.canAdd)', async () => {
-    const event = makeEvent('@Dobby -1');
+      await handleRegistration(makeEvent('@Dobby +3'), 3, false);
 
-    await handleRegistration(event, -1, false);
+      expect(outcomeSummary()).toMatchObject({ outcome: 'added', requestedDelta: 3, cappedAt: 1, guestCountAfter: 6 });
+    });
 
-    expect(logger.info).not.toHaveBeenCalled();
+    it('logs "removed" with the removed entries only in the debug detail', async () => {
+      vi.mocked(calendarRepo.findByDate).mockResolvedValue(baseCalendarEvent({ guests: ['Alice的朋友', 'Bob'] }));
+
+      await handleRegistration(makeEvent('@Dobby -1'), -1, false);
+
+      expect(outcomeSummary()).toMatchObject({ outcome: 'removed', requestedDelta: -1, guestCountBefore: 2, guestCountAfter: 1 });
+      expect(outcomeDetail()).toMatchObject({ removedGuests: ['Alice的朋友'] });
+    });
+
+    it('logs "no-registration" (info, not warn) when there is nothing to remove', async () => {
+      await handleRegistration(makeEvent('@Dobby -1'), -1, false);
+
+      expect(outcomeSummary()).toMatchObject({ outcome: 'no-registration', requestedDelta: -1, guestCountBefore: 0 });
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['+0', 0, []],
+      ['+0', 0, ['Alice的朋友']],
+      // parseInt('-0') is -0, which must also count as zero
+      ['-0', -0, []],
+      ['-0', -0, ['Alice的朋友']],
+    ])('logs "zero-delta" for %s with guests %j (it goes down the removal path, not a rejected registration)', async (text, delta, guests) => {
+      vi.mocked(calendarRepo.findByDate).mockResolvedValue(baseCalendarEvent({ guests }));
+
+      await handleRegistration(makeEvent(`@Dobby ${text}`), delta, false);
+
+      expect(calendarRepo.updateGuests).not.toHaveBeenCalled();
+      expect(outcomeSummary()).toMatchObject({ outcome: 'zero-delta' });
+    });
+
+    it('logs "full" with the capacity numbers when no slot is left', async () => {
+      vi.mocked(calendarRepo.findByDate).mockResolvedValue(baseCalendarEvent({ courts: 0 }));
+
+      await handleRegistration(makeEvent('@Dobby +1'), 1, false);
+
+      expect(outcomeSummary()).toMatchObject({ outcome: 'full', courts: 0, totalSlots: -1, guestCountBefore: 0 });
+    });
+
+    it('logs "paused" when the event is paused, even for an admin', async () => {
+      vi.mocked(calendarRepo.findByDate).mockResolvedValue(baseCalendarEvent({ isPaused: true }));
+
+      await handleRegistration(makeEvent('@Dobby +1'), 1, true);
+
+      expect(outcomeSummary()).toMatchObject({ outcome: 'paused', isAdmin: true });
+    });
+
+    it('logs isSelfSeasonMember false when the target has no People page', async () => {
+      vi.mocked(resolveTarget).mockResolvedValue({ personPageId: '', displayName: 'alice-line', resolvedVia: 'self' });
+
+      await handleRegistration(makeEvent('@Dobby +1'), 1, false);
+
+      expect(outcomeSummary()).toMatchObject({ outcome: 'added', isSelfSeasonMember: false });
+    });
+
+    it('logs "parse-error" and "not-admin" before date/season are known', async () => {
+      await handleRegistration(makeEvent('@Dobby +1 Bob'), 1, true);
+      expect(outcomeSummary()).toEqual({ outcome: 'parse-error', requestedDelta: 1, isAdmin: true });
+
+      vi.mocked(logger.info).mockClear();
+      await handleRegistration(makeEvent('@Dobby @Bob +1', [{ type: 'user', userId: 'u-bob', index: 7, length: 4 }]), 1, false);
+      expect(outcomeSummary()).toEqual({ outcome: 'not-admin', requestedDelta: 1, isAdmin: false });
+    });
+
+    it('logs "target-not-found" with what was asked for, keeping the typed name and userId in the debug detail', async () => {
+      vi.mocked(resolveTarget).mockResolvedValue(null);
+
+      await handleRegistration(makeEvent('@Dobby @Bob +1', [{ type: 'user', userId: 'u-bob', index: 7, length: 4 }]), 1, true);
+
+      const summary = outcomeSummary();
+      expect(summary).toMatchObject({ outcome: 'target-not-found', targetRequest: 'mention', requestedDelta: 1 });
+      expect(summary).not.toHaveProperty('targetName');
+      expect(outcomeDetail()).toEqual({ actorUserId: 'user-alice', targetUserId: 'u-bob', targetName: 'Bob' });
+    });
+
+    it('logs "season-not-found" with the season it looked for', async () => {
+      vi.mocked(seasonRepo.findByName).mockResolvedValue(null);
+
+      await handleRegistration(makeEvent('@Dobby +1'), 1, false);
+
+      const date = formatDate(getNextSaturday());
+      expect(outcomeSummary()).toMatchObject({ outcome: 'season-not-found', seasonName: getSeasonNameForDate(date), resolvedVia: 'self' });
+    });
   });
 });

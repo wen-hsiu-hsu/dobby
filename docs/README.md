@@ -7,7 +7,7 @@
 | [overview.md](overview.md) | 專案用途、技術棧、部署方式、從 n8n 遷移的背景與回滾方式、系統常數 | 第一次接觸專案、確認部署方式、需要回滾到 n8n |
 | [architecture.md](architecture.md) | 系統架構圖、資料流、設計決策 | 改動跨模組的流程（webhook 處理、事件路由） |
 | [commands.md](commands.md) | 所有 @Dobby 指令的說明與範例 | 新增/修改指令行為 |
-| [registration.md](registration.md) | 報名系統詳解：容量計算、guest 命名、Mutex（含逾時時回覆什麼） | 改報名、請假、容量計算相關邏輯 |
+| [registration.md](registration.md) | 報名系統詳解：容量計算、guest 命名、Mutex（含逾時時回覆什麼）、報名／請假的決策摘要 log | 改報名、請假、容量計算相關邏輯 |
 | [schedulers.md](schedulers.md) | 定時推播與顯示名稱更新排程說明 | 改排程任務、推播訊息格式 |
 | [development.md](development.md) | 本地開發設定、環境變數、測試方式 | 建置、部署、加新指令的步驟、環境變數、本機 `.env` 該接哪個 LINE channel |
 | [notion/databases.md](notion/databases.md) | Notion 資料庫業務邏輯與欄位說明 | 改動任何讀寫 Notion 的邏輯 |

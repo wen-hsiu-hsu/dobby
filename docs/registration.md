@@ -157,3 +157,62 @@ LINE 電腦版和手機版的 `mentionees` 行為不一致：
 - 同樣受 Mutex 保護
 
 **例外**：管理員代非季租成員操作 `假`/`銷假` 時，回應是單一句「請假/銷假功能僅限季租成員使用」，**不是**上面「流程概覽」提到的完整名額狀態格式。這是刻意的：這個判斷發生在還沒抓到活動資料之前（對方根本不是季租成員，沒有「本週名額」的意義可顯示），不像其他失敗情境是在拿到活動資料後才判斷。活動日所屬季度的季租資料不存在（例如季末最後一週還沒建下一季紀錄）時，同樣在抓活動資料前就回單一句，但回的是「找不到 YYYY-QN 季租資料」，不是「僅限季租成員」，以免讓真正的季租成員誤以為自己不在名單上。
+
+## 決策摘要 log
+
+報名（`+N`／`-N`）和請假（`假`／`銷假`）的每個結束分支都會記**一行 info** 決策摘要，被拒絕、no-op 的分支也有，不用點開 debug 的回覆全文就看得出這次怎麼判的。訊息字串固定兩個：
+
+- 報名：`Registration handler outcome`
+- 請假：`Leave handler outcome`
+
+跟 `withFreshCalendarEvent` 逾時／錯誤時的 `Registration handler timed out; …`／`Registration handler error` 同一個前綴（handler 傳給 wrapper 的 `context`）。有 debug 明細的分支，另外記一行 `… outcome detail`（debug）。helper 在 `src/commands/registration/outcome-log.ts`。
+
+**等級一律 info，不能用 warn**：`/logs` 的事件狀態會掃所有行的等級（`src/routes/logs.ts` 的 `groupStatus`），用 warn 會讓「名額不足」「已請假」這類正常的拒絕被標成「警告」。
+
+### `outcome` 列舉
+
+| outcome | 報名 | 請假 | 分支 |
+|---------|:---:|:---:|------|
+| `parse-error` | ✓ | ✓ | 指定對象沒用 `@`（取鎖前） |
+| `not-admin` | ✓ | ✓ | 非管理員代他人操作（取鎖前） |
+| `target-not-found` | ✓ | ✓ | `resolveTarget` 回 `null`（取鎖前） |
+| `season-not-found` | ✓ | ✓ | 活動日所屬季度的 Season 查無（取鎖前） |
+| `not-season-member` | | ✓ | 對象不在該季 `報名人`（取鎖前） |
+| `event-not-found` | ✓ | ✓ | 鎖內查無下週六的活動，由 `withFreshCalendarEvent` 記 |
+| `paused` | ✓ | | 活動是「打球暫停」（管理員也會被擋） |
+| `full` | ✓ | | 非管理員、剩餘名額 ≤ 0 |
+| `no-registration` | ✓ | | `-N`（N ≥ 1）但對象沒有零打條目 |
+| `zero-delta` | ✓ | | `+0`／`-0`：走取消路徑且一律被拒，回覆是「找不到…的報名紀錄」或「取消數量需大於 0」（看有沒有條目），不是「報名被拒」 |
+| `added` | ✓ | | `+N` 寫入成功（被截到剩餘名額時帶 `cappedAt`） |
+| `removed` | ✓ | | `-N` 寫入成功 |
+| `already-absent` | | ✓ | 已請假又請假（no-op） |
+| `not-absent` | | ✓ | 未請假卻銷假（no-op） |
+| `leave-recorded` | | ✓ | 請假寫入成功 |
+| `leave-cancelled` | | ✓ | 銷假寫入成功 |
+
+outcome 行不是「每個事件恰好一行」，例外有這些：
+
+- **mutex 逾時**：當下沒有 outcome，wrapper 已有 warn。背景的讀寫跑完後，它自己的 outcome 仍會用同一個 reqId 寫出，時間軸上排在 `Event processed` 之後。例外：背景 refetch 才發現沒有活動時，`EventNotFoundError` 會被 mutex 吞掉，不會有 `event-not-found` 行（很少見）。
+- **鎖內非預期錯誤**：wrapper 的 `… error` 那行就是結果。outcome 是在判斷完、組回覆訊息之前記的，所以如果是組訊息時（`buildEventStatusMessage` 查請假人姓名）才 throw，會同時有 outcome 行和 error 行——outcome 代表判斷結果（寫入成功的分支代表已經寫入），error 代表回覆沒送出。
+- **取鎖前的查詢 throw**（`resolveTarget`／`seasonRepo.findByName`）：沒有 outcome，也不經過 wrapper，只有 event-router 的 error（使用者也收不到回覆，見 `TODO.md`「已知問題」）。
+
+報名被拒的四種（`paused`／`full`／`no-registration`／`zero-delta`）是 handler 依 `delta` 和 `isPaused` 推出來的（`registration-handler.ts` 的 `rejectionOutcome()`），因為 `CapacityResult` 只有給使用者看的錯誤文字。**`capacity-calculator.ts` 如果新增拒絕路徑，`rejectionOutcome()` 要一起改**，不然會被歸成 `full` 或 `no-registration`。
+
+### 欄位
+
+欄位依分支拿得到的為準，愈後面的分支欄位愈多。**`event-not-found` 例外**：它在 wrapper 裡記，只有 `outcome` 和 `date`，看不出是 `+N` 還是 `-N`（`假` 還是 `銷假`），要看同一個 reqId 的 `Routing command`（debug）。下表不含這一支：
+
+| 欄位 | 從哪個分支開始有 | 來源 |
+|------|------------------|------|
+| `requestedDelta`（報名）／`isCancel`（請假）、`isAdmin` | 全部（`event-not-found` 除外） | handler 參數 |
+| `date`、`seasonName` | `target-not-found` 起 | `getNextSaturday()`、`getSeasonNameForDate()`；`parse-error`、`not-admin` 在這之前就 return |
+| `targetRequest` | 只有 `target-not-found` | 指令要找誰：`self`／`mention`／`name`（`describeTargetRequest()`） |
+| `resolvedVia` | `season-not-found` 起 | `resolveTarget` 怎麼找到對象：`self`、`mention`、`mention-name-fallback`（mention 的 userId 不在 USERS，改用姓名查 People）、`name`（電腦版 mention 或 `@名字`） |
+| `isSelfSeasonMember` | 報名鎖內 | 對象的 People 頁在不在該季 `報名人`；沒有 People 頁（`personPageId` 空字串）時為 false。請假不記：過了 `not-season-member` 那關就恆為 true |
+| `courts`、`totalSlots`（報名）／`totalSlotsBefore`（請假）、`guestCountBefore`（報名）／`guestCount`、`absenteeCountBefore`（請假） | 鎖內 | `getEventOccupancy()`，寫入**前**的數字 |
+| `guestCountAfter` | `added`／`removed` | `updatedGuests.length` |
+| `cappedAt` | 只有被截到剩餘名額的 `added` | `CapacityResult.cappedAt`（其他情況是 undefined，不會輸出） |
+| `totalSlotsAfter`、`absenteeCountAfter`、`presentSeasonMembersAfter` | `leave-recorded`／`leave-cancelled` | handler 自己重算的 `newTotalSlots`／`newAbsentees.length`／`newPresentSeasonMembers`（`occupancy` 只有寫入前的數字） |
+| `targetDisplayName` | 只有寫入成功的四種 | 沿用改版前成功摘要就有的欄位，姓名放 info 是 ADR 0005「現況」段待決的 PII，新分支不加 |
+
+**姓名、userId、零打條目只放 debug 明細**（零打條目本身就是姓名，例如 `Alice的朋友 (2)`）。`… outcome detail` 的欄位：`actorUserId`（handler 內的每個分支）、`targetPersonPageId`（找到對象後）、`targetUserId`／`targetName`（`target-not-found`，指令裡帶的 mention userId 和 `@` 後面的文字）、`addedGuests`（`added`，`updatedGuests.slice(寫入前的零打數)`，依賴 calculator 把新條目接在既有條目後面）、`removedGuests`（`removed`）。`event-not-found` 在 wrapper 裡記，拿不到這些，所以沒有明細行。

@@ -100,7 +100,7 @@
 
 ## 其他類型 log 的通用顯示
 
-不屬於 Notion API 呼叫或 LINE 回覆/推播的 log（例如 `handleMessage`、`Routing command`、`Registration updated`、`Leave status updated`、`Event processed` 這類事件/業務摘要 log），一樣會出現在時間軸上，不需要程式碼另外處理：步驟標題就是這筆 log 的 `msg`，除了 `level`/`time`/`msg`/`reqId`/`pid`/`hostname` 這幾個後設欄位以外的其餘欄位，會自動接在下面顯示成一行 `key: value`（值太長會截斷，滑鼠 hover 可以看到沒有截斷的完整內容）。
+不屬於 Notion API 呼叫或 LINE 回覆/推播的 log（例如 `handleMessage`、`Routing command`、`Registration handler outcome`／`Leave handler outcome`（報名／請假每個結束分支的決策摘要，欄位見 `docs/registration.md`「決策摘要 log」）、`Event processed` 這類事件/業務摘要 log），一樣會出現在時間軸上，不需要程式碼另外處理：步驟標題就是這筆 log 的 `msg`，除了 `level`/`time`/`msg`/`reqId`/`pid`/`hostname` 這幾個後設欄位以外的其餘欄位，會自動接在下面顯示成一行 `key: value`（值太長會截斷，滑鼠 hover 可以看到沒有截斷的完整內容）。
 
 這代表**之後新增一種 log 訊息或幫既有 log 多加一個欄位，`/logs` 頁面完全不用改**——只要程式碼裡呼叫 `logger.info({...})`/`logger.debug({...})`，畫面上就會自動有對應的顯示，不需要像 Notion 呼叫/LINE 收發那樣額外寫一份專屬的顯示邏輯。這個通用機制只是單純把值印出來，不會做欄位語意上的解讀（例如布林值就是印 `true`/`false`，物件會印成 JSON 字串），所以想要更精緻的呈現方式（自訂標題、狀態顏色）還是要走 Notion 呼叫/LINE 收發那種專屬顯示。
 

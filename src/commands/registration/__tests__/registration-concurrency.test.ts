@@ -75,8 +75,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(resolveTarget).mockImplementation(async (_target, actorUserId) =>
     actorUserId === 'user-alice'
-      ? { personPageId: 'person-1', displayName: 'Alice' }
-      : { personPageId: 'person-2', displayName: 'Bob' },
+      ? { personPageId: 'person-1', displayName: 'Alice', resolvedVia: 'self' as const }
+      : { personPageId: 'person-2', displayName: 'Bob', resolvedVia: 'self' as const },
   );
   vi.mocked(seasonRepo.findByName).mockResolvedValue(baseSeason());
 });

@@ -1,5 +1,4 @@
 import { replyMessage } from '../../services/line/reply-service.js';
-import { logger } from '../../utils/logger.js';
 import * as calendarRepo from '../../services/notion/calendar-repository.js';
 import * as seasonRepo from '../../services/notion/season-repository.js';
 import { getEventOccupancy } from '../../services/notion/event-occupancy.js';
@@ -8,8 +7,12 @@ import { resolveTarget } from './target-resolver.js';
 import { calculateAddCapacity, calculateRemoveCapacity } from './capacity-calculator.js';
 import { parseRegistrationTarget } from './registration-parser.js';
 import { buildEventStatusMessage } from './event-status-message.js';
+import { logOutcome, describeTargetRequest, type RegistrationOutcome } from './outcome-log.js';
 import { formatDate, getNextSaturday, getSeasonNameForDate } from '../../utils/date-utils.js';
 import type { NotionUser } from '../../types/notion-models.js';
+
+// Also the wrapper's context, so its event-not-found line shares this `${LOG_CONTEXT} outcome` message.
+const LOG_CONTEXT = 'Registration handler';
 
 interface MessageEvent {
   replyToken: string;
@@ -24,13 +27,16 @@ export async function handleRegistration(
   actorUser?: NotionUser | null
 ): Promise<void> {
   const target = parseRegistrationTarget(event as any);
+  const actorUserId = event.source.userId;
 
   if (target.parseError) {
+    logOutcome(LOG_CONTEXT, { outcome: 'parse-error', requestedDelta: delta, isAdmin }, { actorUserId });
     await replyMessage(event.replyToken, [{ type: 'text', text: target.parseError }]);
     return;
   }
 
   if (!target.isSelf && !isAdmin) {
+    logOutcome(LOG_CONTEXT, { outcome: 'not-admin', requestedDelta: delta, isAdmin }, { actorUserId });
     await replyMessage(event.replyToken, [{ type: 'text', text: '你不是管理員' }]);
     return;
   }
@@ -44,11 +50,19 @@ export async function handleRegistration(
     resolveTarget(target, event.source.userId, actorUser),
     seasonRepo.findByName(seasonName),
   ]);
+  const requestSummary = { date: nextSaturday, seasonName, requestedDelta: delta, isAdmin };
   if (!resolved) {
+    logOutcome(
+      LOG_CONTEXT,
+      { outcome: 'target-not-found', ...requestSummary, targetRequest: describeTargetRequest(target) },
+      { actorUserId, targetUserId: target.targetUserId, targetName: target.targetName }
+    );
     await replyMessage(event.replyToken, [{ type: 'text', text: '找不到您的帳號，請先向管理員登記' }]);
     return;
   }
+  const targetDetail = { actorUserId, targetPersonPageId: resolved.personPageId };
   if (!activeSeason) {
+    logOutcome(LOG_CONTEXT, { outcome: 'season-not-found', ...requestSummary, resolvedVia: resolved.resolvedVia }, targetDetail);
     await replyMessage(event.replyToken, [{ type: 'text', text: `找不到 ${seasonName} 季租資料` }]);
     return;
   }
@@ -58,7 +72,7 @@ export async function handleRegistration(
   await withFreshCalendarEvent(
     event.replyToken,
     nextSaturday,
-    'Registration handler',
+    LOG_CONTEXT,
     () => getEventOccupancy(nextSaturday, activeSeason),
     async (occupancy) => {
       const { event: freshEvent, season: freshSeason } = occupancy;
@@ -70,7 +84,17 @@ export async function handleRegistration(
         result = calculateRemoveCapacity(freshEvent, resolved.displayName, delta, isSelfSeasonMember);
       }
 
+      const lockedSummary = {
+        ...requestSummary,
+        isSelfSeasonMember,
+        resolvedVia: resolved.resolvedVia,
+        courts: occupancy.courts,
+        totalSlots: occupancy.totalSlots,
+        guestCountBefore: freshEvent.guests.length,
+      };
+
       if (!result.canAdd) {
+        logOutcome(LOG_CONTEXT, { outcome: rejectionOutcome(delta, freshEvent.isPaused), ...lockedSummary }, targetDetail);
         const replyText = await buildEventStatusMessage({
           date: nextSaturday,
           headline: result.error ?? '操作失敗',
@@ -87,19 +111,19 @@ export async function handleRegistration(
       const updatedGuests = result.newGuests ?? [];
       await calendarRepo.updateGuests(freshEvent.pageId, updatedGuests);
 
-      logger.info(
+      logOutcome(
+        LOG_CONTEXT,
         {
-          date: nextSaturday,
-          delta,
-          targetDisplayName: resolved.displayName,
+          outcome: delta > 0 ? 'added' : 'removed',
+          ...lockedSummary,
           guestCountAfter: updatedGuests.length,
           cappedAt: result.cappedAt,
+          targetDisplayName: resolved.displayName,
         },
-        'Registration updated'
-      );
-      logger.debug(
-        { actorUserId: event.source.userId, targetPersonPageId: resolved.personPageId },
-        'Registration updated detail'
+        delta > 0
+          // calculateAddCapacity appends new entries after the existing ones, in order.
+          ? { ...targetDetail, addedGuests: updatedGuests.slice(freshEvent.guests.length) }
+          : { ...targetDetail, removedGuests: result.removedGuests }
       );
 
       let headline: string;
@@ -123,4 +147,18 @@ export async function handleRegistration(
       await replyMessage(event.replyToken, [{ type: 'text', text: replyText }]);
     }
   );
+}
+
+/**
+ * Which calculator rejection this was, derived from its inputs because CapacityResult
+ * only carries the user-facing error text. Mirrors capacity-calculator.ts: an add is only
+ * rejected when the event is paused or no slot is left; a removal of |delta| >= 1 only when
+ * the target has no entry. `+0`/`-0` goes down the removal path and is always rejected —
+ * as "找不到報名紀錄" or "取消數量需大於 0" depending on whether an entry exists — so it
+ * gets its own outcome rather than a misleading "no registration". If the calculator gains
+ * a new rejection path, add it here too.
+ */
+function rejectionOutcome(delta: number, isPaused: boolean): RegistrationOutcome {
+  if (delta > 0) return isPaused ? 'paused' : 'full';
+  return delta === 0 ? 'zero-delta' : 'no-registration';
 }

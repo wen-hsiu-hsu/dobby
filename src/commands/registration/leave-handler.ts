@@ -1,5 +1,4 @@
 import { replyMessage } from '../../services/line/reply-service.js';
-import { logger } from '../../utils/logger.js';
 import * as calendarRepo from '../../services/notion/calendar-repository.js';
 import * as seasonRepo from '../../services/notion/season-repository.js';
 import { getEventOccupancy } from '../../services/notion/event-occupancy.js';
@@ -9,7 +8,11 @@ import { parseRegistrationTarget } from './registration-parser.js';
 import { buildEventStatusMessage } from './event-status-message.js';
 import { formatDate, getNextSaturday, getSeasonNameForDate } from '../../utils/date-utils.js';
 import { withFreshCalendarEvent } from './with-fresh-calendar-event.js';
+import { logOutcome, describeTargetRequest } from './outcome-log.js';
 import type { NotionUser } from '../../types/notion-models.js';
+
+// Also the wrapper's context, so its event-not-found line shares this `${LOG_CONTEXT} outcome` message.
+const LOG_CONTEXT = 'Leave handler';
 
 interface MessageEvent {
   replyToken: string;
@@ -24,13 +27,16 @@ export async function handleLeave(
   actorUser?: NotionUser | null
 ): Promise<void> {
   const target = parseRegistrationTarget(event as any);
+  const actorUserId = event.source.userId;
 
   if (target.parseError) {
+    logOutcome(LOG_CONTEXT, { outcome: 'parse-error', isCancel, isAdmin }, { actorUserId });
     await replyMessage(event.replyToken, [{ type: 'text', text: target.parseError }]);
     return;
   }
 
   if (!target.isSelf && !isAdmin) {
+    logOutcome(LOG_CONTEXT, { outcome: 'not-admin', isCancel, isAdmin }, { actorUserId });
     await replyMessage(event.replyToken, [{ type: 'text', text: '你不是管理員' }]);
     return;
   }
@@ -45,11 +51,20 @@ export async function handleLeave(
     seasonRepo.findByName(seasonName),
   ]);
 
+  const requestSummary = { date: nextSaturday, seasonName, isCancel, isAdmin };
   if (!resolved) {
+    logOutcome(
+      LOG_CONTEXT,
+      { outcome: 'target-not-found', ...requestSummary, targetRequest: describeTargetRequest(target) },
+      { actorUserId, targetUserId: target.targetUserId, targetName: target.targetName }
+    );
     await replyMessage(event.replyToken, [{ type: 'text', text: '找不到您的資料' }]);
     return;
   }
+  const targetDetail = { actorUserId, targetPersonPageId: resolved.personPageId };
+  const resolvedSummary = { ...requestSummary, resolvedVia: resolved.resolvedVia };
   if (!activeSeason) {
+    logOutcome(LOG_CONTEXT, { outcome: 'season-not-found', ...resolvedSummary }, targetDetail);
     // Checked separately from membership: in the last week of a quarter the next season's
     // record may not exist yet, and "僅限季租成員" would wrongly tell a real member they aren't one.
     await replyMessage(event.replyToken, [{ type: 'text', text: `找不到 ${seasonName} 季租資料` }]);
@@ -58,6 +73,7 @@ export async function handleLeave(
   if (!activeSeason.members.includes(resolved.personPageId)) {
     // Target isn't a season member — no calendar event fetched yet, and no meaningful
     // "occupancy" to show for someone who has no leave concept to begin with.
+    logOutcome(LOG_CONTEXT, { outcome: 'not-season-member', ...resolvedSummary }, targetDetail);
     await replyMessage(event.replyToken, [{ type: 'text', text: '請假/銷假功能僅限季租成員使用' }]);
     return;
   }
@@ -65,13 +81,22 @@ export async function handleLeave(
   await withFreshCalendarEvent(
     event.replyToken,
     nextSaturday,
-    'Leave handler',
+    LOG_CONTEXT,
     () => getEventOccupancy(nextSaturday, activeSeason),
     async (occupancy) => {
       const { event: freshEvent, season: freshSeason } = occupancy;
       const isCurrentlyAbsent = freshEvent.absentees.includes(resolved.personPageId);
+      // Past the membership check, so the target is always a season member here.
+      const lockedSummary = {
+        ...resolvedSummary,
+        courts: occupancy.courts,
+        guestCount: freshEvent.guests.length,
+        totalSlotsBefore: occupancy.totalSlots,
+        absenteeCountBefore: freshEvent.absentees.length,
+      };
 
       if (!isCancel && isCurrentlyAbsent) {
+        logOutcome(LOG_CONTEXT, { outcome: 'already-absent', ...lockedSummary }, targetDetail);
         const replyText = await buildEventStatusMessage({
           date: nextSaturday,
           headline: `${resolved.displayName} 已請假，無需重複操作`,
@@ -86,6 +111,7 @@ export async function handleLeave(
       }
 
       if (isCancel && !isCurrentlyAbsent) {
+        logOutcome(LOG_CONTEXT, { outcome: 'not-absent', ...lockedSummary }, targetDetail);
         const replyText = await buildEventStatusMessage({
           date: nextSaturday,
           headline: `${resolved.displayName} 目前未請假`,
@@ -105,22 +131,21 @@ export async function handleLeave(
 
       await calendarRepo.updateAbsentees(freshEvent.pageId, newAbsentees);
 
-      logger.info(
-        {
-          date: nextSaturday,
-          isCancel,
-          targetDisplayName: resolved.displayName,
-          absenteeCountAfter: newAbsentees.length,
-        },
-        'Leave status updated'
-      );
-      logger.debug(
-        { actorUserId: event.source.userId, targetPersonPageId: resolved.personPageId },
-        'Leave status updated detail'
-      );
-
       const newTotalSlots = calculateTotalSlots({ absentees: newAbsentees, courts: freshEvent.courts }, freshSeason);
       const newPresentSeasonMembers = freshSeason.members.length - newAbsentees.length;
+
+      logOutcome(
+        LOG_CONTEXT,
+        {
+          outcome: isCancel ? 'leave-cancelled' : 'leave-recorded',
+          ...lockedSummary,
+          totalSlotsAfter: newTotalSlots,
+          absenteeCountAfter: newAbsentees.length,
+          presentSeasonMembersAfter: newPresentSeasonMembers,
+          targetDisplayName: resolved.displayName,
+        },
+        targetDetail
+      );
       const replyText = await buildEventStatusMessage({
         date: nextSaturday,
         headline: isCancel ? '銷假成功 ✅' : '請假成功 ✅',

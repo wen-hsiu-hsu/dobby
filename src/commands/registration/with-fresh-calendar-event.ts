@@ -1,6 +1,7 @@
 import { withMutex, MutexTimeoutError } from '../../services/mutex.js';
 import { replyMessage } from '../../services/line/reply-service.js';
 import { logger } from '../../utils/logger.js';
+import { logOutcome } from './outcome-log.js';
 
 class EventNotFoundError extends Error {}
 
@@ -27,6 +28,10 @@ export async function withFreshCalendarEvent<T>(
     });
   } catch (err: unknown) {
     if (err instanceof EventNotFoundError) {
+      // Handlers pass their own log context here, so this lands on the same
+      // `${context} outcome` message as their other branches — just with fewer fields,
+      // since request details (delta, season...) never reach the wrapper.
+      logOutcome(context, { outcome: 'event-not-found', date });
       await replyMessage(replyToken, [{ type: 'text', text: `找不到 ${date} 的活動` }]);
       return;
     }
