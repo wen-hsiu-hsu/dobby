@@ -24,6 +24,16 @@
 
 **error/warn log 不受 `LOG_LEVEL` 篩選，訊息內容不能直接放在 error/warn 那一行**：pino 的 level 排序是 debug < info < warn < error，設定 `LOG_LEVEL=info` 只是把 debug 以下的行濾掉，warn/error 不管設定多少一定會輸出。所以失敗時「補訊息內容方便除錯」不能直接加在 `logger.warn(...)`/`logger.error(...)` 那一行的物件裡——那樣訊息全文會不管 `LOG_LEVEL` 設定、在正式環境預設就外洩，違背這整套分層的目的。正確做法是另開一行**debug** 層級的「failure payload」log（例如 `'Reply failed payload'`/`'Push message failed payload'`），跟對應的 warn/error 行用同一個 `sendId` 綁在一起；warn/error 行本身只留 `err`/`method`/`path`/`sendId`，永遠可見但不含訊息內容，要看失敗當下實際送的是什麼還是得開 `LOG_LEVEL=debug`。這是「新增任何會被流程表用到的 log 呼叫時，先檢查分層」這條既有提醒的一個新案例，之後遇到 warn/error 想補內容時直接抄這個模式，不要重新踩一次。
 
+## 補充（2026-09-28）：`request()` 的每一種失敗都要記 `Notion API error`
+
+`routes/log-grouping.ts` 只靠 `Notion API error` 這個訊息字串把 Notion 那一步標成失敗，`routes/logs.ts` 的 `groupStatus()` 規則 1 再靠它把事件判成「失敗」。原本只有「HTTP 非 2xx 且 body 是 JSON」這一種情況會記：`fetch` 本身丟錯（DNS 失敗、連線中斷、undici 預設逾時）直接往外丟，`assertOk` 先 `res.json()`，碰到 proxy 回 HTML 的 502/503 就丟 `SyntaxError`，錯誤 log 跟 HTTP status 一起消失。結果那一步在時間軸上只剩「尚無回應記錄」，fire-and-forget 路徑（`trackUser` 等）的事件被判成「完成（有降級）」而不是「失敗」。
+
+現在 `notion-fetch.ts` 的 `request()` 在 `fetch` 丟錯、非 2xx（先 `res.text()` 再試 `JSON.parse`，失敗就記截斷後的原文）、2xx 的 body 讀不出來這三處都記 `Notion API error`。修改時注意：
+
+- **訊息字串不能改**，也不能為了區分網路錯誤另取一個名字，否則 `log-grouping.ts` 認不得，這一步又會變回「尚無回應記錄」。網路錯誤沒有 `status`，`logs.ts` 已經只在 `status` 是數字時才顯示 HTTP 碼。
+- **網路錯誤要原樣丟出，不要包成新的 `Error`**。原本的 `TypeError: fetch failed` 帶著 `cause`（例如 `getaddrinfo ENOTFOUND api.notion.com`），呼叫端 `logger.error({ err })` 時 pino 會把 cause 串進訊息；包一層新 Error 又沒設 `cause` 的話，這個最有用的原因就沒了。
+- 呼叫端（`Message handler error`、`User tracking failed (non-blocking)` 等）照樣會記自己的錯誤，這一行是額外的，不是取代。
+
 ## 現況（2026-09-28）：正式環境常駐 debug
 
 上面的理由都建立在「正式環境預設 `info`，診斷時才暫時開 `debug`」這個前提上。實際上正式環境（Pi）一直都跑 `LOG_LEVEL=debug`，2026-09-28 決定維持這個做法、把文件改成符合現況，不改回 `info`。取捨是：Notion payload、LINE 訊息全文、userId/groupId 這些 PII 會常駐寫進 `logs/` 與 R2 備份；換到的是出問題時不用重現就能直接從 log 查出原因（見 `docs/overview.md`「日誌」小節）。

@@ -15,12 +15,24 @@ function jsonResponse(status: number, body: unknown, headers: Record<string, str
     status,
     headers: { get: (name: string) => headers[name] ?? null },
     json: async () => body,
+    text: async () => JSON.stringify(body),
+  } as unknown as Response;
+}
+
+function textResponse(status: number, text: string): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: () => null },
+    json: async () => JSON.parse(text),
+    text: async () => text,
   } as unknown as Response;
 }
 
 describe('notion-fetch', () => {
   beforeEach(() => {
     fetchMock.mockReset();
+    vi.clearAllMocks();
   });
 
   it('notionGet sends GET with auth headers and no body', async () => {
@@ -96,6 +108,55 @@ describe('notion-fetch', () => {
       expect.objectContaining({ method: 'PATCH', path: '/pages/x', status: 500, durationMs: expect.any(Number) }),
       'Notion API error',
     );
+  });
+
+  it('logs "Notion API error" with status and the raw (truncated) body when an error response is not JSON', async () => {
+    const html = `<html><body>502 Bad Gateway</body></html>${'x'.repeat(1000)}`;
+    fetchMock.mockResolvedValue(textResponse(502, html));
+
+    const thrown = await notionGet('/pages/abc').catch((e: unknown) => e);
+
+    // 丟出的錯誤訊息要可讀，不是 JSON.parse 的 SyntaxError
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toMatch(/^Notion API error: HTTP 502 <html><body>502 Bad Gateway/);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'GET',
+        path: '/pages/abc',
+        status: 502,
+        durationMs: expect.any(Number),
+        err: expect.stringMatching(/^<html><body>502 Bad Gateway/),
+      }),
+      'Notion API error',
+    );
+    const loggedErr = vi.mocked(logger.error).mock.calls[0]![0] as { err: string };
+    expect(loggedErr.err.length).toBeLessThan(html.length);
+  });
+
+  it('logs "Notion API error" (no status) and rethrows the original error on a network failure', async () => {
+    const networkErr = new TypeError('fetch failed', { cause: new Error('getaddrinfo ENOTFOUND api.notion.com') });
+    fetchMock.mockRejectedValue(networkErr);
+
+    // 原樣丟出，cause 才保得住
+    await expect(notionPost('/pages', { a: 1 })).rejects.toBe(networkErr);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    const [fields, msg] = vi.mocked(logger.error).mock.calls[0]!;
+    expect(msg).toBe('Notion API error');
+    expect(fields).toEqual(
+      expect.objectContaining({ method: 'POST', path: '/pages', durationMs: expect.any(Number), err: networkErr }),
+    );
+    expect(fields).not.toHaveProperty('status');
+  });
+
+  it('logs "Notion API error" when a 2xx response body cannot be parsed', async () => {
+    fetchMock.mockResolvedValue(textResponse(200, '<html>truncated'));
+
+    await expect(notionGet('/pages/abc')).rejects.toThrow(SyntaxError);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ method: 'GET', path: '/pages/abc', status: 200 }),
+      'Notion API error',
+    );
+    expect(logger.info).not.toHaveBeenCalledWith(expect.anything(), 'Notion API response');
   });
 
   describe('429 retry', () => {

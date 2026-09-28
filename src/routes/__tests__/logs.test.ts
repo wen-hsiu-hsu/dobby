@@ -458,6 +458,29 @@ describe('createLogsRouter', () => {
     expect(html).toContain('Could not get user profile —');
   });
 
+  it('marks a non-blocking path whose Notion call hit a network error (no HTTP status) as "error", not "degraded"', async () => {
+    // notion-fetch.ts 在 fetch 本身丟錯時（DNS 失敗、連線中斷）也會記
+    // 'Notion API error'，只是沒有 status。這一步要被標成失敗，事件狀態走
+    // groupStatus() 規則 1，不能落到 'User tracking failed (non-blocking)'
+    // 的降級判斷。
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'message', sourceType: 'group', reqId: 'req-neterr', msg: 'Processing event' },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 1), reqId: 'req-neterr', msg: 'Notion API request', method: 'POST', path: '/databases/users/query', db: 'users' },
+      { level: 50, time: Date.UTC(2024, 0, 1, 0, 0, 2), reqId: 'req-neterr', msg: 'Notion API error', method: 'POST', path: '/databases/users/query', db: 'users', durationMs: 12, err: { type: 'TypeError', message: 'fetch failed; getaddrinfo ENOTFOUND api.notion.com' } },
+      { level: 50, time: Date.UTC(2024, 0, 1, 0, 0, 3), reqId: 'req-neterr', msg: 'User tracking failed (non-blocking)', err: { message: 'fetch failed' } },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 4), reqId: 'req-neterr', msg: 'LINE reply', method: 'POST', path: '/v2/bot/message/reply', sendId: 's-net' },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 5), reqId: 'req-neterr', msg: 'LINE reply sent', sendId: 's-net' },
+    ]);
+
+    const html = await getLogsHtml();
+
+    expect(html).toContain('data-key="req-neterr" data-status="error"');
+    expect(html).toContain('Notion API 失敗');
+    expect(html).toContain('Notion API 呼叫失敗');
+    expect(html).not.toContain('Notion API 呼叫失敗 · HTTP');
+    expect(html).not.toContain('尚無回應記錄');
+  });
+
   it('renders a proportional batch-result chart for a scheduled job summary with 2+ numeric fields, excluding "total"', async () => {
     vi.mocked(readRecentLogs).mockResolvedValueOnce([
       { level: 30, time: Date.UTC(2024, 0, 1, 4, 0, 0), reqId: 'sched-batch', msg: 'Starting display name batch update' },
