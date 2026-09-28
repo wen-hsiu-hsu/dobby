@@ -470,16 +470,54 @@ function groupTitle(group: FlowGroup, kind: EventKind): string {
   return kind === 'system' ? '系統事件' : group.reqId ? '背景作業' : '背景/未關聯事件';
 }
 
-function groupUserId(group: FlowGroup): string {
-  for (const e of flattenEntries(group)) {
-    if (typeof e['userId'] === 'string' && e['userId']) return e['userId'] as string;
-  }
-  return '';
+/**
+ * 事件的「使用者」（觸發這次事件的人）。userId 跟顯示名稱一定出自同一個
+ * 人：先決定 userId，名稱只從「同一筆 log 也帶著這個 userId」的 log 取（目
+ * 前只有 `profile-service.ts` 的 `LINE get profile detail`）。不能各自抓
+ * 「第一筆有 userId 的 log」跟「第一筆有 displayName 的 log」再拼起來——
+ * `flattenEntries()` 的順序不是時間順序，而且同一個事件裡的名字可能屬於別
+ * 人：管理員代報 `+1 @X` 時 `targetDisplayName` 是被報名的 X（改顯示成「對
+ * 象」，見 `groupTargetName()`）。找不到同一人的名字就只顯示 userId，不拿別
+ * 人的名字湊。
+ *
+ * userId 的來源優先順序：
+ * 1. `message-handler.ts` 的 debug `handleMessage`——訊息事件的發話者。
+ * 2. `Processing event detail`（debug）的 `source.userId`——同樣是觸發這次
+ *    事件的人，`handleMessage` 沒記到時（例如非文字訊息提早 return）的備援。
+ * 3. 其他 LINE 事件（`memberJoined` 這類 source 是群組、沒有 `source.userId`
+ *    的）退回第一筆有 `userId` 的 log，例如新成員的 profile 查詢。
+ *
+ * 沒有 `Processing event` 的事件（排程等）一律不顯示使用者：display-name
+ * 排程之類的批次作業會連續處理好幾個人，沒有「這個事件是誰觸發的」這回事，
+ * 硬挑一筆只會顯示成某個不相干的人。
+ */
+function groupWho(group: FlowGroup): { userId: string; name: string | null } {
+  if (!group.start) return { userId: '', name: null };
+  const flat = flattenEntries(group);
+  const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+  const detailSource =
+    group.startDetail && typeof group.startDetail['source'] === 'object' && group.startDetail['source'] !== null
+      ? (group.startDetail['source'] as Record<string, unknown>)
+      : undefined;
+  const userId =
+    str(flat.find((e) => e.msg === 'handleMessage' && str(e['userId']))?.['userId']) ||
+    str(detailSource?.['userId']) ||
+    str(flat.find((e) => str(e['userId']))?.['userId']);
+  if (!userId) return { userId: '', name: null };
+  const nameEntry = flat.find((e) => e['userId'] === userId && str(e['displayName']));
+  return { userId, name: nameEntry ? str(nameEntry['displayName']) : null };
 }
 
-function groupDisplayName(group: FlowGroup): string | null {
+/**
+ * 報名／請假改到的人（`registration-handler.ts`／`leave-handler.ts` 的 info
+ * log `Registration updated`／`Leave status updated` 的 `targetDisplayName`）。
+ * 自己報名時也會有，這時就是發話者本人在人員清單上的名字（可能跟 LINE 顯
+ * 示名稱不同）；log 裡分不出是自己還是代報，所以一律標成「對象」，不當成
+ * 發話者的名字。
+ */
+function groupTargetName(group: FlowGroup): string | null {
   for (const e of flattenEntries(group)) {
-    const name = e['targetDisplayName'] ?? e['displayName'];
+    const name = e['targetDisplayName'];
     if (typeof name === 'string' && name) return name;
   }
   return null;
@@ -934,8 +972,11 @@ interface EventView {
   kindCss: string;
   title: string;
   hasWho: boolean;
+  /** 使用者的顯示名稱——一定跟 `userIdRaw` 是同一個人，見 `groupWho()`。 */
   name: string | null;
   userIdRaw: string;
+  /** 報名／請假的對象（`targetDisplayName`），見 `groupTargetName()`。 */
+  targetName: string | null;
   groupIdRaw: string;
   source: string;
   origin: string;
@@ -972,8 +1013,8 @@ function buildEventView(group: FlowGroup, rawEntries: LogEntry[]): EventView {
   const status = groupStatus(group, kind);
   const title = groupTitle(group, kind);
   const preview = groupPreview(group);
-  const name = groupDisplayName(group);
-  const userIdRaw = groupUserId(group);
+  const { userId: userIdRaw, name } = groupWho(group);
+  const targetName = groupTargetName(group);
   const groupIdRaw = groupGroupId(group);
   const origin = groupOrigin(group, kind);
   const source = groupSource(group, kind);
@@ -993,6 +1034,7 @@ function buildEventView(group: FlowGroup, rawEntries: LogEntry[]): EventView {
     hasWho: !!userIdRaw,
     name,
     userIdRaw,
+    targetName,
     groupIdRaw,
     source,
     origin,
@@ -1004,7 +1046,7 @@ function buildEventView(group: FlowGroup, rawEntries: LogEntry[]): EventView {
     batch: computeBatch(group, kind),
     stepsHeading: STEPS_HEADING_BY_KIND[kind] ?? '處理過程',
     durationText: formatDuration(last - first),
-    searchText: [title, preview, group.reqId, name ?? '', userIdRaw, origin]
+    searchText: [title, preview, group.reqId, name ?? '', userIdRaw, targetName ?? '', origin]
       .join(' ')
       .toLowerCase(),
     mergeKey: eventMergeKey(kind, origin, status),
@@ -1083,6 +1125,7 @@ function buildSystemEventView(entry: LogEntry, dupeIndex: number): EventView {
     hasWho: false,
     name: null,
     userIdRaw: '',
+    targetName: null,
     groupIdRaw: '',
     source,
     origin,
@@ -1136,8 +1179,9 @@ function eventListItemHtml(ev: EventView, boundary: BoundaryMarker | undefined):
   const boundaryHtml = boundary
     ? `<div class="ev-boundary"><span class="ev-boundary-icon">⏻</span><span class="ev-boundary-label">${escapeHtml(boundary.label)}</span><span class="ev-boundary-meta">${escapeHtml(boundary.meta)}</span><span class="ev-boundary-time">${escapeHtml(boundary.time)}</span></div>`
     : '';
-  const whoHtml = ev.hasWho
-    ? `<div class="ev-item-meta">${ev.name ? `<span class="ev-name">${escapeHtml(ev.name)}</span>` : ''}<span class="ev-userid"><span class="id-masked">${escapeHtml(maskId(ev.userIdRaw))}</span><span class="id-plain">${escapeHtml(ev.userIdRaw)}</span></span></div>`
+  const targetHtml = ev.targetName ? `<span class="ev-target">對象 ${escapeHtml(ev.targetName)}</span>` : '';
+  const whoHtml = ev.hasWho || ev.targetName
+    ? `<div class="ev-item-meta">${ev.name ? `<span class="ev-name">${escapeHtml(ev.name)}</span>` : ''}${ev.hasWho ? `<span class="ev-userid"><span class="id-masked">${escapeHtml(maskId(ev.userIdRaw))}</span><span class="id-plain">${escapeHtml(ev.userIdRaw)}</span></span>` : ''}${targetHtml}</div>`
     : '';
   const flagHtml = ev.flag
     ? `<span class="ev-flag ev-flag-${ev.status}">${escapeHtml(ev.flag)}</span>`
@@ -1208,6 +1252,9 @@ function eventDetailHtml(ev: EventView, active: boolean): string {
           <span class="detail-field-value">${ev.name ? `<span class="sel-name">${escapeHtml(ev.name)}</span>` : ''}<span class="detail-userid"><span class="id-masked">${escapeHtml(maskId(ev.userIdRaw))}</span><span class="id-plain">${escapeHtml(ev.userIdRaw)}</span></span> <span class="reveal-link" onclick="toggleMask()"><span class="id-masked">顯示</span><span class="id-plain">遮蔽</span></span></span>
         </div>`
     : '';
+  const targetFieldHtml = ev.targetName
+    ? `<div class="detail-field"><span class="detail-field-label">對象</span><span class="detail-field-value"><span class="sel-name">${escapeHtml(ev.targetName)}</span></span></div>`
+    : '';
   const groupHtml = ev.groupIdRaw
     ? `<div class="detail-field"><span class="detail-field-label">群組 ID</span><span class="detail-field-value"><span class="detail-userid"><span class="id-masked">${escapeHtml(maskId(ev.groupIdRaw))}</span><span class="id-plain">${escapeHtml(ev.groupIdRaw)}</span></span></span></div>`
     : '';
@@ -1254,6 +1301,7 @@ function eventDetailHtml(ev: EventView, active: boolean): string {
           <div class="detail-field"><span class="detail-field-label">來源</span><span class="detail-field-value">${escapeHtml(ev.source)}</span></div>
           ${groupHtml}
           ${whoHtml}
+          ${targetFieldHtml}
         </div>
       </div>
     </div>
@@ -1500,6 +1548,7 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
     .ev-item-meta { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; }
     .ev-name { font-size: 11.5px; font-weight: 500; color: #c6c9d6; }
     .ev-userid { font: 11px ui-monospace, monospace; color: #8b8fa3; word-break: break-all; }
+    .ev-target { font-size: 11.5px; color: #c6c9d6; }
     .ev-preview { font-size: 12px; color: #8b8fa3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .ev-preview-degraded { color: #d3a35c; }
     .ev-preview-warn { color: #d3a35c; }
@@ -1931,7 +1980,8 @@ function renderEventDetailText(ev: EventView): string {
   lines.push(`# ${ev.title}`);
   lines.push(`reqId: ${ev.reqId || '(無 reqId)'}`);
   lines.push(`時間: ${ev.stamp}　耗時: ${ev.durationText}　狀態: ${ev.statusLabel}　類型: ${ev.kindLabel}`);
-  if (ev.hasWho) lines.push(`使用者: ${ev.name ?? ''} (${ev.userIdRaw})`);
+  if (ev.hasWho) lines.push(`使用者: ${ev.name ? `${ev.name} ` : ''}(${ev.userIdRaw})`);
+  if (ev.targetName) lines.push(`對象: ${ev.targetName}`);
   if (ev.groupIdRaw) lines.push(`群組 ID: ${ev.groupIdRaw}`);
   lines.push(`來源: ${ev.source}　來自: ${ev.origin}`);
   if (ev.flag) lines.push(`flag: ${ev.flag}`);

@@ -334,6 +334,74 @@ describe('createLogsRouter', () => {
     expect(html).toContain('toggleMask()');
   });
 
+  describe('使用者／對象欄位', () => {
+    const ADMIN = 'Uadmin0000000000000000000000000001';
+    // 管理員代報 `+1 @小華`：userId 來自 handleMessage（管理員本人），
+    // targetDisplayName 來自 Registration updated（被報名的小華）。
+    // Registration updated 故意排在 profile detail 前面——舊做法抓「第一筆
+    // 有 targetDisplayName ?? displayName 的 log」，會把小華的名字接在管理員
+    // 的 userId 後面。
+    const proxyRegistration = [
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'message', sourceType: 'group', reqId: 'req-proxy', msg: 'Processing event' },
+      { level: 20, time: Date.UTC(2024, 0, 1, 0, 0, 1), reqId: 'req-proxy', msg: 'Processing event detail', source: { type: 'group', groupId: 'C1', userId: ADMIN }, message: { type: 'text', text: '@Dobby +1 @小華' } },
+      { level: 20, time: Date.UTC(2024, 0, 1, 0, 0, 2), reqId: 'req-proxy', msg: 'handleMessage', userId: ADMIN, text: '@Dobby +1 @小華', isAdmin: true },
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 3), reqId: 'req-proxy', msg: 'Registration updated', date: '2024-01-06', delta: 1, targetDisplayName: '小華' },
+      { level: 20, time: Date.UTC(2024, 0, 1, 0, 0, 4), reqId: 'req-proxy', msg: 'LINE get profile detail', userId: ADMIN, groupId: 'C1', displayName: '管理員阿明' },
+    ];
+
+    it('takes the 使用者 name and userId from the same person, and shows a proxy target separately as 對象', async () => {
+      vi.mocked(readRecentLogs).mockResolvedValueOnce(proxyRegistration);
+      const { text } = await getLogsText({ reqId: 'req-proxy' });
+
+      expect(text).toContain(`使用者: 管理員阿明 (${ADMIN})`);
+      expect(text).toContain('對象: 小華');
+      expect(text).not.toContain('使用者: 小華');
+    });
+
+    it('renders 對象 on the card and detail page, keeps the userId masked, and makes the target name searchable', async () => {
+      vi.mocked(readRecentLogs).mockResolvedValueOnce(proxyRegistration);
+      const html = await getLogsHtml();
+
+      expect(html).toContain('<span class="ev-name">管理員阿明</span>');
+      expect(html).toContain('<span class="ev-target">對象 小華</span>');
+      expect(html).toContain('<span class="detail-field-label">對象</span>');
+      expect(html).toContain('<span class="id-masked">Uadmi●●●●●●001</span>');
+      const card = html.match(/<div class="ev-item" data-key="req-proxy"[^>]*>/)?.[0] ?? '';
+      expect(card).toContain('小華');
+      expect(card).toContain('管理員阿明');
+      expect(card).toContain(ADMIN.toLowerCase());
+    });
+
+    it('shows only the userId when no log carries that same user\'s display name, instead of borrowing someone else\'s', async () => {
+      vi.mocked(readRecentLogs).mockResolvedValueOnce([
+        { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'message', sourceType: 'group', reqId: 'req-noname', msg: 'Processing event' },
+        { level: 20, time: Date.UTC(2024, 0, 1, 0, 0, 1), reqId: 'req-noname', msg: 'LINE get profile detail', userId: 'Uother', displayName: '別人' },
+        { level: 20, time: Date.UTC(2024, 0, 1, 0, 0, 2), reqId: 'req-noname', msg: 'handleMessage', userId: ADMIN, text: 'hi' },
+      ]);
+      const { text } = await getLogsText({ reqId: 'req-noname' });
+
+      expect(text).toContain(`使用者: (${ADMIN})`);
+      expect(text).not.toContain('使用者: 別人');
+    });
+
+    it('does not show a 使用者 field for a display-name batch run, even though its logs carry several users\' userId/displayName', async () => {
+      const batch = [
+        { level: 30, time: Date.UTC(2024, 0, 1, 4, 0, 0), msg: 'Starting display name batch update', reqId: 'sched-dn' },
+        { level: 30, time: Date.UTC(2024, 0, 1, 4, 0, 1), msg: 'Skipping display name update: user has no known groups', userId: 'Uaaaa', reqId: 'sched-dn' },
+        { level: 20, time: Date.UTC(2024, 0, 1, 4, 0, 2), msg: 'LINE get profile detail', userId: 'Ubbbb', groupId: 'C1', displayName: 'B 的名字', reqId: 'sched-dn' },
+        { level: 30, time: Date.UTC(2024, 0, 1, 4, 0, 3), msg: 'Display name update complete', updated: 1, skipped: 1, failed: 0, total: 2, reqId: 'sched-dn' },
+      ];
+      vi.mocked(readRecentLogs).mockResolvedValueOnce(batch);
+      const html = await getLogsHtml();
+      vi.mocked(readRecentLogs).mockResolvedValueOnce(batch);
+      const { text } = await getLogsText({ reqId: 'sched-dn' });
+
+      expect(html).not.toContain('class="ev-item-meta"');
+      expect(html).not.toContain('<span class="detail-field-label">使用者</span>');
+      expect(text).not.toContain('使用者:');
+    });
+  });
+
   // 決定：groupId 跟 userId 一樣是 PII，套用同一套遮蔽機制（id-masked/
   // id-plain 由全域 toggleMask() 控制），不因為設計稿 mockup 明碼顯示就
   // 跳過遮蔽。
