@@ -50,6 +50,7 @@ Notion 呼叫原本在 `log-grouping.ts` 用 method+path 配對，同一個 key 
 `sendId` 讓每次回覆各自配對成一列之後，`buildFlowGroups()`（`routes/log-grouping.ts`）再把一個 reqId 的列分成起點／步驟／雜項／終點。以下幾點看起來可以「簡化」，但簡化回去會壞：
 
 - **一個事件可能有兩次 LINE 回覆，`FlowGroup.end` 只放最後一次，前面的留在 `misc`**。報名／請假 mutex 逾時時，`with-fresh-calendar-event.ts` 先成功回覆逾時訊息，背景任務跑完再用同一個 replyToken 回覆、被 LINE 拒絕（[ADR 0002](0002-mutex-timeout-does-not-cancel-task.md)）。原本 `end = row` 讓後一次覆蓋前一次，使用者實際收到的逾時訊息從時間軸消失、卡片預覽只剩「回覆失敗」。沒有改成 `end` 陣列，是因為讀 `end` 的地方大多只需要「有沒有回覆」（規則 3 的「指令沒回覆 → 警告」）或「終點是哪一步」，陣列會讓每個呼叫端都多一層處理；代價是「所有回覆」要看 `misc` 裡的 line-reply 加上 `end`——`routes/logs.ts` 的 `replyRows()`／`hasReplyFailure()`。狀態、flag、卡片預覽都走它，不要改回只看 `group.end`：狀態規則 1 是「任何一次回覆失敗」（先失敗後成功也算失敗），預覽則要顯示送出成功的那則（使用者實際收到的），不是最後一則。
+- **「終點」照實際時間排進時間軸，不固定放最後**（`routes/logs.ts` 的 `buildTimeline()`）。原本在所有步驟之後才 push 終點，fire-and-forget 的 `trackUser` 在回覆之後才完成的 USERS 重查／PATCH 看起來像發生在回覆之前。「終點」只是標示哪一步是回覆，不代表「最後一步」；讀 `group.end` 的其他地方（狀態、預覽、flag、`flattenEntries()`）都不依賴它是最後一步，之後新增讀 `end` 的邏輯也不要做這個假設。
 
 ## 現況（2026-09-28）：正式環境常駐 debug
 

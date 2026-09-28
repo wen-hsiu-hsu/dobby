@@ -1504,4 +1504,52 @@ describe('createLogsRouter', () => {
       expect(text).toContain('flag: LINE 回覆失敗');
     });
   });
+
+  // fire-and-forget 的 trackUser（USERS 重查、累加發言數 PATCH、`Mutex task
+  // finished`）常在回覆送出之後才完成。之前 buildTimeline() 把終點固定 push 在
+  // 最後，畫面上看起來像這些步驟都發生在回覆之前（本機 reqId 78aafa）。
+  describe('終點 LINE 回覆 placement in the timeline', () => {
+    const at = (s: number) => Date.UTC(2024, 0, 1, 0, 0, s);
+    const entries = [
+      { level: 30, time: at(0), type: 'message', sourceType: 'group', reqId: 'req-late-track', msg: 'Processing event' },
+      { level: 30, time: at(1), reqId: 'req-late-track', msg: 'Message classified', isCommand: true, parsed: true, commandType: 'registration' },
+      { level: 30, time: at(2), reqId: 'req-late-track', msg: 'LINE reply', method: 'POST', path: '/v2/bot/message/reply', sendId: 's-lt' },
+      { level: 30, time: at(3), reqId: 'req-late-track', msg: 'LINE reply sent', sendId: 's-lt' },
+      { level: 30, time: at(3), reqId: 'req-late-track', msg: 'Event processed', type: 'message', durationMs: 3000 },
+      { level: 30, time: at(4), reqId: 'req-late-track', msg: 'Notion API request', method: 'PATCH', path: '/pages/u1', db: 'users', callId: 'c-lt', purpose: '累加使用者發言次數' },
+      { level: 30, time: at(5), reqId: 'req-late-track', msg: 'Notion API response', method: 'PATCH', path: '/pages/u1', db: 'users', callId: 'c-lt', durationMs: 400 },
+      { level: 20, time: at(6), reqId: 'req-late-track', msg: 'Mutex task finished', key: 'user-track-U1', queuedAhead: 0, waitMs: 0, heldMs: 900, callerTimedOut: false, fnFailed: false },
+    ];
+
+    it('places the 終點 reply at its actual time, before trackUser steps that finished later, still labeled 終點', async () => {
+      vi.mocked(readRecentLogs).mockResolvedValueOnce(entries);
+
+      const { text } = await getLogsText({ reqId: 'req-late-track' });
+
+      const stepTitles = text
+        .split('\n')
+        .filter((l) => l.startsWith('- ['))
+        .map((l) => l.replace(/^- \[\w+\] /, '').split('  ').slice(0, 2).join(' '));
+      expect(stepTitles).toEqual([
+        '起點 收到訊息',
+        'Message classified',
+        '終點 LINE 回覆已送出',
+        'Event processed',
+        '累加使用者發言次數 PATCH /pages/u1',
+        'Mutex task finished',
+      ]);
+      // 終點不在最後一步，不能影響狀態判定（規則 3「指令沒回覆 → 警告」只看有沒有回覆）
+      expect(text).toContain('狀態: 完成');
+    });
+
+    it('renders the 終點 tag on the reply step in the HTML timeline even when it is not the last step', async () => {
+      vi.mocked(readRecentLogs).mockResolvedValueOnce(entries);
+
+      const html = await getEventDetailHtml('req-late-track');
+
+      const endTagAt = html.indexOf('<span class="tl-endpoint-tag">終點</span>');
+      expect(endTagAt).toBeGreaterThan(-1);
+      expect(endTagAt).toBeLessThan(html.indexOf('累加使用者發言次數'));
+    });
+  });
 });

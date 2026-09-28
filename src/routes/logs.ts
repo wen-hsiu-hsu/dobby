@@ -1019,29 +1019,36 @@ function singleStepTimeline(entry: LogEntry): TimelineStep {
   };
 }
 
+/**
+ * 起點固定第一步；其餘（Notion 呼叫、雜項、終點回覆）全部依實際時間混排。
+ * 終點不固定放最後：fire-and-forget 的 `trackUser`（USERS 重查、累加發言數
+ * PATCH、`Mutex task finished`）常在回覆送出之後才完成，固定放最後會讓畫面
+ * 看起來像它們發生在回覆之前。終點仍保留「終點」標示，只是不一定是最後一步。
+ */
 function buildTimeline(group: FlowGroup): TimelineStep[] {
-  const middleRows: DisplayRow[] = [...group.steps, ...group.misc]
+  const rows: DisplayRow[] = [...group.steps, ...group.misc];
+  if (group.end) rows.push(group.end);
+  const orderedRows = rows
     .map((row) => ({ row, t: representativeTime(row) }))
     .sort((a, b) => a.t - b.t)
     .map((x) => x.row);
 
   const steps: TimelineStep[] = [];
   if (group.start) steps.push(startStepTimeline(group));
-  for (const row of middleRows) {
+  for (const row of orderedRows) {
     switch (row.kind) {
       case 'notion-call':
         steps.push(notionStepTimeline(row));
         break;
       case 'line-reply':
       case 'line-push':
-        steps.push(lineStepTimeline(row, false));
+        steps.push(lineStepTimeline(row, row === group.end));
         break;
       case 'single':
         steps.push(singleStepTimeline(row.entry));
         break;
     }
   }
-  if (group.end) steps.push(lineStepTimeline(group.end, true));
   return steps;
 }
 
