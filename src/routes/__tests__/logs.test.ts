@@ -504,6 +504,80 @@ describe('createLogsRouter', () => {
     expect(html).toMatch(/data-key="req-chat"[^>]*>[\s\S]*?對話/);
   });
 
+  // LOG_LEVEL=info 時沒有 debug 層的 `Routing command`／`Auto-reply lookup`。
+  // 閒聊一樣會查 USERS（有 Notion 呼叫），舊的 fallback 會把它判成指令、沒回
+  // 覆再被標成警告；`message-handler.ts` 的 info 摘要 `Message classified`
+  // 要優先於那個 fallback。
+  describe('info-level message classification (Message classified summary)', () => {
+    function usersLookup(reqId: string, second: number) {
+      return [
+        { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, second), reqId, msg: 'Notion API request', method: 'POST', path: '/databases/users-db/query', db: 'users', purpose: '查詢使用者' },
+        { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, second + 1), reqId, msg: 'Notion API response', method: 'POST', path: '/databases/users-db/query', db: 'users', durationMs: 120 },
+      ];
+    }
+
+    it('treats chat with a USERS lookup but no reply as 對話/完成, not 指令/警告', async () => {
+      vi.mocked(readRecentLogs).mockResolvedValueOnce([
+        { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'message', sourceType: 'group', reqId: 'req-info-chat', msg: 'Processing event' },
+        { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 1), reqId: 'req-info-chat', msg: 'Message classified', isCommand: false },
+        ...usersLookup('req-info-chat', 2),
+      ]);
+
+      const { text } = await getLogsText({ reqId: 'req-info-chat' });
+
+      expect(text).toContain('狀態: 完成');
+      expect(text).toContain('類型: 對話');
+      expect(text).toContain('來自: 自動回覆（非指令）');
+    });
+
+    it('treats a command as 指令 and shows its commandType in 來自 without the debug Routing command line', async () => {
+      vi.mocked(readRecentLogs).mockResolvedValueOnce([
+        { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'message', sourceType: 'group', reqId: 'req-info-cmd', msg: 'Processing event' },
+        { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 1), reqId: 'req-info-cmd', msg: 'Message classified', isCommand: true, parsed: true, commandType: 'registration' },
+        ...usersLookup('req-info-cmd', 2),
+        { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 4), reqId: 'req-info-cmd', msg: 'LINE reply', method: 'POST', path: '/v2/bot/message/reply', sendId: 's-ic' },
+        { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 5), reqId: 'req-info-cmd', msg: 'LINE reply sent', sendId: 's-ic' },
+      ]);
+
+      const { text } = await getLogsText({ reqId: 'req-info-cmd' });
+
+      expect(text).toContain('類型: 指令');
+      expect(text).toContain('狀態: 完成');
+      expect(text).toContain('來自: registration');
+    });
+
+    it('keeps the old Notion-call fallback for log files written before the summary line existed', async () => {
+      vi.mocked(readRecentLogs).mockResolvedValueOnce([
+        { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'message', sourceType: 'group', reqId: 'req-old-info', msg: 'Processing event' },
+        ...usersLookup('req-old-info', 1),
+      ]);
+
+      const { text } = await getLogsText({ reqId: 'req-old-info' });
+
+      expect(text).toContain('類型: 指令');
+      expect(text).toContain('狀態: 警告');
+      expect(text).toContain('來自: （未知，需要 LOG_LEVEL=debug）');
+    });
+
+    it('treats messages ignored by message-handler (no userId / not text) as 對話/完成', async () => {
+      const entries = [
+        { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'message', sourceType: 'group', reqId: 'req-no-uid', msg: 'Processing event' },
+        { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 1), reqId: 'req-no-uid', msg: 'Message ignored: no userId', sourceType: 'group' },
+        { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 2), type: 'message', sourceType: 'group', reqId: 'req-sticker', msg: 'Processing event' },
+        { level: 20, time: Date.UTC(2024, 0, 1, 0, 0, 3), reqId: 'req-sticker', msg: 'Message ignored: not text', messageType: 'sticker' },
+      ];
+      vi.mocked(readRecentLogs).mockResolvedValueOnce(entries).mockResolvedValueOnce(entries);
+
+      const noUid = (await getLogsText({ reqId: 'req-no-uid' })).text;
+      const sticker = (await getLogsText({ reqId: 'req-sticker' })).text;
+
+      for (const text of [noUid, sticker]) {
+        expect(text).toContain('類型: 對話');
+        expect(text).toContain('狀態: 完成');
+      }
+    });
+  });
+
   it('treats a command-shaped message that never sent a reply as "warn" (沒看懂)', async () => {
     vi.mocked(readRecentLogs).mockResolvedValueOnce([
       { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'message', sourceType: 'group', reqId: 'req-parsefail', msg: 'Processing event' },

@@ -426,18 +426,37 @@ function groupSource(group: FlowGroup, kind: EventKind): string {
   return 'HTTP · POST /webhook';
 }
 
+// 跟 `handlers/message-handler.ts` 的 log 訊息字面量一致。
+const MESSAGE_CLASSIFIED_MSG = 'Message classified';
+const MESSAGE_IGNORED_MSGS = new Set(['Message ignored: not text', 'Message ignored: no userId']);
+
+function messageClassifiedEntry(group: FlowGroup): LogEntry | undefined {
+  return flattenEntries(group).find((e) => e.msg === MESSAGE_CLASSIFIED_MSG);
+}
+
 /**
- * 訊息事件是不是指令（`@Dobby +1` 這類）還是普通對話（走自動回覆），
- * 只有 `Routing command`/`Auto-reply lookup`（都是 debug 層）能明確分辨；
- * `LOG_LEVEL=info` 下這兩行都不存在，退而用「這個流程有沒有 Notion 呼叫」
- * 當猜測依據（指令通常會查/寫 Notion，單純聊天不會）。
+ * 訊息事件是不是指令（`@Dobby +1` 這類）還是普通對話（走自動回覆）。
+ *
+ * 優先看 `message-handler.ts` 在所有分支之前記的 info 摘要
+ * `Message classified`（`isCommand`/`parsed`/`commandType`），`LOG_LEVEL=info`
+ * 下也分得出來。被 `message-handler.ts` 直接略過的非文字訊息、沒有 userId 的
+ * 訊息不會有這行，算對話（沒有指令被處理，也不該被標成「指令沒回覆」的警告）。
+ *
+ * 以下兩層只給加這行之前寫下的舊 log 檔用：先看 debug 層的
+ * `Routing command`/`Auto-reply lookup`；再沒有就退而用「這個流程有沒有
+ * Notion 呼叫」猜。這個猜法在 info 下並不準——`message-handler.ts` 對每則
+ * 文字訊息都會查一次 USERS（群組／room 還會累加發言數），閒聊也有 Notion
+ * 呼叫，所以舊的 info log 檔裡文字訊息幾乎都會被判成指令。
  */
 function groupKind(group: FlowGroup): EventKind {
   if (!group.start) return 'schedule';
   const msgType = String(group.start['type'] ?? '');
   if (msgType === 'join' || msgType === 'memberJoined') return 'join';
   if (msgType === 'message') {
+    const classified = messageClassifiedEntry(group);
+    if (classified) return classified['isCommand'] === true ? 'command' : 'chat';
     const flat = flattenEntries(group);
+    if (flat.some((e) => MESSAGE_IGNORED_MSGS.has(String(e.msg ?? '')))) return 'chat';
     // 'Routing command'／'Message looks like command but failed to parse'
     // 都只會從 message-handler.ts 的 isCommand(text) 分支裡發出，即使後者
     // 代表解析失敗，也一樣是「這被判定為指令」的證據。
@@ -445,6 +464,7 @@ function groupKind(group: FlowGroup): EventKind {
       return 'command';
     }
     if (flat.some((e) => e.msg === 'Auto-reply lookup' || e.msg === 'Skipping auto-reply for admin')) return 'chat';
+    // 舊 log 檔（沒有 `Message classified`）在 info 下的最後手段，見上方說明。
     return group.steps.length > 0 ? 'command' : 'chat';
   }
   return 'chat';
@@ -576,6 +596,12 @@ function eventMergeKey(kind: EventKind, origin: string, status: EventStatus): st
 /** 「來自」欄位——訊息事件是指令類型，排程事件是排程檔案名稱，其餘退回一個通用標籤。 */
 function groupOrigin(group: FlowGroup, kind: EventKind): string {
   if (kind === 'command') {
+    const classified = messageClassifiedEntry(group);
+    if (classified) {
+      if (typeof classified['commandType'] === 'string') return classified['commandType'];
+      if (classified['parsed'] === false) return '（指令解析失敗）';
+    }
+    // 舊 log 檔沒有 `Message classified`，只能靠 debug 層的 `Routing command`。
     for (const e of flattenEntries(group)) {
       if (e.msg === 'Routing command' && e['command'] && typeof e['command'] === 'object') {
         const type = (e['command'] as Record<string, unknown>)['type'];

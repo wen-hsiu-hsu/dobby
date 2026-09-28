@@ -51,8 +51,9 @@ Notion 呼叫原本在 `log-grouping.ts` 用 method+path 配對，同一個 key 
 
 **分層不拆掉**：這份 ADR 的 info/debug 分層仍然照做。它讓 `/logs` 在 `info` 下不會一片空白，也讓之後要改回 `info` 時不用重新整理每一行 log。新增 log 時仍然要把摘要級跟載荷級分成兩行。
 
+**已處理（2026-09-28）**：`/logs` 在 `info` 下原本會把所有文字訊息判成「指令」、沒回覆的閒聊標成「警告」（`groupKind()` 只能靠「有沒有 Notion 呼叫」猜，但每則文字訊息都會查 USERS）。現在 `src/handlers/message-handler.ts` 在所有分支之前記一行 info 摘要 `Message classified`（`isCommand`/`parsed`/`commandType`），`groupKind()`／`groupOrigin()` 優先讀它。這行本身就是這份 ADR 分層的一個例子：只帶分類結果，不帶訊息原文和 userId（原文仍在 debug 層的 `handleMessage`／`Processing event detail`）。加這行之前的舊 log 檔仍走原本的猜法，見 `docs/logging.md`「事件種類」。
+
 **之後如果要改回 `info`，要先處理這些**（細節見 `TODO.md`「Log 可觀測性」段）：
 
-- `/logs` 在 `info` 下會把所有文字訊息判成「指令」，沒回覆的閒聊標成「警告」（`src/routes/logs.ts` 的 `groupKind()` fallback）。
 - 報名／請假被拒絕、no-op 的分支只有 debug 層的回覆全文，info 層看不出原因；要先補每個結束分支的 info 決策摘要。
 - 以下 info／warn／error 行直接帶 userId 或 groupId，違反上面「身分識別資訊留 debug」的原則（warn/error 不受 `LOG_LEVEL` 篩選，任何等級都會寫出），要改成 USERS pageId 或搬到 debug：`display-name-update.ts:40,47,58`、`user-management.ts:24,57,62`、`member-joined-handler.ts:29`、`welcome-message.ts:79`、`weekly-push.ts:46`（2026-09-28 單行 grep 的結果，改之前要再搜一次跨多行的 logger 呼叫）。`registration-handler.ts:94`、`leave-handler.ts:112` 的 `targetDisplayName`（姓名）也在 info，要決定是當例外還是搬走。

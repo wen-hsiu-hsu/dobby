@@ -36,13 +36,17 @@
 
 | 種類 | 判斷依據 | 分頁 |
 |------|----------|------|
-| 指令 | 有 `Processing event`（`type: 'message'`），且底下有 `Routing command` 或 `Message looks like command but failed to parse`（兩者都只會從 `isCommand(text)` 判定為真的分支發出，即使後者代表解析失敗也一樣算指令） | 訊息 |
-| 對話 | 有 `Processing event`（`type: 'message'`），但不是指令——通常是自動回覆（`services/auto-reply.ts`，靜態 JSON） | 訊息 |
+| 指令 | 有 `Processing event`（`type: 'message'`），且 info 摘要 `Message classified` 的 `isCommand` 是 `true`（即使 `parsed: false` 代表解析失敗也一樣算指令）。舊 log 檔沒有這行時，改看底下有沒有 `Routing command` 或 `Message looks like command but failed to parse`（見下方說明） | 訊息 |
+| 對話 | 有 `Processing event`（`type: 'message'`），但不是指令——通常是自動回覆（`services/auto-reply.ts`，靜態 JSON）。`message-handler.ts` 直接略過的訊息（`Message ignored: not text`、`Message ignored: no userId`）也算對話 | 訊息 |
 | 加入 | `Processing event` 的 `type` 是 `join` 或 `memberJoined` | 訊息 |
 | 排程 | 沒有 `Processing event`，但有 `reqId`——`weekly-push.ts`/`display-name-update.ts` 各自用 `runWithContext` 包住整次執行；R2 同步的 `uploadAllLogs()`（`log-upload.ts`，含 graceful shutdown 那次）也一樣（見下方「排程事件的 reqId」） | 排程 |
 | 系統 | 完全沒有 `reqId`，且不是伺服器生命週期訊息（見下方「服務重啟分隔線」；兩個排程啟動時各記一次的 `... scheduler started` 也算生命週期訊息，不會變成卡片）。有專屬文案的有三種：LINE webhook 簽章驗證失敗（`index.ts` 的全域錯誤處理，發生在事件處理、也就是 reqId 產生之前，真正的異常）、`webhook.ts` 一次收到兩筆以上事件時的批次提示（正常、預期內的情況，不是錯誤）、`log-upload.ts` 在 R2 未設定時於啟動時記一次的提示（debug 層，非錯誤）。其他沒有 reqId 的訊息——例如 `log-cleanup.ts` 的 `Deleted old log file`、錯誤處理的 `.catch` 記下的 `Log cleanup run failed`/`R2 log sync run failed`/`R2 log sync on shutdown failed`/`Error processing events`、`index.ts` 的 `Unhandled request error`——會退回通用文案：「來自」顯示「（未知系統來源）」，「來源」顯示中性的「未知」 | 系統 |
 
-**指令 vs 對話只有在 `LOG_LEVEL=debug` 才能準確判斷**——`Routing command`/`Auto-reply lookup`/`Skipping auto-reply for admin` 全部是 debug 層。`LOG_LEVEL=info` 下這些線都不存在，程式碼退而用「這個流程有沒有 Notion API 呼叫」猜測。但 `message-handler.ts` 對每則文字訊息都會查一次 USERS，所以 `info` 下所有文字訊息都會被判成指令，沒回覆的閒聊還會被標成「警告」（見 `TODO.md`「Log 可觀測性」）。正式環境常駐 `debug`（見 `docs/overview.md`「日誌」小節），不受影響。
+**指令 vs 對話靠 `message-handler.ts` 的 info 摘要 `Message classified` 判斷，`LOG_LEVEL=info` 下也準確。** 這行在訊息處理的所有分支之前記（包括 USERS 查詢失敗、指令解析失敗、管理員略過自動回覆這幾個提早 return 的分支），欄位是 `isCommand`，指令另外有 `parsed`、`commandType`。依 [ADR 0005](adr/0005-purpose-context-layered-on-reqid.md)，這行不含訊息原文，也不含 userId。
+
+比這行更早 return 的兩種訊息各有自己的一行，在 info 層也分得出來：非文字訊息（貼圖、圖片等）記 debug 的 `Message ignored: not text`（帶 `messageType`；群組裡量大、又不需要處理，所以放 debug），來源沒有 userId 的文字訊息記 info 的 `Message ignored: no userId`（使用者會覺得 bot 沒反應，所以要在 info 看得到；刻意不用 warn，免得每一筆都被標成「警告」）。這兩種都算「對話」、狀態是「完成」。
+
+**舊 log 檔的 fallback**：加這行之前寫下的 log 沒有 `Message classified`，改看 debug 層的 `Routing command`/`Message looks like command but failed to parse`（指令）或 `Auto-reply lookup`/`Skipping auto-reply for admin`（對話）；再沒有就退而用「這個流程有沒有 Notion API 呼叫」猜。這個猜法不準——`message-handler.ts` 對每則文字訊息都會查一次 USERS，所以舊的 info log 檔裡，文字訊息都會被判成指令，沒回覆的閒聊還會被標成「警告」。正式環境常駐 `debug`（見 `docs/overview.md`「日誌」小節），舊檔也有 debug 行，不受影響。
 
 ## 每個事件卡片顯示什麼
 
@@ -53,7 +57,7 @@
 
 - **標題**：訊息類事件用 `Processing event detail`（debug 層）解析出的指令/對話文字加引號；加入事件顯示事件類型；排程/系統事件用它自己第一筆摘要 log 的訊息名稱當標題。
 - **來源**：訊息類事件顯示群組／多人聊天室／1 對 1；排程顯示「排程 · cron」；系統事件依訊息各自顯示（對照 `src/routes/logs.ts` 的 `SYSTEM_EVENT_INFO`）：webhook 簽章驗證失敗跟批次提示是「HTTP · POST /webhook」，R2 未設定的啟動提示是「啟動 · log-upload.ts」，其他沒有專屬文案的訊息顯示中性的「未知」（這類訊息多半不是 HTTP 請求來的，例如 log-cleanup 或背景作業的 `.catch`，不猜成 `POST /webhook`）。
-- **來自**（詳情頁欄位）：指令類事件顯示 `Routing command` 的 `command.type`（debug 層才有，否則顯示「（未知，需要 LOG_LEVEL=debug）」）；對話顯示「自動回覆（非指令）」；加入顯示事件類型（`join`/`memberJoined`）；排程顯示排程檔案的短名稱（`weekly-push`/`display-name-update`/`log-upload`，靠比對已知的摘要 log 訊息辨認，猜不到就顯示「排程作業」）；系統事件依訊息顯示各自的文案（對照 `src/routes/logs.ts` 的 `SYSTEM_EVENT_INFO`，例如簽章驗證失敗是「index.ts 錯誤處理」、批次提示是 `webhook.ts`、R2 未設定提示是 `log-upload.ts`），未知訊息顯示「（未知系統來源）」。
+- **來自**（詳情頁欄位）：指令類事件顯示 `Message classified` 的 `commandType`（`parsed: false` 時顯示「（指令解析失敗）」）；舊 log 檔沒有這行時改用 `Routing command` 的 `command.type`（debug 層才有，否則顯示「（未知，需要 LOG_LEVEL=debug）」）；對話顯示「自動回覆（非指令）」；加入顯示事件類型（`join`/`memberJoined`）；排程顯示排程檔案的短名稱（`weekly-push`/`display-name-update`/`log-upload`，靠比對已知的摘要 log 訊息辨認，猜不到就顯示「排程作業」）；系統事件依訊息顯示各自的文案（對照 `src/routes/logs.ts` 的 `SYSTEM_EVENT_INFO`，例如簽章驗證失敗是「index.ts 錯誤處理」、批次提示是 `webhook.ts`、R2 未設定提示是 `log-upload.ts`），未知訊息顯示「（未知系統來源）」。
 - **狀態**（完成／完成（有降級）／警告／失敗）：見下一節。
 
 ## 狀態判定：完成／降級／警告／失敗

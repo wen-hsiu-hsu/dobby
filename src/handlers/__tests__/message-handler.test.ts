@@ -11,6 +11,11 @@ vi.mock('../../services/line/reply-service.js');
 vi.mock('../../commands/command-router.js');
 vi.mock('../../services/user-management.js');
 
+const { loggerMock } = vi.hoisted(() => ({
+  loggerMock: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock('../../utils/logger.js', () => ({ logger: loggerMock }));
+
 function textEvent(text: string): MessageEvent {
   return {
     type: 'message',
@@ -86,6 +91,85 @@ describe('handleMessage', () => {
 
       finishTracking();
       await handling;
+    });
+  });
+
+  // /logs 靠這行在 LOG_LEVEL=info 下分辨指令／對話（routes/logs.ts 的
+  // groupKind/groupOrigin），所以每個分支都要先記到；依 ADR 0005 不能帶訊息
+  // 原文或 userId。
+  describe('info-level "Message classified" summary', () => {
+    function classifiedCalls() {
+      return loggerMock.info.mock.calls.filter(([, msg]) => msg === 'Message classified');
+    }
+
+    function expectNoPiiAtInfo(text: string) {
+      for (const call of loggerMock.info.mock.calls) {
+        const serialized = JSON.stringify(call);
+        expect(serialized).not.toContain('user-1');
+        expect(serialized).not.toContain(text);
+      }
+    }
+
+    it('logs isCommand=false for chat (including the admin skip branch)', async () => {
+      vi.mocked(findByUserId).mockResolvedValue({ isAdmin: true } as any);
+      vi.mocked(trackUser).mockResolvedValue();
+
+      await handleMessage(textEvent('大家好'));
+
+      expect(classifiedCalls()).toEqual([[{ isCommand: false }, 'Message classified']]);
+      expectNoPiiAtInfo('大家好');
+    });
+
+    it('logs the parsed command type for a command', async () => {
+      vi.mocked(findByUserId).mockResolvedValue({ isAdmin: false } as any);
+      vi.mocked(trackUser).mockResolvedValue();
+
+      await handleMessage(textEvent('@Dobby +1'));
+
+      expect(classifiedCalls()).toEqual([
+        [{ isCommand: true, parsed: true, commandType: 'registration' }, 'Message classified'],
+      ]);
+      expectNoPiiAtInfo('@Dobby +1');
+    });
+
+    it('is logged before the USERS lookup, so a lookup failure still has it', async () => {
+      vi.mocked(findByUserId).mockRejectedValue(new Error('Notion API error'));
+
+      await handleMessage(textEvent('@Dobby 假'));
+
+      expect(classifiedCalls()).toEqual([
+        [{ isCommand: true, parsed: true, commandType: 'leave' }, 'Message classified'],
+      ]);
+    });
+  });
+
+  describe('ignored messages', () => {
+    it('logs an info line (not warn) and skips everything when the source has no userId', async () => {
+      const event = textEvent('@Dobby +1');
+      delete (event.source as { userId?: string }).userId;
+
+      await handleMessage(event);
+
+      expect(loggerMock.info).toHaveBeenCalledWith({ sourceType: 'group' }, 'Message ignored: no userId');
+      expect(loggerMock.warn).not.toHaveBeenCalled();
+      expect(loggerMock.error).not.toHaveBeenCalled();
+      expect(loggerMock.info.mock.calls.some(([, msg]) => msg === 'Message classified')).toBe(false);
+      expect(findByUserId).not.toHaveBeenCalled();
+    });
+
+    it('logs a debug line for non-text messages', async () => {
+      const event = {
+        type: 'message',
+        replyToken: 'reply-token-1',
+        source: { type: 'group', userId: 'user-1', groupId: 'group-1' },
+        message: { type: 'sticker', id: 'm1', packageId: '1', stickerId: '1' },
+      } as unknown as MessageEvent;
+
+      await handleMessage(event);
+
+      expect(loggerMock.debug).toHaveBeenCalledWith({ messageType: 'sticker' }, 'Message ignored: not text');
+      expect(loggerMock.info).not.toHaveBeenCalled();
+      expect(findByUserId).not.toHaveBeenCalled();
     });
   });
 });
