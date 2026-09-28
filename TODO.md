@@ -213,13 +213,3 @@
   - 另有一個可以單獨做的小改善：操作對象本人在請假名單裡時（請假成功、「已請假，無需重複操作」，以及已請假的季租成員自己 `+N`），他的 People 頁會 GET 兩次，一次在鎖外的 `resolveTarget`（`target-resolver.ts:38`），一次在鎖內的 `buildEventStatusMessage`（`event-status-message.ts:30`）。不是 bug，姓名相同，只是鎖內多一次約 0.3 秒的 GET；請假成功時本人排在 `newAbsentees` 最後（`leave-handler.ts:133`），前面有人時還要多等一次 400ms sleep。如果要處理：可以讓 `buildEventStatusMessage` 多收一個「已知 pageId → 姓名」參數（傳 `resolved.personPageId` → `resolved.displayName`），已知的就跳過 GET，但輸出順序要維持 `absenteePageIds` 的順序。pageId 出現在請假名單就一定有 People 頁，所以這時 `displayName` 一定是 People 的 `Name`，不會拿到 LINE 名稱。若做了上面的鎖外組訊息，或 `findByPageIds` 那一項的快取備案，這個重複的影響會變小或消失。
 
 ---
-
-## Log 可觀測性（2026-09-28 評估，剩餘項目）
-
-> 2026-09-28 評估出的 log 缺口已大多補上（Notion 錯誤 log、callId 配對、`/logs` 狀態判斷、info 分類摘要、mutex 摘要、報名／請假決策摘要、crash handler 等，細節見 `docs/logging.md`、`docs/registration.md`、ADR 0002／0005）。以下是還沒做的尾巴，都**不影響使用者**、不是急件。路徑除非另外寫明，都相對於 `src/`。
-
-- [ ] **graceful shutdown 的 `process.exit` 前沒有 flush log。** `src/index.ts:82-83`（`Graceful shutdown timed out, forcing exit` 後 `process.exit(1)`）和 `:102`（正常關閉後 `process.exit(0)`）都直接結束。正式環境的檔案 stream 是非同步的 SonicBoom，前面還有排隊的行時，最後幾行可能沒寫進 `logs/`（crash handler 那邊實測過：不 flush 直接 exit、前面有排隊時最後一行 0/20 寫進檔案）。
-
-  不是 bug，只是關機前最後幾行 log 可能遺失；docker 的 stdout 還有一份。如果要處理：在這兩處 exit 前呼叫 `utils/logger.ts` 的 `flushLogsSync()`（crash handler `utils/crash-handlers.ts` 已經這樣用）。
-
----
