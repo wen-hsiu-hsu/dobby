@@ -747,11 +747,16 @@ interface BatchStat {
 
 /**
  * 排程事件結束時的摘要 log（例如 `Display name update complete` 的
- * `{updated, skipped, failed, total}`、`Weekly push complete` 的
- * `{succeeded, failed, total}`）通用地抓出數字欄位畫成比例條——不特別認識
- * 任何排程的欄位名稱，只要是數字就收，`total` 排除掉（它是其他欄位加總，
- * 畫進去會讓比例條變成一半是重複的），依欄位名稱的關鍵字猜顏色。新增一種
- * 排程摘要 log 不需要改這裡。
+ * `{updated, unchanged, skipped, failed, noUserId, total}`、`Weekly push
+ * complete` 的 `{succeeded, failed, total}`）通用地抓出數字欄位畫成比例條——
+ * 不特別認識任何排程的欄位名稱，只要是數字就收，`total` 排除掉（畫進去會讓
+ * 比例條變成一半是重複的），依欄位名稱的關鍵字猜顏色，名稱不含 fail／success
+ * 之類關鍵字的畫灰色。新增一種排程摘要 log 不需要改這裡。
+ *
+ * 這裡不會檢查 `total` 是不是其他欄位的加總，每個「X / N」的 N 是其他欄位
+ * 自己加起來的數字，不是 `total`。所以寫摘要 log 的排程要自己保證每個項目都
+ * 落在某個計數裡：漏算的項目不會出現在圖上，比例會被放大（display-name 以前
+ * 沒算「名稱沒變」和「沒有 userId」，30 人只更新 1 人也顯示成 100%、「1 / 1」）。
  */
 function computeBatch(group: FlowGroup, kind: EventKind): BatchStat[] | null {
   if (kind !== 'schedule') return null;

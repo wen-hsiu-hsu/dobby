@@ -29,11 +29,19 @@ async function doUpdateDisplayNames(): Promise<void> {
   try {
     const users = await usersRepo.findAll();
 
+    // 每個使用者都要落在其中一個計數裡，total 才會等於它們的加總——/logs 的
+    // 批次結果圖（routes/logs.ts 的 computeBatch）排除 total、只拿其他數字
+    // 欄位畫比例，漏算的人會讓「30 人只更新 1 人」顯示成 100%、「1 / 1」。
     let updated = 0;
+    let unchanged = 0;
     let skipped = 0;
     let failed = 0;
+    let noUserId = 0;
     for (const user of users) {
-      if (!user.userId) continue;
+      if (!user.userId) {
+        noUserId++;
+        continue;
+      }
 
       try {
         if (user.groups.length === 0) {
@@ -52,6 +60,8 @@ async function doUpdateDisplayNames(): Promise<void> {
         if (displayName !== user.customName) {
           await usersRepo.update(user.pageId, { customName: displayName });
           updated++;
+        } else {
+          unchanged++;
         }
       } catch (err) {
         // Isolate per-user failures so one bad record doesn't stop the rest of the batch.
@@ -63,7 +73,7 @@ async function doUpdateDisplayNames(): Promise<void> {
       await new Promise((r) => setTimeout(r, 400));
     }
 
-    logger.info({ updated, skipped, failed, total: users.length }, 'Display name update complete');
+    logger.info({ updated, unchanged, skipped, failed, noUserId, total: users.length }, 'Display name update complete');
   } catch (err) {
     logger.error({ err }, 'Display name update failed');
   }

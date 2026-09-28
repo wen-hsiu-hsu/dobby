@@ -2,10 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { updateDisplayNames } from '../display-name-update.js';
 import * as usersRepo from '../../services/notion/users-repository.js';
 import { getProfile } from '../../services/line/profile-service.js';
+import { logger } from '../../utils/logger.js';
 import type { NotionUser } from '../../types/notion-models.js';
 
 vi.mock('../../services/notion/users-repository.js');
 vi.mock('../../services/line/profile-service.js');
+vi.mock('../../utils/logger.js', () => ({
+  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
 
 const findAllMock = vi.mocked(usersRepo.findAll);
 const updateMock = vi.mocked(usersRepo.update);
@@ -135,6 +139,37 @@ describe('updateDisplayNames', () => {
     await expect(updateDisplayNames()).resolves.toBeUndefined();
 
     expect(updateMock).toHaveBeenCalledWith('page-user-good', { customName: 'New-user-good' });
+  });
+
+  it('counts every user in exactly one bucket, so the summary counts add up to total', async () => {
+    vi.useFakeTimers();
+    try {
+      findAllMock.mockResolvedValue([
+        makeUser({ userId: 'user-changed', customName: 'Old', groups: ['group-1'] }),
+        makeUser({ userId: 'user-same', customName: 'Same', groups: ['group-1'] }),
+        makeUser({ userId: 'user-nogroup', customName: 'X', groups: [] }),
+        makeUser({ userId: 'user-unresolved', customName: 'Y', groups: ['group-1'] }),
+        makeUser({ userId: 'user-broken', customName: 'Z', groups: ['group-1'] }),
+        makeUser({ userId: '', customName: 'NoId', groups: ['group-1'] }),
+      ]);
+      getProfileMock.mockImplementation(async (userId) => {
+        if (userId === 'user-changed') return { userId, displayName: 'New' };
+        if (userId === 'user-same') return { userId, displayName: 'Same' };
+        if (userId === 'user-broken') throw new Error('boom');
+        return null;
+      });
+
+      const promise = updateDisplayNames();
+      await vi.advanceTimersByTimeAsync(5000);
+      await promise;
+
+      expect(logger.info).toHaveBeenCalledWith(
+        { updated: 1, unchanged: 1, skipped: 2, failed: 1, noUserId: 1, total: 6 },
+        'Display name update complete'
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('waits 400ms after processing each user to respect the Notion rate limit', async () => {

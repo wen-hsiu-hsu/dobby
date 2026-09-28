@@ -691,6 +691,32 @@ describe('createLogsRouter', () => {
     expect(html).not.toContain('batch-stat-label">total<');
   });
 
+  it('draws display-name "unchanged"/"noUserId" counts as their own gray bars, so a run that updated 1 of 30 is not shown as 100%', async () => {
+    vi.mocked(readRecentLogs).mockResolvedValueOnce([
+      { level: 30, time: Date.UTC(2024, 0, 1, 4, 0, 0), reqId: 'sched-batch2', msg: 'Starting display name batch update' },
+      {
+        level: 30,
+        time: Date.UTC(2024, 0, 1, 4, 0, 5),
+        reqId: 'sched-batch2',
+        msg: 'Display name update complete',
+        updated: 1,
+        unchanged: 26,
+        skipped: 2,
+        failed: 0,
+        noUserId: 1,
+        total: 30,
+      },
+    ]);
+
+    const html = await getLogsHtml();
+
+    // 分母是各欄位加總（= total），不是只有 updated 自己
+    expect(html).toContain('batch-stat-label">updated</span><span class="batch-stat-value">1 / 30<');
+    // 名稱不含 fail/success 關鍵字的欄位畫灰色
+    expect(html).toContain('background:#595d6c"></span><span class="batch-stat-label">unchanged<');
+    expect(html).toContain('background:#595d6c"></span><span class="batch-stat-label">noUserId<');
+  });
+
   it('does not render a batch chart when the summary log only has one numeric field', async () => {
     vi.mocked(readRecentLogs).mockResolvedValueOnce([
       { level: 30, time: Date.UTC(2024, 0, 1, 4, 0, 0), reqId: 'sched-single', msg: 'Weekly push aborted: DOBBY_GROUP_IDS is not set' },

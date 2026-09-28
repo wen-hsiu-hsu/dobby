@@ -110,7 +110,7 @@
 
 ## 排程事件的批次結果圖
 
-如果一個排程事件（`kind: schedule`）的最後一筆摘要 log 帶了兩個以上的數字欄位（排除掉 `total`），詳情頁會在時間軸上方畫一條依比例分色的長條圖＋圖例，例如 `Display name update complete` 的 `{updated, skipped, failed, total}`、`Weekly push complete` 的 `{succeeded, failed, total}`。顏色是依欄位名稱關鍵字猜的（`fail`/`error` → 紅，`success`/`succeed`/`updated`/`sent`/`complete` → 綠，其餘 → 灰），不是每個排程都手刻一份——**新增一個排程只要讓它結束時的摘要 log 帶兩個以上數字欄位，批次結果圖就會自動出現**，不用改 `/logs` 頁面。只有一個數字欄位時不會畫圖（長條圖跟单一個數字沒有意義的比例可比）。
+如果一個排程事件（`kind: schedule`）的最後一筆摘要 log 帶了兩個以上的數字欄位（排除掉 `total`），詳情頁會在時間軸上方畫一條依比例分色的長條圖＋圖例，例如 `Display name update complete` 的 `{updated, unchanged, skipped, failed, noUserId, total}`、`Weekly push complete` 的 `{succeeded, failed, total}`。每個欄位顯示成「值 / 其他欄位加總」，分母不是 `total`，程式也不會檢查兩者是否相等——**摘要 log 要讓每個項目都落在某個計數裡**，漏算的項目不會出現在圖上，比例會被放大（display-name 以前沒算「名稱沒變」和「沒有 userId」，30 人只更新 1 人也顯示成 100%、「1 / 1」）。顏色是依欄位名稱關鍵字猜的（`fail`/`error` → 紅，`success`/`succeed`/`updated`/`sent`/`complete` → 綠，其餘 → 灰），不是每個排程都手刻一份——**新增一個排程只要讓它結束時的摘要 log 帶兩個以上數字欄位，批次結果圖就會自動出現**，不用改 `/logs` 頁面。只有一個數字欄位時不會畫圖（長條圖跟单一個數字沒有意義的比例可比）。
 
 ## userId／群組 ID／顯示名稱遮蔽
 
