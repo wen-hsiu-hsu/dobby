@@ -8,7 +8,7 @@ LINE → POST /webhook → Signature Verification → Event Router
 
 Event Router 依事件類型分派：
 
-- **message** → Message Handler：是否以 `@Dobby` 開頭？是 → Command Parser → Command Router → 對應 Command Handler；否 → Auto-Reply 比對 → LINE Reply API。群組/聊天室訊息同時在背景追蹤使用者（`user-management.ts`，建立或更新 USERS）；唯一會等追蹤完成的情況是 USERS 查無此人且訊息是指令，因為報名、請假需要先有記錄
+- **message** → Message Handler：是否以 `@Dobby` 開頭？是 → Command Parser → Command Router → 對應 Command Handler；否 → Auto-Reply 比對 → LINE Reply API。群組/聊天室訊息同時在背景追蹤使用者（`user-management.ts`，建立或更新 USERS）；唯一會等追蹤完成的情況是 USERS 查無此人且訊息是指令，因為報名、請假需要先有記錄。開頭查到的 USERS 記錄會經 Command Router 傳給報名／請假的 Target Resolver 沿用（只採信非 `null` 的記錄，`null` 一律重查，見 [ADR 0009](adr/0009-actor-users-snapshot-non-null-only.md)）
 - **join** → Welcome Message Handler
 - **memberJoined** → Member Joined Handler（@mention 替換為新成員，並寫入 USERS 資料庫）
 
@@ -90,6 +90,8 @@ Webhook 收到 LINE 事件後，立即回傳 200，再非同步處理事件。
 這兩者都靠同一個 context 統一處理，**新增/修改 command handler 不需要逐一手動傳遞 `reqId`/`quoteToken`**——只要最終呼叫的是 `reply-service.ts` 的 `replyMessage`，就會自動帶上；不要繞過它直接呼叫 LINE SDK 送訊息，否則會漏掉這個機制。
 
 同一個 `request-context.ts` 還提供 `withPurpose(purpose, fn)`，疊加（不是取代）在這個 context 之上，讓 `*-repository.ts` 的函式能幫自己的 Notion API 呼叫標上「打的目的」，`/logs` 頁面的處理過程時間軸會用這個欄位把一組 `reqId` 的呼叫鏈顯示成「目的 → method/db」的敘事。設計理由（為什麼疊加、為什麼在 repository 函式內部包而不改簽名、為什麼 Notion API log 要分 info/debug 兩行記）見 [`docs/adr/0005-purpose-context-layered-on-reqid.md`](adr/0005-purpose-context-layered-on-reqid.md)。兩個排程（`weekly-push.ts`/`display-name-update.ts`）也各自用 `runWithContext` 包住整次執行，讓每次排程執行有自己專屬的 reqId，見 [`docs/logging.md`](logging.md)。
+
+這個 context 只放請求的後設資料（`reqId`、`quoteToken`、purpose），**不要拿來快取 Notion 查詢結果**（例如 `findByUserId`）：`trackUser` 在同一個 context 裡 fire-and-forget 執行，它在 mutex 內刻意重查，快取會讓它拿到舊資料，理由見 [ADR 0009](adr/0009-actor-users-snapshot-non-null-only.md)。
 
 **原因：** Webhook 處理是非同步的，沒有 correlation ID 很難追蹤單一事件的完整日誌；quoteToken 若不使用，使用者在群組裡容易搞不清楚機器人是在回應哪一則訊息。
 

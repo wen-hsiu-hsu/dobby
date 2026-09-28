@@ -12,11 +12,11 @@ Registration Parser
   └── 解析 delta（+2）和目標（自己或 @Vic）
     │
     ▼
-Target Resolver
-  └── 判斷操作對象：self / mention userId / name 文字
-    │
-    ▼
-取得活動日（下週六）所屬季度的 Season 資料（供 isSelfSeasonMember 判斷）
+並行執行（互不相依）：
+  ├── Target Resolver：判斷操作對象（self / mention userId / name 文字）
+  └── 取得活動日（下週六）所屬季度的 Season 資料（供 isSelfSeasonMember 判斷）
+  兩者都查無時，以找不到對象優先：報名回「找不到您的帳號，請先向管理員登記」、
+  請假回「找不到您的資料」；對象有找到但 Season 查無，才回「找不到 YYYY-QN 季租資料」
     │
     ▼
 獲取 Mutex 鎖（key = 下一個週六的日期字串，同 key FIFO 排隊，見下方「Mutex 保護」）
@@ -33,10 +33,10 @@ Capacity Calculator
 更新 Notion 行事曆（零打 multi-select）
     │
     ▼
-釋放 Mutex
+組訊息並回覆 LINE：新名單 + 剩餘名額 + 請假名單（目前在鎖內送出）
     │
     ▼
-回覆 LINE：新名單 + 剩餘名額 + 請假名單
+釋放 Mutex
 ```
 
 失敗或邊界情況（名額不足、重複請假、未請假卻銷假等）也會回覆同一種「完整名額狀態」格式，只是第一行換成對應的說明，而不是只回一句話（`src/commands/registration/event-status-message.ts`）。從取鎖開始的流程中，只有 `withFreshCalendarEvent` 統一處理的三種情況只回一句話：找不到活動、mutex 逾時（見下方「Mutex 保護」）、其他非預期錯誤（「系統錯誤，請稍後再試」）。例外情況見下方「請假邏輯」一節。
@@ -102,7 +102,7 @@ src/services/mutex.ts
 
 | 情境 | 判斷條件 | 處理方式 |
 |------|----------|----------|
-| 自己報名 | 無 mention | 查 USERS 資料庫取得對應 userId 的記錄（群組裡第一次發言就下指令的新使用者，會先等記錄建好才走到這步，見 `docs/notion/databases.md` USERS 小節） |
+| 自己報名 | 無 mention | 直接沿用 `message-handler` 開頭查到的 USERS 記錄，不重查；那時查無此人（`null`）才重新查一次 USERS——群組裡第一次發言就下指令的新使用者，會先等記錄建好才走到這步（見 `docs/notion/databases.md` USERS 小節），所以開頭的 `null` 已經過時，不能當成「沒有帳號」（見 [ADR 0009](adr/0009-actor-users-snapshot-non-null-only.md)） |
 | @mention 指定 | 有目標 userId | 查 USERS 資料庫取得對應 userId 的記錄 |
 | 名字指定 | `@名字` 沒帶 userId（LINE 電腦版的 mention），或 @mention 的 userId 查不到 USERS 記錄 | 用 `@` 後面的文字查 People List 比對 |
 

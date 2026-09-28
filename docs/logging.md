@@ -65,7 +65,7 @@
    |------|----------|
    | `Could not get user profile` | LINE profile API 呼叫失敗，只能用 userId 顯示，看不到顯示名稱 |
    | `buildMemberJoinedWelcome error, using fallback` | 從 Notion 讀取歡迎詞失敗，送出的是內建備用文案 |
-   | `User tracking failed (non-blocking)` | 使用者記錄的建立或更新失敗。已知使用者不影響這次回覆；還沒有記錄的使用者若下的是指令，指令會回「找不到您的帳號」（該指令有等追蹤完成，見 `docs/notion/databases.md` USERS 小節） |
+   | `User tracking failed (non-blocking)` | 使用者記錄的建立或更新失敗。已知使用者不影響這次回覆；還沒有記錄的使用者若下的是指令，報名會回「找不到您的帳號」、請假會回「找不到您的資料」（該指令有等追蹤完成，見 `docs/notion/databases.md` USERS 小節） |
    | `Failed to record joined member (non-blocking)` | 新成員的 USERS 記錄寫入逾時（mutex 10 秒）或發生非 Notion API 的錯誤，歡迎訊息照常送出；逾時時寫入仍在背景進行。Notion API 本身回錯時會先被規則 1 判成失敗，不會落到這裡 |
    | `People list already has this name, skipped auto-link` | 新使用者的名稱在人員清單已有同名頁面，沒有自動建立或連結，需要管理員手動設定 `Registered name` |
    | `Failed to create people record for new user (non-blocking)` | 新使用者的人員清單頁面建立失敗（非 Notion API 錯誤），USERS 照常建立但沒有連結，不會自動重試 |
