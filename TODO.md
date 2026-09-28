@@ -182,15 +182,4 @@
 
   不是 bug，只是關機前最後幾行 log 可能遺失；docker 的 stdout 還有一份。如果要處理：在這兩處 exit 前呼叫 `utils/logger.ts` 的 `flushLogsSync()`（crash handler `utils/crash-handlers.ts` 已經這樣用）。
 
-- [ ] **`/logs` 時間軸的排序與「終點」呈現有三個小問題。**（2026-09-29 本機測試時發現；都只影響 `/logs` 顯示，不影響 bot 行為和 log 檔內容）
-
-  1. **同一毫秒的行，Notion 步驟一律排在其他 log 前面。** `src/routes/logs.ts:998-1002` 的 `buildTimeline()` 把 `[...group.steps, ...group.misc]` 依 `representativeTime()`（`routes/log-grouping.ts:193-203`，Notion 呼叫取 request 的時間）做穩定排序，時間相同就維持「先 steps、後 misc」。本機 log 裡 `Message classified` 和緊接著的 USERS query 常是同一毫秒（例如 reqId `c25fac`、`ab7162`、`dd6f30`、`78aafa`），畫面上 USERS query 反而排在前面。純外觀問題。
-  2. **「終點 LINE 回覆」固定排在最後，不管實際時間。** `buildTimeline()` 第 1020 行在所有步驟之後才 push `group.end`。fire-and-forget 的 `trackUser`（USERS 重查、累加發言數 PATCH、`Mutex task finished`）常在回覆送出之後才完成，畫面上卻顯示成回覆之前發生（例如 `78aafa`）。`docs/logging.md` 第 88 行寫「時間軸嚴格依時間排序（…LINE 收發全部混在一起排…）」，對終點這一步不成立。
-  3. **同一事件有兩次 LINE 回覆時，前一次整列消失。** `routes/log-grouping.ts:299` 的 `buildFlowGroups()` 遇到 `line-reply` 就 `group.end = row; continue;`，後面的回覆直接覆蓋前面的，前一次既不在 `end` 也不在 `misc`（2026-09-29 用暫時的測試確認：兩次回覆 sendId `a`、`b`，結果 `end` 是 `b`、`misc` 是空的）。實際會發生在報名／請假 mutex 逾時：`with-fresh-calendar-event.ts:39-40` 先成功回覆「處理時間較長，這次操作可能已經完成…」，背景任務完成後再用同一個 replyToken 回覆一次、被 LINE 拒絕（`Reply failed`）。`/logs` 上只剩失敗的那次，使用者實際收到的逾時訊息看不到，卡片預覽也變成「回覆失敗」。狀態判定不受影響（仍依 `docs/logging.md` 說明變成「失敗」），但會讓人誤以為使用者什麼都沒收到。這一項比 1、2 值得先處理。
-
-  如果要處理：
-  - 第 1 項：可以在 `groupPairedEntries()`（`log-grouping.ts:221`）解析時記下每一行在原始 log 裡的順序，排序時間相同就用它比；不要改成「先 misc 後 steps」，那只是把問題換邊。
-  - 第 2 項：可以把 `group.end` 也放進中間排序、但保留「終點」標示；或維持放最後、在畫面上標出實際時間。改之前要看 `groupPreview()`、`groupStatus()`、`?format=text` 的 `renderEventDetailText()` 是否假設終點是最後一步。
-  - 第 3 項：`FlowGroup` 目前只有一個 `end`，要改成「最後一次回覆當 `end`、其餘回覆放進 `misc`（`lineStepTimeline(row, false)` 已能畫非終點的回覆）」，或把 `end` 改成陣列。注意 `groupStatus()` 看 `group.end?.failure`、`groupPreview()` 看 `group.end`：逾時案例中要決定預覽顯示「逾時訊息」還是「回覆失敗」，建議預覽顯示使用者實際收到的那則（第一次成功的回覆），狀態維持「失敗」。測試寫在 `routes/__tests__/log-grouping.test.ts`、`logs.test.ts`。
-
 ---
