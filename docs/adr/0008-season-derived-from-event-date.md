@@ -17,4 +17,4 @@
 
 **可接受的代價**：季末最後一週如果管理員還沒建立下一季的「季租承租紀錄」，報名／請假會回「找不到 YYYY-QN 季租資料」，週報推播也會中止（記 `logger.error`）。這是刻意的 fail-fast，不 fallback 回上一季，因為 fallback 正是這次 bug 的成因。
 
-已知的誤導訊息：同樣情況下 `@Dobby next` 會回「找不到 YYYY-MM-DD 的活動」，看起來像是行事曆沒建。原因是 `getEventOccupancy` 把「活動不存在」和「季資料不存在」都回成 `null`，呼叫端分不出來。這是既有行為，這次沒改。2026-09-28 起 `getEventOccupancy` 回 `null` 前會記一行 info `Event occupancy unavailable: no event or season for date`（`{date, hasEvent, hasSeason}`），管理員可以在 `/logs` 查到真正原因；使用者收到的回覆仍然一樣誤導。
+已知的誤導訊息：同樣情況下 `@Dobby next` 會回「找不到 YYYY-MM-DD 的活動」，看起來像是行事曆沒建。原因是 `getEventOccupancy` 把「活動不存在」和「季資料不存在」都回成 `null`，呼叫端分不出來。這是既有行為，這次沒改。2026-09-28 起 `getEventOccupancy` 回 `null` 前會記一行 info `Event occupancy unavailable: no event or season for date`（`{date, hasEvent, hasSeason}`），管理員可以在 `/logs` 查到真正原因；使用者收到的回覆仍然一樣誤導。2026-09-29 評估後決定不修（只有管理員建資料建到一半時會遇到，理由見 `TODO.md`「已評估、不採納」）。

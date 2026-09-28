@@ -110,6 +110,8 @@
 
   若 log 累積 10 次以上 `owe`，且在 Notion 沒有整體變慢的時段仍然穩定超過 2 秒，可以重新評估。
 
+- **`@Dobby next` 在「有活動、沒季資料」時回「找不到 YYYY-MM-DD 的活動」的誤導訊息**（2026-09-29 決定）— 不修。背景見 [ADR 0008](docs/adr/0008-season-derived-from-event-date.md) 最後一段：`getEventOccupancy` 把「沒有活動」和「沒有季資料」都回 `null`，`commands/next-event.ts` 分不出來。不修的理由：新一季的建立流程一定是先建季資料、再建活動，所以「有活動、沒季資料」只會在管理員建資料建到一半時出現；而會在這時候下 `@Dobby next` 的也只有管理員本人，他自己知道資料還沒建完。需要查原因時，`/logs` 的 info 行 `Event occupancy unavailable: no event or season for date`（`{date, hasEvent, hasSeason}`）已經看得出來。若之後建資料的流程改成非管理員也會碰到這個狀態，再重新評估。
+
 ---
 
 ## 效能觀察（從真實 `logs/` 分析發現，尚未處理）
@@ -156,8 +158,8 @@
   - **測試 fixture：** `create-test-bot.ts:74-86` 的 `routePost` 只依 DB ID 回 fixture、不看 filter，改用 DB query 後現有 fixture 大多可以直接用。另外 `routeGet` 的 `/pages/:id`（第 102-109 行）一律從 people fixture 找，所以現在測試裡 calendar 的 `findByPageIds` 拿到的其實是 people 頁面。改成 calendar query 後反而更正確，但既有斷言可能要跟著調整。
 
 - [ ] **報名／請假的回覆訊息在鎖內組，拉長鎖持有時間。** `buildEventStatusMessage` 在請假人數 >0 時會呼叫 `peopleRepo.findByPageIds` 查請假人姓名（`event-status-message.ts:29-31`）。它在 `withFreshCalendarEvent` 的 mutation 裡被呼叫，後面的 `replyMessage` 也在 mutation 裡，所以鎖要等 LINE API 回應後才釋放。共有 5 處：
-  - `registration-handler.ts:98-106`（名額不足）、`138-146`（成功）
-  - `leave-handler.ts:100-108`（已請假，no-op）、`115-123`（未請假，no-op）、`149-157`（成功）
+  - `registration-handler.ts:102-110`（名額不足）、`142-150`（成功）
+  - `leave-handler.ts:104-112`（已請假，no-op）、`119-127`（未請假，no-op）、`153-161`（成功）
 
   實測鎖持有時間：中位數約 1.43 秒（0.85～4.44 秒，n=34）。n=34 是所有進到鎖內的報名／請假請求，包含名額不足和 no-op 分支，所以比成功寫入的次數（`+N`／`-N` 26 次＋請假／銷假 4 次）多。這是 mutex 摘要上線前量的：當時 log 沒有 acquire／release 事件，是用鎖內第一個 calendar query 的開始時間，算到 `LINE reply sent` 推出來的。2026-09-28 起可以直接看 `Mutex task finished` 的 `heldMs`／`waitMs`／`queuedAhead`（見 `docs/registration.md`「從 log 看鎖競爭」），做完這一項後用它比對效果。4.4 秒那筆是 calendar PATCH 長尾，跟組訊息無關。鎖內姓名查詢中位數約 0.28 秒，LINE reply 約 0.2 秒。
 
@@ -168,7 +170,7 @@
   如果要處理：可以讓 mutation 回傳組訊息需要的資料，改到鎖外組訊息並 `replyMessage`。要改 `with-fresh-calendar-event.ts:19` 的 mutation 簽名，它現在是 `(fresh: T) => Promise<void>`。
   - 移到鎖外不會造成資料不一致：訊息內容仍然用 mutation 在鎖內算出的快照（`updatedGuests`、`newAbsentees`、`totalSlots`），跟現在一樣。差別只有姓名查詢晚一點（姓名不會變），以及 B 的回覆可能比 A 先到，都無害。
   - 如果做了上面 `findByPageIds` 那一項的快取備案，請假人姓名會走快取，鎖內只剩 LINE reply 約 0.2 秒，這一項就不值得做了。那一項的首選做法（反向 relation 查詢）不碰鎖內的查詢，做完後這一項的效益不變。
-  - 另有一個可以單獨做的小改善：操作對象本人在請假名單裡時（請假成功、「已請假，無需重複操作」，以及已請假的季租成員自己 `+N`），他的 People 頁會 GET 兩次，一次在鎖外的 `resolveTarget`（`target-resolver.ts:38`），一次在鎖內的 `buildEventStatusMessage`（`event-status-message.ts:30`）。不是 bug，姓名相同，只是鎖內多一次約 0.3 秒的 GET；請假成功時本人排在 `newAbsentees` 最後（`leave-handler.ts:129`），前面有人時還要多等一次 400ms sleep。如果要處理：可以讓 `buildEventStatusMessage` 多收一個「已知 pageId → 姓名」參數（傳 `resolved.personPageId` → `resolved.displayName`），已知的就跳過 GET，但輸出順序要維持 `absenteePageIds` 的順序。pageId 出現在請假名單就一定有 People 頁，所以這時 `displayName` 一定是 People 的 `Name`，不會拿到 LINE 名稱。若做了上面的鎖外組訊息，或 `findByPageIds` 那一項的快取備案，這個重複的影響會變小或消失。
+  - 另有一個可以單獨做的小改善：操作對象本人在請假名單裡時（請假成功、「已請假，無需重複操作」，以及已請假的季租成員自己 `+N`），他的 People 頁會 GET 兩次，一次在鎖外的 `resolveTarget`（`target-resolver.ts:38`），一次在鎖內的 `buildEventStatusMessage`（`event-status-message.ts:30`）。不是 bug，姓名相同，只是鎖內多一次約 0.3 秒的 GET；請假成功時本人排在 `newAbsentees` 最後（`leave-handler.ts:133`），前面有人時還要多等一次 400ms sleep。如果要處理：可以讓 `buildEventStatusMessage` 多收一個「已知 pageId → 姓名」參數（傳 `resolved.personPageId` → `resolved.displayName`），已知的就跳過 GET，但輸出順序要維持 `absenteePageIds` 的順序。pageId 出現在請假名單就一定有 People 頁，所以這時 `displayName` 一定是 People 的 `Name`，不會拿到 LINE 名稱。若做了上面的鎖外組訊息，或 `findByPageIds` 那一項的快取備案，這個重複的影響會變小或消失。
 
 ---
 
@@ -176,18 +178,8 @@
 
 > 2026-09-28 評估出的 log 缺口已大多補上（Notion 錯誤 log、callId 配對、`/logs` 狀態判斷、info 分類摘要、mutex 摘要、報名／請假決策摘要、crash handler 等，細節見 `docs/logging.md`、`docs/registration.md`、ADR 0002／0005）。以下是還沒做的尾巴，都**不影響使用者**、不是急件。路徑除非另外寫明，都相對於 `src/`。
 
-- [ ] **USERS `groups` 殘留的測試群組 ID，讓 display-name 排程每週都顯示「完成（有降級）」。** 每週排程對殘留群組查 profile 會失敗，`services/line/profile-service.ts:32` 記 `Could not get user profile`（降級訊息）；該使用者所有群組都查不到時，再加 `schedulers/display-name-update.ts:55` 的 `Could not resolve profile for user in any known group` warn。Notion API 錯誤、LINE 送出失敗，以及非降級的 `logger.error`（例如 `display-name-update.ts:68`）仍會顯示「失敗」（`routes/logs.ts` `groupStatus()` 規則 1、2 先判），會被降級蓋掉的只有第 55 行的 warn。
-
-  這不是程式 bug，是 Notion 資料問題，只影響 `/logs` 呈現。如果要處理：
-  - 比較好的做法是到 Notion USERS 手動清掉殘留的群組 ID，不是降低 log 等級。
-  - **清掉不保證事件變回綠色**：使用者退出的群組查 profile 也會 404（`display-name-update.ts:7-9` 註解），只要那個群組排在清單前面就會再記一次；如果 bot 還在那個測試群組，使用者在裡面發言時 `trackUser`（`services/user-management.ts:129-131`）會把群組 ID 加回去。
-
 - [ ] **graceful shutdown 的 `process.exit` 前沒有 flush log。** `src/index.ts:82-83`（`Graceful shutdown timed out, forcing exit` 後 `process.exit(1)`）和 `:102`（正常關閉後 `process.exit(0)`）都直接結束。正式環境的檔案 stream 是非同步的 SonicBoom，前面還有排隊的行時，最後幾行可能沒寫進 `logs/`（crash handler 那邊實測過：不 flush 直接 exit、前面有排隊時最後一行 0/20 寫進檔案）。
 
   不是 bug，只是關機前最後幾行 log 可能遺失；docker 的 stdout 還有一份。如果要處理：在這兩處 exit 前呼叫 `utils/logger.ts` 的 `flushLogsSync()`（crash handler `utils/crash-handlers.ts` 已經這樣用）。
-
-- [ ] **`@Dobby next` 在「有活動、沒季資料」時回「找不到 YYYY-MM-DD 的活動」，誤導成行事曆沒建。** `commands/next-event.ts:19-21`；原因是 `services/notion/event-occupancy.ts` 的 `getEventOccupancy` 把「沒有活動」和「沒有季資料」都回 `null`。背景見 ADR 0008 最後一段。
-
-  現在管理員可以從 `/logs` 的 info 行 `Event occupancy unavailable: no event or season for date`（`{date, hasEvent, hasSeason}`）查到真正原因，但使用者收到的回覆還是一樣。如果要處理：要讓呼叫端分得出兩種情況（例如改 `getEventOccupancy` 的回傳形狀），注意它還有週報、報名、請假三個呼叫端，報名／請假事先確認過 season 不是 null，改形狀時要一起調整。
 
 ---
