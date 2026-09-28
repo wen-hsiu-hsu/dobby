@@ -14,6 +14,7 @@
 
 - [ ] 全形 `＋`/`－` 符號 —— 程式碼已支援（`command-parser.ts`／`registration-parser.ts` 的 `normalizeFullWidth()`），只需要實際傳 `@Dobby ＋1` 這種全形指令驗證一次即可，不需要改 code
 - [ ] 正式切換後第一次 `display-name-update`（2026-09-28 週一 04:00）—— 到 `/logs` 的排程分頁確認有跑完、更新筆數合理；USERS `groups` 裡殘留的測試群組 ID 造成的 404 是預期中的（見 `docs/overview.md`「從 n8n 遷移」），不是錯誤
+- [ ] 部署「報名／請假沿用 message-handler 的 USERS 快照＋Season 並行查」（2026-09-28，見 [ADR 0009](docs/adr/0009-actor-users-snapshot-non-null-only.md)）後，到 `/logs` 看既有使用者在群組的 `@Dobby +N`／`@Dobby 假`：時間軸應該只剩一次 USERS query（`message-handler` 那次），`resolveTarget` 的 People GET 和 Season query 起點應該幾乎相同。改之前的基準：成功寫入的 `+N`／`-N` 每次 7～12 個 Notion 呼叫、中位數 3.3 秒，預估降到 2.4～2.5 秒（原始分析見 git 歷史中被刪掉的 TODO 項目「報名／請假：同一個請求查兩次 USERS」）。群組新使用者的第一個指令、一對一私訊仍會查兩次 USERS，這是預期的。沒達到預估不是 bug，把實測數字記在下方即可。
 
 ---
 
@@ -24,6 +25,25 @@
   - **先把規則書第 11 節的待確認事項定案。** 那幾項是規則本身互相矛盾，或定義不足以直接實作，不是實作細節，照目前的文字寫不出唯一正確的行為。
   - **規則書第 9 節列的 Notion 資料庫不是完整的實作清單。** 那一節只列出管理者要填的設定，成就解鎖紀錄、哪些打球週已結算、發話統計這類系統自己要存的狀態都沒列。重新分析時要另外盤點。
   - **規則要對照 `CLAUDE.md` 的專案慣例檢查**，特別是「回覆一律用 `replyMessage`」、Notion rate limit（約 3 req/s），以及「讀取 → 計算 → 寫回用 `withMutex`」。規則書的「不推播」「一則訊息只回覆一次」和這些慣例一致，但實作時每則群組訊息都要判定成就，要注意不能每則都打 Notion。
+
+---
+
+## 已知問題（尚未處理）
+
+- [ ] **報名／請假在取鎖前的 Notion 例外不會回覆使用者。** `handleRegistration`／`handleLeave` 呼叫 `withFreshCalendarEvent` 之前，會先用 `Promise.all` 並行查 `resolveTarget` 和 `seasonRepo.findByName`（`src/commands/registration/registration-handler.ts:43-46`、`leave-handler.ts:43-46`）。這段沒有 try/catch；`with-fresh-calendar-event.ts:20-40` 的 try 只包住取鎖之後。任一查詢 throw，例外會經 `command-router.ts`、`message-handler.ts:49` 一路丟到 `src/handlers/event-router.ts:38-40`，那裡只 `logger.error`（`/logs` 顯示為失敗），使用者收不到任何回覆。
+
+  這是 bug，但目前還沒觀察到：
+  - `notion-fetch.ts` 只對 429 重試（最多 3 次，第 38、63 行）；5xx、網路錯誤、429 重試用完都會直接 throw（`assertOk`，第 30-36 行）。本機 `logs/`（2026-09-21～27）沒有任何 `Error handling event` 或 `Notion API error`。
+  - 從 n8n 遷移的第一版（commit `23c32a1`）就是這樣，當時的 try 也只包鎖內。
+  - 其他指令都自己 try/catch 並回「系統錯誤，請稍後再試」：`owe.ts:6-14`、`news.ts:59-84`、`participants.ts:8-22`、`payment.ts:7-16`、`next-event.ts:13-27`、`season-announcement.ts:56-150`、`introduce.ts:12-42`。`message-handler.ts:23-29` 的 `findByUserId` 也在 commit `5ef200d` 補過同一種缺口。只有報名／請假漏掉。
+  - 2026-09-28 把兩個查詢改成並行後，多了一種觸發情況：對象查無（`resolved` 為 null）而 Season 查詢 throw。舊版依序執行，會先回「找不到您的帳號」；現在 `Promise.all` 整個 reject，不回覆。其他組合的行為跟舊版相同。
+  - 影響：使用者以為 bot 沒收到，通常會再打一次。這段在任何寫入之前，所以重打不會重複報名，只是體驗差。
+
+  如果要處理：
+  - 可以把取鎖前的查詢（`Promise.all` 那段）包進 try/catch，catch 時記 `logger.error`、回「系統錯誤，請稍後再試」。取鎖前還沒寫入任何東西，回「系統錯誤」、讓使用者重試是安全的。
+  - **try 範圍不要包住 `withFreshCalendarEvent`。** 它自己會處理例外並回覆。外層再 catch 回「系統錯誤」的話，萬一日後它把 `MutexTimeoutError` 往外丟，就會違反 [ADR 0002](docs/adr/0002-mutex-timeout-does-not-cancel-task.md)：逾時時背景寫入可能仍會成功，`+N`／`-N` 不是冪等的，不能回「系統錯誤」引導重試。
+  - 另一種做法是在 `message-handler.ts:49` 對 `routeCommand` 統一 catch，以後新增的指令也不會漏。但同樣不能讓 `MutexTimeoutError` 落到這裡被回成「系統錯誤」；已經回覆過的 handler 若之後才 throw，再回一次會因 replyToken 已用過而被 LINE 拒絕（無害，但 `/logs` 會多一筆 `Reply failed`）。
+  - 測試不能用 `createTestBot`（fixture 不會 throw），要手動 mock repository 讓它 reject，寫法參考 `src/commands/registration/__tests__/registration-handler.test.ts` 開頭。
 
 ---
 
@@ -58,7 +78,7 @@
 > - 沒有任何 429，也沒有任何 mutex 逾時。
 > - log 幾乎都是測試流量：報名只有 2 個 userId，請假人數只有 0～2 人。正式搶報的行為還沒被觀察到。
 >
-> 慢的原因是呼叫模式（逐筆查、人為延遲、重複查、能平行卻依序），不是 Notion 本身或 rate limit。以下都**不是 bug**：結果正確，只是慢，不是急件，依效益排序。做完任何一項後，都要在 `/logs` 時間軸比對同類指令前後的 Notion 呼叫數與總耗時。
+> 慢的原因是呼叫模式（逐筆查、人為延遲），不是 Notion 本身或 rate limit。以下都**不是 bug**：結果正確，只是慢，不是急件，依效益排序。做完任何一項後，都要在 `/logs` 時間軸比對同類指令前後的 Notion 呼叫數與總耗時。
 
 - [ ] **`findByPageIds` 逐筆 GET，每筆之間 sleep 400ms，是 `participants`／`news` 慢的主因。** 兩個 repository 都有這個函式：
   - `src/services/notion/people-repository.ts:17-27`（sleep 在第 21 行）
@@ -71,8 +91,8 @@
   - `news.ts:75-76`：實測 2 次，都是 29 次呼叫（11 次姓名 GET＋13 次活動 GET＋5 次其他），耗時 11.3 和 11.7 秒。兩組 GET 各自拖了 7～9.5 秒，其中 sleep 約佔各組的 55～60%，約佔整個指令的 40%。兩組用 `Promise.all`（`news.ts:73-77`）同時跑，平均合計約 2.5～3 req/s，任 1 秒窗口瞬間最多 4 個 GET，靠 Notion 容許的短暫突發撐住，沒有出現 429。
   - `season-announcement.ts:90-91`：管理員專用（產生新一季公告草稿），頻率很低，優先度比 news／participants 更低。
   - `weekly-status-message.ts:22`
-  - `registration/event-status-message.ts:30`：報名／請假的回覆訊息查請假人姓名，在鎖內執行，見下面第三項。只有請假人數 ≥2 時才會觸發 sleep。
-  - `registration/target-resolver.ts:19,28`：每次只傳 1 筆 ID，sleep 永遠不會觸發，**不受這一項影響**。
+  - `registration/event-status-message.ts:30`：報名／請假的回覆訊息查請假人姓名，在鎖內執行，見下面「回覆訊息在鎖內組」那一項。只有請假人數 ≥2 時才會觸發 sleep。
+  - `registration/target-resolver.ts:31,40`：每次只傳 1 筆 ID，sleep 永遠不會觸發，**不受這一項影響**。
 
   **只拿掉 sleep 或改有限並行不能解決問題。** 現在平均已經頂在 3 req/s 上限，拿掉 sleep 就會超出，變成靠 Notion 容忍短時間超量加上 429 重試兜底，違反 `CLAUDE.md` 的節流慣例。news、season-announcement 還會有 2～3 組同時跑。真正能加速的只有減少呼叫次數。Notion query 也沒辦法依 page ID 篩選（SDK 的 `PropertyFilter` 只有 relation 的 `contains`），所以不能把 N 次 GET 合成一次「ID in [...]」查詢。
 
@@ -84,7 +104,7 @@
     - schema 顯示 `報名人`（季租紀錄）↔`報名季度`（People）、`打球日`（季租紀錄）↔`季度`（行事曆）各自是兩個 DB 之間唯一的 `dual_property`，很可能就是配對的兩端。但 `docs/notion/schemas/` 沒記錄配對的屬性名，實作前要先用 Notion API 讀 database schema 的 `synced_property_name` 確認。
     - season-announcement：打球日只查本季（第 90 行），People 要查本季＋上一季的成員（第 91 行，`allMemberIds`），要用 `or` 篩兩個季度，或查兩次。另外有更便宜的做法：這裡的 `people` 只拿來當 `buildMentionResolver` 的保底姓名，第 22 行註解寫 USERS 找不到的情況「理論上不會發生」，所以也可以改成用到時才查，或直接拿掉保底。
     - 成員超過 100 位要處理分頁，寫法參考 `users-repository.ts:39-56`。
-  - **備案：People DB 全表建 `pageId → name` 的 in-memory Map（TTL 約 10 分鐘）。** 對整季名單的效益跟首選差不多，但多了下面的快取陷阱。它的範圍比首選大：`請假人` 是單向 relation，沒有反向欄位可篩，只有快取能加速鎖內的請假人姓名查詢（`event-status-message.ts:30`），等於順便處理第三項。只有在想一起處理第三項時才值得考慮。新 LINE 使用者自動建立的 People 頁面（見 `docs/notion/databases.md` 第 49 行）不在快取裡，要走 miss 路徑逐筆 GET。
+  - **備案：People DB 全表建 `pageId → name` 的 in-memory Map（TTL 約 10 分鐘）。** 對整季名單的效益跟首選差不多，但多了下面的快取陷阱。它的範圍比首選大：`請假人` 是單向 relation，沒有反向欄位可篩，只有快取能加速鎖內的請假人姓名查詢（`event-status-message.ts:30`），等於順便處理下面「回覆訊息在鎖內組」那一項。只有在想一起處理那一項時才值得考慮。新 LINE 使用者自動建立的 People 頁面（見 `docs/notion/databases.md` 第 49 行）不在快取裡，要走 miss 路徑逐筆 GET。
 
   已知陷阱：
   - **query 回來的順序跟 relation 順序不同。** participants 的編號、news 的名單順序都依賴 `season.members` 的順序，要照它重排。日期那邊 `groupDatesByMonth` 本來就會排序，不受影響。
@@ -93,39 +113,11 @@
   - **若走快取備案，快取是 module 層級狀態，測試之間會殘留。** 要提供 reset 函式，在測試檔的 `beforeEach` 呼叫。**不要**在 `src/test-utils/setup.ts` 用靜態 import 引入：那支檔案只負責在任何 module 載入前設定 env var，靜態 import 會被 hoist 到 env 設定之前，讓 `env.ts` 驗證失敗，也可能讓測試檔對 `notion-fetch.js` 的 `vi.mock` 失效。
   - **測試 fixture：** `create-test-bot.ts:74-86` 的 `routePost` 只依 DB ID 回 fixture、不看 filter，改用 DB query 後現有 fixture 大多可以直接用。另外 `routeGet` 的 `/pages/:id`（第 102-109 行）一律從 people fixture 找，所以現在測試裡 calendar 的 `findByPageIds` 拿到的其實是 people 頁面。改成 calendar query 後反而更正確，但既有斷言可能要跟著調整。
 
-- [ ] **報名／請假：同一個請求查兩次 USERS，互不相依的查詢依序執行。** 實測成功寫入的 `+N`／`-N` 共 26 次（另有 7 次失敗或 no-op 未計），每次 7～12 個 Notion 呼叫，中位數 3.3 秒（2.4～7.1 秒）。10、12 個呼叫的是新使用者第一次 `+1`，會多建 USERS／People 頁面。請假／銷假每次 7～9 個呼叫，中位數 3.1 秒（只有 4 筆樣本）。除了 `trackUser` 的「累加使用者發言次數」PATCH（fire-and-forget，和指令路徑並行），其他呼叫都依序執行。
-
-  典型的既有使用者 `-2`（log reqId `aa2f09`，總耗時 3.1 秒，時間相對於事件開始）：
-  ```
-  USERS      +8    → +548   message-handler 的 findByUserId
-  USERS      +552  → +1037  resolveTarget（重複查同一人）
-  incMsg     +556  → +1040  trackUser fire-and-forget，和上一列並行
-  PeopleGET  +1056 → +1323  resolveTarget 查自己的姓名
-  Season     +1325 → +1689  可以和 resolveTarget 並行
-  Cal        +1692 → +2081  鎖內
-  updGuests  +2090 → +2607  鎖內
-  PeopleGET  +2613 → +2905  請假人姓名（鎖內，見第三項）
-  ```
-
-  - **重複查 USERS。** `handlers/message-handler.ts:24` 已經 `findByUserId` 一次，`registration/target-resolver.ts:16` 自己報名時又查一次（替別人報名走第 25 行，查的是別人，不算重複）。請假也走 `resolveTarget`（`leave-handler.ts:36`）。
-  - **能平行卻依序執行。** `registration-handler.ts:36` 的 `resolveTarget` 和第 46 行的 `seasonRepo.findByName` 互不相依：季度名稱只由日期算出，`resolved` 到第 52 行才用到。`leave-handler.ts:36,47` 也一樣（第 54 行才用到 `resolved`）。
-  - 另有一個小重複：請假成功時，自己的 People 頁會 GET 兩次，一次在 `resolveTarget`，一次在 `buildEventStatusMessage` 查請假人姓名。這個不在本項範圍，改請假人姓名的查詢方式時才會一起解掉。
-
-  如果要處理：
-  - **傳 `notionUser`：** `routeCommand`（`message-handler.ts:49`）加一個參數；router 的 3 個呼叫點（`command-router.ts:52,56,59`）、`handleRegistration`、`handleLeave`、`resolveTarget` 各加一個 optional 參數 `actorUser?: NotionUser | null`。只有非 null 時才採用，null 或 undefined 就重查。既有 handler 測試直接用 `(event, x, false)` 呼叫的地方不用改，但 `src/commands/__tests__/command-router.test.ts:141,149,157,178,185,192` 用 `toHaveBeenCalledWith(event, x, isAdmin)` 斷言，router 多傳一個參數（即使是 undefined）就會失敗，要跟著改。
-  - **並行：** 把 `resolveTarget` 和 `findByName` 包進 `Promise.all`。要放在 `parseError`／非管理員檢查之後，並保留「`resolved` 為 null 就先回覆錯誤」的順序，錯誤訊息才會跟現在一樣。失敗路徑會多白查一次 Season（約 0.4 秒），不影響正確性。
-
-  預估效益（用 log 的實際 durationMs 逐筆重算 20 筆既有使用者的 `+N`）：中位數從約 3.3 秒降到約 2.4～2.5 秒，大約省 0.7 秒。其中 USERS 去重約省 0.45 秒；並行只有在使用者有綁 People 時才有效，約省 0.26 秒。這些呼叫都在鎖外，不會降低 mutex 逾時（含排隊時間，見 [ADR 0002](docs/adr/0002-mutex-timeout-does-not-cancel-task.md)）的機率。
-
-  已知陷阱：
-  - **傳進來的 `null` 不能當成「使用者不存在」。** 在群組／多人聊天裡，`notionUser` 為 null 時，`message-handler.ts:36-39` 會 await `trackUser` 把 USERS 頁面建好，所以傳下去的 null 在這條路徑上一定是過時的。這跟 `services/user-management.ts:83-85` 註解講的「null snapshot 不能信」同理。1 對 1 聊天不做 tracking，null 才是真的不存在，重查也只多一次呼叫。反過來，非 null 的 snapshot 可以直接用：既有使用者的 `trackUser` 只會改 groups／multiChats／message_counts（`user-management.ts` 的 existing 分支），不會改 `resolveTarget` 需要的 `registeredPersonPageId`。
-  - **不要用 AsyncLocalStorage（`src/utils/request-context.ts`）對 `findByUserId` 做請求範圍快取。** `user-management.ts:89` 在 mutex 內刻意重查，要拿最新資料。`trackUser` 又是在同一個 context 裡 fire-and-forget 執行，會命中快取、拿到舊的 snapshot，重新引發 `user-management.ts:75-82` 註解在防的覆寫 groups／message_counts 問題。
-
 - [ ] **報名／請假的回覆訊息在鎖內組，拉長鎖持有時間。** `buildEventStatusMessage` 在請假人數 >0 時會呼叫 `peopleRepo.findByPageIds` 查請假人姓名（`event-status-message.ts:29-31`）。它在 `withFreshCalendarEvent` 的 mutation 裡被呼叫，後面的 `replyMessage` 也在 mutation 裡，所以鎖要等 LINE API 回應後才釋放。共有 5 處：
-  - `registration-handler.ts:70-78`（名額不足）、`110-118`（成功）
-  - `leave-handler.ts:71-79`（已請假，no-op）、`85-93`（未請假，no-op）、`120-128`（成功）
+  - `registration-handler.ts:74-82`（名額不足）、`114-122`（成功）
+  - `leave-handler.ts:75-83`（已請假，no-op）、`89-97`（未請假，no-op）、`124-132`（成功）
 
-  實測鎖持有時間：中位數約 1.43 秒（0.85～4.44 秒，n=34）。n=34 是所有進到鎖內的報名／請假請求，包含名額不足和 no-op 分支，所以比第二項的「成功寫入 26 次＋請假 4 次」多。log 沒有 acquire／release 事件，這是用鎖內第一個 calendar query 的開始時間，算到 `LINE reply sent` 推出來的。4.4 秒那筆是 calendar PATCH 長尾，跟組訊息無關。鎖內姓名查詢中位數約 0.28 秒，LINE reply 約 0.2 秒。
+  實測鎖持有時間：中位數約 1.43 秒（0.85～4.44 秒，n=34）。n=34 是所有進到鎖內的報名／請假請求，包含名額不足和 no-op 分支，所以比成功寫入的次數（`+N`／`-N` 26 次＋請假／銷假 4 次）多。log 沒有 acquire／release 事件，這是用鎖內第一個 calendar query 的開始時間，算到 `LINE reply sent` 推出來的。4.4 秒那筆是 calendar PATCH 長尾，跟組訊息無關。鎖內姓名查詢中位數約 0.28 秒，LINE reply 約 0.2 秒。
 
   鎖內多出的時間會隨請假人數增加：每位請假人約 0.3 秒 GET，加上筆與筆之間 400ms sleep。1 人約 0.3 秒，2～3 人約 1～1.7 秒，5～6 人約 3.1～3.8 秒。log 是測試流量，請假人數只有 0～2 人。但從 calendar payload 看，7/04～9/19 各週的最終請假人數是 0～6 人（中位數約 2.5），週末前的報名可能遇到較高的數字。
 
@@ -133,6 +125,7 @@
 
   如果要處理：可以讓 mutation 回傳組訊息需要的資料，改到鎖外組訊息並 `replyMessage`。要改 `with-fresh-calendar-event.ts:18` 的 mutation 簽名，它現在是 `(fresh: T) => Promise<void>`。
   - 移到鎖外不會造成資料不一致：訊息內容仍然用 mutation 在鎖內算出的快照（`updatedGuests`、`newAbsentees`、`totalSlots`），跟現在一樣。差別只有姓名查詢晚一點（姓名不會變），以及 B 的回覆可能比 A 先到，都無害。
-  - 如果做了第一項的快取備案，請假人姓名會走快取，鎖內只剩 LINE reply 約 0.2 秒，這一項就不值得做了。第一項的首選做法（反向 relation 查詢）不碰鎖內的查詢，做完後這一項的效益不變。
+  - 如果做了上面 `findByPageIds` 那一項的快取備案，請假人姓名會走快取，鎖內只剩 LINE reply 約 0.2 秒，這一項就不值得做了。那一項的首選做法（反向 relation 查詢）不碰鎖內的查詢，做完後這一項的效益不變。
+  - 另有一個可以單獨做的小改善：操作對象本人在請假名單裡時（請假成功、「已請假，無需重複操作」，以及已請假的季租成員自己 `+N`），他的 People 頁會 GET 兩次，一次在鎖外的 `resolveTarget`（`target-resolver.ts:31`），一次在鎖內的 `buildEventStatusMessage`（`event-status-message.ts:30`）。不是 bug，姓名相同，只是鎖內多一次約 0.3 秒的 GET；請假成功時本人排在 `newAbsentees` 最後（`leave-handler.ts:103`），前面有人時還要多等一次 400ms sleep。如果要處理：可以讓 `buildEventStatusMessage` 多收一個「已知 pageId → 姓名」參數（傳 `resolved.personPageId` → `resolved.displayName`），已知的就跳過 GET，但輸出順序要維持 `absenteePageIds` 的順序。pageId 出現在請假名單就一定有 People 頁，所以這時 `displayName` 一定是 People 的 `Name`，不會拿到 LINE 名稱。若做了上面的鎖外組訊息，或 `findByPageIds` 那一項的快取備案，這個重複的影響會變小或消失。
 
 ---
