@@ -103,7 +103,7 @@ Mutex 以活動日期字串為 key（不是 calendar 頁面 ID，這樣不用多
 | `waitMs` | 從呼叫 `withMutex` 到 `fn()` 開始，也就是排隊等前面任務的時間 |
 | `heldMs` | `fn()` 從開始到真正結束的時間，就是實際持有鎖的時間；呼叫端逾時後仍會量到背景跑完為止 |
 | `callerTimedOut` | 呼叫端是否已經因 10 秒逾時放棄等待 |
-| `fnFailed` | `fn()` 是否丟出錯誤。呼叫端逾時後，背景任務失敗只有這個欄位看得到，錯誤本身不會再被任何人記下 |
+| `fnFailed` | `fn()` 是否丟出錯誤。呼叫端逾時後，背景任務失敗只有這個欄位看得到，錯誤本身不會再被任何人記下。注意報名／請假「找不到活動」也會是 `true`：`withFreshCalendarEvent` 是在鎖內丟 `EventNotFoundError` 再由 wrapper 接住，這是正常流程，不是失敗（看同一 reqId 的 `… outcome` 是不是 `event-not-found`） |
 
 看法：`queuedAhead > 0` 表示有人同時操作同一場活動；`waitMs` 大而 `heldMs` 正常是被前面的人拖住，`heldMs` 本身就大則是鎖內的 Notion 呼叫或 LINE 回覆慢（對照同一 reqId 時間軸上的各步 `durationMs`）。逾時時，呼叫端那一行 warn 也帶 `queuedAhead`，摘要則要等背景任務跑完才寫出，會排在該事件 `Event processed` 之後。
 

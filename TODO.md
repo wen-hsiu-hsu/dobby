@@ -136,7 +136,7 @@
 
 > 2026-09-28 評估出的 log 缺口已大多補上（Notion 錯誤 log、callId 配對、`/logs` 狀態判斷、info 分類摘要、mutex 摘要、報名／請假決策摘要、crash handler 等，細節見 `docs/logging.md`、`docs/registration.md`、ADR 0002／0005）。以下是還沒做的尾巴，都**不影響使用者**、不是急件。路徑除非另外寫明，都相對於 `src/`。
 
-- [ ] **USERS `groups` 殘留的測試群組 ID，讓 display-name 排程每週都顯示「完成（有降級）」。** 每週排程對殘留群組查 profile 會失敗，`services/line/profile-service.ts:32` 記 `Could not get user profile`（降級訊息）；該使用者所有群組都查不到時，再加 `schedulers/display-name-update.ts:55` 的 `Could not resolve profile for user in any known group` warn。Notion API 錯誤和 LINE 送出失敗仍會顯示「失敗」，會被降級蓋掉的只有非 Notion 的 `logger.error`（例如 `display-name-update.ts:68`）和第 55 行的 warn。
+- [ ] **USERS `groups` 殘留的測試群組 ID，讓 display-name 排程每週都顯示「完成（有降級）」。** 每週排程對殘留群組查 profile 會失敗，`services/line/profile-service.ts:32` 記 `Could not get user profile`（降級訊息）；該使用者所有群組都查不到時，再加 `schedulers/display-name-update.ts:55` 的 `Could not resolve profile for user in any known group` warn。Notion API 錯誤、LINE 送出失敗，以及非降級的 `logger.error`（例如 `display-name-update.ts:68`）仍會顯示「失敗」（`routes/logs.ts` `groupStatus()` 規則 1、2 先判），會被降級蓋掉的只有第 55 行的 warn。
 
   這不是程式 bug，是 Notion 資料問題，只影響 `/logs` 呈現。如果要處理：
   - 比較好的做法是到 Notion USERS 手動清掉殘留的群組 ID，不是降低 log 等級。
