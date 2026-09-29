@@ -45,6 +45,10 @@ Notion 呼叫原本在 `log-grouping.ts` 用 method+path 配對，同一個 key 
 
 `callId` 是隨機值、不含使用者資料，留在 info 行沒有 PII 問題。
 
+## 補充（2026-09-28）：同一個 repository 函式有多種用途時，purpose 要由參數決定
+
+`withPurpose` 是內層蓋掉外層（`src/utils/request-context.ts`）。所以同一個 repository 函式被不同理由呼叫時，呼叫端在外面再包一層 `withPurpose` 沒有用，會被函式自己那層覆蓋。`users-repository.ts` 的 `findByUserId` 就是例子：它同時用來查發話者、被 @ 的對象、`trackUser` 鎖內重查，原本時間軸一律顯示「查詢發話者的 bot 使用者帳號」。現在改成收一個固定列舉 `reason`（`'actor' | 'mention-target' | 'track-user'`），在函式內挑對應的 purpose 文字；預設值是 `'actor'`，新增呼叫端時要記得傳對的 reason，否則會被標成「發話者」。以後其他 repository 函式遇到同樣情況，照這個做法加參數（或拆成不同函式），不要在呼叫端包 `withPurpose`。
+
 ## 補充（2026-09-29）：`/logs` 時間軸的回覆、終點與排序
 
 `sendId` 讓每次回覆各自配對成一列之後，`buildFlowGroups()`（`routes/log-grouping.ts`）再把一個 reqId 的列分成起點／步驟／雜項／終點。以下幾點看起來可以「簡化」，但簡化回去會壞：

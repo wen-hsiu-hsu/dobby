@@ -36,7 +36,7 @@
 
 | 種類 | 判斷依據 | 分頁 |
 |------|----------|------|
-| 指令 | 有 `Processing event`（`type: 'message'`），且 info 摘要 `Message classified` 的 `isCommand` 是 `true`（即使 `parsed: false` 代表解析失敗也一樣算指令）。舊 log 檔沒有這行時，改看底下有沒有 `Routing command` 或 `Message looks like command but failed to parse`（見下方說明） | 訊息 |
+| 指令 | 有 `Processing event`（`type: 'message'`），且 info 摘要 `Message classified` 的 `isCommand` 是 `true`（即使 `parsed: false` 代表解析失敗也一樣算指令；不過目前 `parseCommand()` 對 `@Dobby` 開頭的文字至少回 `unknown`，`parsed: false` 實際上不會出現，打錯的指令會是 `commandType: 'unknown'`）。舊 log 檔沒有這行時，改看底下有沒有 `Routing command` 或 `Message looks like command but failed to parse`（見下方說明） | 訊息 |
 | 對話 | 有 `Processing event`（`type: 'message'`），但不是指令——通常是自動回覆（`services/auto-reply.ts`，靜態 JSON）。`message-handler.ts` 直接略過的訊息（`Message ignored: not text`、`Message ignored: no userId`）也算對話 | 訊息 |
 | 加入 | `Processing event` 的 `type` 是 `join` 或 `memberJoined` | 訊息 |
 | 排程 | 沒有 `Processing event`，但有 `reqId`——`weekly-push.ts`/`display-name-update.ts` 各自用 `runWithContext` 包住整次執行；R2 同步的 `uploadAllLogs()`（`log-upload.ts`，含 graceful shutdown 那次）也一樣（見下方「排程事件的 reqId」） | 排程 |
@@ -66,7 +66,7 @@
 
 1. **失敗**：Notion API 呼叫失敗，或 LINE 回覆/推播失敗（一個事件回覆兩次時，任何一次失敗都算，不只看最後一次）——不論那筆失敗 log 實際記錄的 level 是 warn 還是 error，一律算失敗。Notion 這邊認的是 `notion-fetch.ts` 記的 `Notion API error`：HTTP 錯誤、錯誤回應不是 JSON（例如 proxy 回 HTML 的 502/503，`err` 記截斷後的原文）、網路錯誤（DNS 失敗、連線中斷、逾時）、成功回應的 body 讀不出來，都會記這一行。網路錯誤沒有 HTTP status，時間軸那一步只顯示「Notion API 呼叫失敗」，不帶 HTTP 碼。
 2. **失敗**：事件底下有 error/fatal 等級的 log 行，**但先逐行濾掉規則 4 表格裡的降級訊息**，再看剩下的行。例如指令處理中途丟出、沒被 handler 自己接住的例外，`handlers/event-router.ts` 會記一行 `Error handling event`，而且因為沒有回覆，要排在規則 3 前面，不然會跟「指令打錯字」一樣只顯示「警告」。濾掉降級訊息是因為 `buildMemberJoinedWelcome error, using fallback` 是 error 等級、但屬於降級（見規則 4）；濾的單位是「行」而不是「事件」——同時有 `User tracking failed (non-blocking)` 跟 `Error handling event` 的事件，後者仍然讓事件判成失敗。
-3. **警告**：看起來像指令（見上方「事件種類」），但整個流程從頭到尾沒有送出任何 LINE 回覆——通常代表指令解析失敗（例如日期格式不符），使用者完全沒收到反應。這種「安靜的失敗」跟真正的錯誤分開標示，方便定期檢查指令說明是不是不夠清楚。這個規則只套用在指令類事件，不套用在對話（自動回覆本來就常常沒有關鍵字命中、不回覆是正常行為，不該被標成警告）。
+3. **警告**：看起來像指令（見上方「事件種類」），但整個流程從頭到尾沒有送出任何 LINE 回覆——通常代表打了 bot 不認得的指令（`commandType: 'unknown'`，例如 `@Dobby hello`，`command-router.ts` 直接忽略、不回覆），使用者完全沒收到反應。這種「安靜的失敗」跟真正的錯誤分開標示，方便定期檢查指令說明是不是不夠清楚。這個規則只套用在指令類事件，不套用在對話（自動回覆本來就常常沒有關鍵字命中、不回覆是正常行為，不該被標成警告）。
 4. **完成（有降級）**：流程仍然正常送出了回覆，但過程中出現已知的、不影響最終結果的降級訊息——目前認得六種：
 
    | 訊息 | 什麼情況 |

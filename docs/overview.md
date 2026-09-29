@@ -81,7 +81,7 @@ docker compose down
 - **userId 跨 bot 相同**：正式與測試 bot 在同一個 LINE Provider 底下，LINE 的 userId 是依 Provider 發放的，所以 USERS DB 裡 n8n 時期的資料（包括 `is_admin`）直接沿用，沒有轉換過。
 - **`@Dobby` 指令前綴**：`command-parser.ts` 寫死比對 `@Dobby`，正式與測試 bot 的顯示名稱都叫 Dobby，本機接測試 channel 開發時不用改。
 - **LINE Official Account Manager 的回應設定**要維持「Webhook 開啟、自動回應訊息關閉」，否則會和 `auto-reply.json` 重複回覆。
-- **Notion 裡留有測試期間的資料**：測試期間 dobby 接測試 channel、寫的卻是正式 Notion，所以測試群組成員在 USERS 有 row、在人員清單有自動建立的頁面（見 `docs/notion/databases.md`），USERS 的 `groups` 欄位也混著測試群組的 ID。後者只會讓週一的 `display-name-update` 對這些群組多打幾次 404 再改試下一個群組，不影響結果（見 `docs/schedulers.md`「顯示名稱批次更新」）。本機開發至今仍會持續產生這類資料，見 `docs/development.md`「本地開發」。
+- **Notion 裡留有測試期間的資料**：測試期間 dobby 接測試 channel、寫的卻是正式 Notion，所以測試群組成員在 USERS 有 row、在人員清單有自動建立的頁面（見 `docs/notion/databases.md`），USERS 的 `groups` 欄位也混著測試群組的 ID（2026-09-29 已手動清掉跟球隊無關的群組 ID；本機開發仍會用測試群組，之後還可能再出現）。後者只會讓週一的 `display-name-update` 對這些群組多打幾次 404 再改試下一個群組，不影響結果（見 `docs/schedulers.md`「顯示名稱批次更新」）。本機開發至今仍會持續產生這類資料，見 `docs/development.md`「本地開發」。
 
 **回滾**：n8n 的 workflow 只停用沒刪除，真的要回滾時，把 LINE Developers Console 上正式 channel 的 Webhook URL 改回 n8n、重新啟用 n8n 的**所有** workflow（包括排程類的），再用 `docker compose stop` 停掉 Pi 上的服務——只改 Webhook URL 關不掉兩邊各自的 cron，沒停掉的話週日會推兩次週報，兩邊也會同時寫 Notion。dobby 期間寫進 USERS 的欄位格式跟 n8n 相同，但 dobby 會自動連結人員清單的 `Registered name`，n8n 是否把「`Registered name` 有值」當成季租球員沒有確認過。
 
