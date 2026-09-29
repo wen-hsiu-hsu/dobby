@@ -5,6 +5,10 @@ services:
   app:
     build: .
     restart: unless-stopped
+    # docker stop／compose recreate 送 SIGTERM 後，預設只等 10 秒就 SIGKILL，剛好等於
+    # src/utils/graceful-shutdown.ts 的 10 秒強制結束，兩邊在搶毫秒；輸了的話強制
+    # 結束那行 log 和 flush 都不會發生。多留 5 秒讓程式自己的逾時一定先到。
+    stop_grace_period: 15s
     ports:
       - "${PORT:-3000}:${PORT:-3000}"
     env_file:
