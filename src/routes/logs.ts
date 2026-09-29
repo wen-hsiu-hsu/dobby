@@ -108,6 +108,7 @@ const LIFECYCLE_MESSAGES = new Set([
   'Received shutdown signal, closing server',
   'Graceful shutdown timed out, forcing exit',
   'Server closed, exiting',
+  'Shutdown already in progress, ignoring signal',
   'Weekly push scheduler started',
   'Display name update scheduler started',
 ]);

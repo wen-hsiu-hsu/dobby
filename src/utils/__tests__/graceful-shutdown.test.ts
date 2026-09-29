@@ -173,3 +173,25 @@ describe('createGracefulShutdown — force exit after 10 seconds', () => {
     }
   });
 });
+
+describe('createGracefulShutdown — repeated signals', () => {
+  // SIGTERM 之後又收到 SIGINT（例如手動 Ctrl+C）時，第二次不能再跑一遍流程：
+  // 第二次 server.close() 會因為 server 已經不在 listen 而立刻帶錯誤回呼，
+  // 不等第一次的 close 完成就 exit(0)，把還在處理中的請求切斷。
+  it('ignores a second signal while shutdown is in progress', async () => {
+    const server = fakeServer();
+    const shutdown = createGracefulShutdown(server, () => Promise.resolve());
+
+    shutdown('SIGTERM');
+    shutdown('SIGINT');
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(server.close).toHaveBeenCalledTimes(1);
+    expect(logger.info).toHaveBeenCalledWith({ signal: 'SIGINT' }, 'Shutdown already in progress, ignoring signal');
+    expect(exitSpy).not.toHaveBeenCalled();
+
+    server.closeCallback?.();
+    expect(exitSpy).toHaveBeenCalledTimes(1);
+    expect(exitSpy).toHaveBeenCalledWith(0);
+  });
+});

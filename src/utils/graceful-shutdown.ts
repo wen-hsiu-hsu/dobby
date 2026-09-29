@@ -36,7 +36,16 @@ function logFlushAndExit(log: () => void, code: number): void {
  * 從 `index.ts` 抽出來是為了能測試：`index.ts` 在 `NODE_ENV=test` 不會跑啟動流程。
  */
 export function createGracefulShutdown(server: ClosableServer, syncLogs: () => Promise<void>): (signal: string) => void {
+  let shuttingDown = false;
   return (signal) => {
+    // 只跑一次：SIGTERM 之後又收到 SIGINT（例如手動 Ctrl+C）時，第二次的
+    // server.close() 會因為 server 已經不在 listen 而立刻帶錯誤回呼，不等第一次
+    // 的 close 完成就 exit(0)，切斷還在處理的請求。第一次的 10 秒強制結束仍然有效。
+    if (shuttingDown) {
+      logger.info({ signal }, 'Shutdown already in progress, ignoring signal');
+      return;
+    }
+    shuttingDown = true;
     logger.info({ signal }, 'Received shutdown signal, closing server');
 
     const forceExitTimer = setTimeout(() => {
