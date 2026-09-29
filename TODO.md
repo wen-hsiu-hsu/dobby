@@ -128,6 +128,23 @@
 
 ---
 
+## 程式碼整理與小改善（非 bug，低優先）
+
+- [ ] **`message-handler.ts` 的「指令解析失敗」分支永遠走不到。** `src/handlers/message-handler.ts:65-68` 的 `if (!command)`（記 debug `Message looks like command but failed to parse` 後 return）不會執行：`isCommand()`（`src/commands/command-parser.ts:98-100`）就是 `text.startsWith('@Dobby')`，而 `parseCommand()` 只在「不是 `@Dobby` 開頭」時回 `null`（第 12 行），其餘至少回 `{ type: CommandType.UNKNOWN }`（第 95 行）。所以 `Message classified` 的 `parsed` 永遠是 `true`，打錯的指令會以 `commandType: 'unknown'` 進 `routeCommand`、被靜默忽略，`/logs` 顯示成「指令／警告」、「來自」`unknown`（2026-09-28 本機 reqId `d8dad6` 的 `@Dobby hello` 實測）。
+
+  不是 bug，行為正確，只是死碼加上幾處為它寫的顯示邏輯。不處理也沒有風險；風險只在之後有人改 `parseCommand()` 讓它對某些 `@Dobby` 開頭的文字回 `null` 時，這些分支才會突然「活過來」，所以處理時要決定是刪掉還是保留當防禦。
+
+  如果要處理：
+  - 相關的地方要一起看：`message-handler.ts:37` 的 `parsed: command !== null`、`src/routes/logs.ts:478-481`（舊 log fallback 認 `Message looks like command but failed to parse`）、`logs.ts:635`（`parsed === false` 時「來自」顯示「（指令解析失敗）」）、`docs/logging.md` 第 39、45、49、60 行的說明，以及 `src/routes/__tests__/logs.test.ts` 裡用到 `failed to parse`／`parsed: false` 的測試。
+  - **`logs.ts:478-481` 的舊 log fallback 不能刪**：`/logs` 會讀本機保留 7 天、R2 備份的舊 log 檔，裡面可能有這行。
+  - 如果改成保留分支，可以考慮讓 `parseCommand()` 的型別不回 `null`（呼叫端先確認 `isCommand()`），讓 TypeScript 直接擋掉這個分支；如果刪掉，`Message classified` 的 `parsed` 欄位要一起決定去留（`logs.ts:635` 在讀它）。
+
+- [ ] **`/logs`「起點」那一步的摘要沒顯示 `lagMs`。** `src/handlers/event-router.ts` 的 `Processing event` 從 2026-09-28 起帶 `lagMs`（事件發生到 Pi 開始處理的毫秒數，定義與判讀限制見 `docs/logging.md`「起點」那段），但 `src/routes/logs.ts:866-903` 的 `startStepTimeline()` 組 note 時只放訊息內容、事件類型、來源、`webhookEventId` 和 `isRedelivery`，沒有 `lagMs`，要點開「起點」看原始 JSON 才看得到；`?format=text` 也沒有。`docs/logging.md` 已經寫明「目前沒有顯示在起點的摘要文字裡」。
+
+  不是 bug，只是不方便。如果要處理：在 note 加一段（例如「延遲 246ms」），舊 log 沒有這個欄位時不要顯示。**負值是正常的**（Pi／容器時鐘偏差，本機實測看過 -302），不要當成錯誤標紅；重送事件（`isRedelivery`）的值本來就很大，搭配既有的黃色重送提示看。改完要同步 `docs/logging.md` 那句「目前沒有顯示」，`logs.test.ts` 有起點 note 的測試可以參考。
+
+---
+
 ## 已評估、不採納
 
 - **表格驅動指令解析與路由**（`/improve-codebase-architecture` 報告候選 3，Speculative）— 評估後不採納。理由：(1) 各 command handler 簽名不一致（7 種不同形狀，從 `(replyToken, botId)` 到 `(event, delta, botId, isAdmin)`），單一表格 row 形狀塞不下這些差異；(2) 報告自己也承認 deletion test 不明確，拆掉 `command-parser.ts`/`command-router.ts` 可能只是把 switch 搬位置，不會真正集中複雜度；(3) 唯一有具體壞味道支撐的症狀（courtOverride 解析邏輯被拆到兩個 module）已隨 `next?c=N` what-if 預覽功能整個移除而不復存在，不只是修好。若未來新增指令的頻率明顯提高、且 handler 簽名先被拉齊，可重新評估。
@@ -151,6 +168,9 @@
   若 log 累積 10 次以上 `owe`，且在 Notion 沒有整體變慢的時段仍然穩定超過 2 秒，可以重新評估。
 
 - **`@Dobby next` 在「有活動、沒季資料」時回「找不到 YYYY-MM-DD 的活動」的誤導訊息**（2026-09-29 決定）— 不修。背景見 [ADR 0008](docs/adr/0008-season-derived-from-event-date.md) 最後一段：`getEventOccupancy` 把「沒有活動」和「沒有季資料」都回 `null`，`commands/next-event.ts` 分不出來。不修的理由：新一季的建立流程一定是先建季資料、再建活動，所以「有活動、沒季資料」只會在管理員建資料建到一半時出現；而會在這時候下 `@Dobby next` 的也只有管理員本人，他自己知道資料還沒建完。需要查原因時，`/logs` 的 info 行 `Event occupancy unavailable: no event or season for date`（`{date, hasEvent, hasSeason}`）已經看得出來。若之後建資料的流程改成非管理員也會碰到這個狀態，再重新評估。
+
+- **部署後逐項驗證 log 改動的手動測試項、重測本機沒送到的情境**（2026-09-29 決定）— 不加進「手動測試追蹤」。2026-09-28 的 log 可觀測性改動已在本機用真實 LINE 訊息驗證過 30 個事件（原始 log 與 `/logs` 呈現都正確）；閒聊、貼圖、連續兩次 `假`、非管理員代報、從 LINE 選單點選的真正 mention、mutex 逾時這幾種當時沒送到本機伺服器或沒觸發，決定不再補測。部署到 Pi 後確認 `stop_grace_period` 生效（`docker inspect` 的 `StopTimeout` 為 15）也不列成追蹤項目。
+- **`notion-fetch.test.ts` 兩個 429 重試測試各跑 1 秒、3 秒**（2026-09-28 發現）— 不處理。原因是測試用 `Retry-After: '0'`，程式把 0 視為無效、退回預設 1 秒等待；只影響測試速度，不影響正確性。新寫的 429 測試已改用 fake timers。
 
 ---
 
