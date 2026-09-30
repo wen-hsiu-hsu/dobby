@@ -8,6 +8,6 @@
 
 **Flex 訊息帶不了 `quoteToken`，接受這個限制。** `reply-service.ts` 的 `withQuoteToken()` 只對 `text`／`textV2` 訊息附加 quoteToken（LINE 的「引用回覆」效果，讓使用者看到自己的哪則訊息被回應），flex 訊息型別的 schema 沒有這個欄位，也沒有替代做法。改成卡片後，報名／請假的回覆不會再顯示引用回覆的框線，只是純文字時代才有的、不影響回覆內容本身。
 
-**Flex 的 `button` 元件不能設定文字粗體，三顆按鈕都自己用 `box` + `text` 畫（`messageButton()`，現在在 `src/commands/flex-card-parts.ts`，指令清單卡也用它）。** LINE 的 Flex button component 的文字樣式選項有限，設計稿要求的粗體做不到；改用 `box` 包一個 `text`（`weight: 'bold'`），`action` 掛在外層 `box` 上，視覺效果一樣可以點擊，只是元件類型不是 `button`。之後如果要再加按鈕，記得同樣的限制。
+**Flex 的 `button` 元件不能設定文字粗體，三顆按鈕都自己用 `box` + `text` 畫（`messageButton()`，現在在 `src/commands/flex-card-parts.ts`，指令清單卡、名單卡也用它）。** LINE 的 Flex button component 的文字樣式選項有限，設計稿要求的粗體做不到；改用 `box` 包一個 `text`（`weight: 'bold'`），`action` 掛在外層 `box` 上，視覺效果一樣可以點擊，只是元件類型不是 `button`。之後如果要再加按鈕，記得同樣的限制。
 
 **圖片放 `assets/flex/`，由 `.github/workflows/pages.yml` 發布到 GitHub Pages（`https://wen-hsiu-hsu.github.io/dobby/flex/<檔名>`），圖示用 `scripts/generate-flex-icons.mjs` 產生。** LINE 的 Flex `image`／`hero` 元件的 `url` 必須是外部可存取的 HTTPS 網址，這個服務本身沒有對外提供靜態檔案的路由，所以另外用 GitHub Pages 當圖床。這帶來一個容易忽略的限制：**已經發出去的卡片（使用者手機上收到的那份 LINE 訊息）會一直讀同一個網址**，LINE 用戶端不會重新抓一份新的卡片 JSON——改圖示或照片時**必須換檔名**，不能直接覆蓋舊檔的內容；覆蓋的話新舊卡片會同時變成新圖，可能不是想要的效果，也沒辦法針對「只有新卡片用新圖」做區分。**刪掉舊檔案會讓所有還留著那張舊卡片的使用者看到破圖**（LINE 顯示圖片載入失敗的預留位置），所以舊檔名原則上不刪，即使已經沒有任何目前的卡片邏輯在用。另外，Flex 的圖片只能置中裁切（`aspectMode: 'cover'`／`fit`，沒有其他裁切模式可選），所以像 `header-shuttle.jpg` 這種照片素材要先裁好目標比例（見卡片裡設定的 `aspectRatio`），不能指望 Flex 幫忙裁出想要的構圖。

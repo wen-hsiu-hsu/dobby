@@ -10,7 +10,7 @@
 
 **新增「下一季公告草稿」按鈕，季度依今天日期算。** 原本純文字清單只寫範例 `@Dobby season 2026Q2`，管理員要自己改季度。卡片上的按鈕直接送出 `@Dobby season YYYYQn`，季度是「今天所在季度的下一季」（`getNextSeasonName(getCurrentSeasonName())`），因為管理員通常在季末準備下一季公告。換季之後才補做當季草稿的話（例如 10/1 才要做 Q4 公告），按鈕會送出再下一季（`2027Q1`），Notion 還沒有那一季的季租資料時會回「找不到 2027-Q1 季租資料」，這種情況要自己輸入季度。寫成 `2026Q4` 不帶連字號，跟 `docs/commands.md` 的範例一致，`parseSeasonInput()` 兩種寫法都接受。
 
-**altText 列出卡片上每個指令的寫法，不只寫「指令清單」。** altText 是 LINE 通知、`/logs`、不支援 Flex 的舊版 LINE 唯一看得到的內容。指令清單卡沒有動態資料，但使用者看到 altText 時沒有卡片可以點，所以 altText 列出卡片上每個指令的寫法，管理員章節一樣只在 `isAdmin` 時加上。卡片和 altText 都只列中文關鍵字，改版前純文字清單列的英文別名（`owe`、`news`、`announcement`、`payment`、`people`、`command`）不再列出，但指令本身照樣能用（`docs/commands.md` 有完整別名）。
+**altText 列出卡片上每個指令的寫法，不只寫「指令清單」。** altText 是 LINE 通知、`/logs`、不支援 Flex 的舊版 LINE 唯一看得到的內容。指令清單卡沒有動態資料，但使用者看到 altText 時沒有卡片可以點，所以 altText 列出卡片上每個指令的寫法，管理員章節一樣只在 `isAdmin` 時加上。卡片和 altText 都只列中文關鍵字，改版前純文字清單列的英文別名（`owe`、`news`、`announcement`、`payment`、`participants`、`people`、`command`）不再列出，但指令本身照樣能用（`docs/commands.md` 有完整別名）。
 
 **自我介紹（單獨的 `@Dobby`）不列在卡片上。** 自我介紹會 @mention 管理員（Notion 的 INTRODUCE 內容有 `{MANAGER}`、而且找得到管理員時，見 `src/commands/introduce.ts`），做成一點就送的列，成員好奇點一下，管理員就多收一則通知。改版前的純文字清單有列它，這是刻意拿掉的；指令本身照樣能用。
 
