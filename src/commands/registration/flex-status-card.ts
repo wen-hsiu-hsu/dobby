@@ -217,7 +217,8 @@ export function buildStatusCardBubble(params: StatusCardParams): messagingApi.Fl
     );
   }
 
-  const absenteeText = absenteeNames.length > 0 ? absenteeNames.join('、') : '無';
+  // 只有一位請假人且 Notion 名字空白時，join 出來是空字串，Flex text 不能是空字串（LINE 會整則退回）
+  const absenteeText = absenteeNames.length > 0 ? absenteeNames.map((n) => n || '（未命名）').join('、') : '無';
 
   // 暫停週：標題列只留徽章＋標題，不顯示「剩 N 位／已額滿」；innerBox 底下也不接
   // 副標題、進度條——這三個都是「還能不能報名」的資訊，暫停週沒有這個概念。

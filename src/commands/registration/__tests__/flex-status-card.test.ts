@@ -213,6 +213,11 @@ describe('buildStatusCardBubble', () => {
       expect(leaveSection.contents[1].text).toBe('無');
       expect(leaveSection.contents[0].contents[1]).toMatchObject({ text: '0 人' });
     });
+
+    it('Notion 名字空白的請假人顯示「（未命名）」，避免只有一人時出現 LINE 會退回的空字串 text', () => {
+      const bubble = buildStatusCardBubble(baseParams({ absenteeNames: [''] }));
+      expect((bubble.body as any).contents[2].contents[1].text).toBe('（未命名）');
+    });
   });
 
   describe('本週出席', () => {
