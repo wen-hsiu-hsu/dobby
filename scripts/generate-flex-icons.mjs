@@ -28,6 +28,20 @@ const ICONS = [
   { file: 'users-gray.png', icon: 'users', color: '#A3A3A3', strokeWidth: 2 },
   { file: 'calendar-x-gray.png', icon: 'calendar-x', color: '#A3A3A3', strokeWidth: 2 },
   { file: 'user-check-gray.png', icon: 'user-check', color: '#A3A3A3', strokeWidth: 2 },
+  // 指令清單卡（src/commands/command-list-card.ts）
+  { file: 'list-dark.png', icon: 'list', color: '#111111', strokeWidth: 2.5 },
+  { file: 'search-gray.png', icon: 'search', color: '#A3A3A3', strokeWidth: 2 },
+  { file: 'calendar-gray.png', icon: 'calendar', color: '#A3A3A3', strokeWidth: 2 },
+  { file: 'shield-gray.png', icon: 'shield', color: '#A3A3A3', strokeWidth: 2 },
+  { file: 'user-plus-gray.png', icon: 'user-plus', color: '#A3A3A3', strokeWidth: 2 },
+  { file: 'users-light.png', icon: 'users', color: '#D4D4D4', strokeWidth: 2 },
+  { file: 'megaphone-light.png', icon: 'megaphone', color: '#D4D4D4', strokeWidth: 2 },
+  { file: 'credit-card-light.png', icon: 'credit-card', color: '#D4D4D4', strokeWidth: 2 },
+  { file: 'circle-dollar-sign-light.png', icon: 'circle-dollar-sign', color: '#D4D4D4', strokeWidth: 2 },
+  { file: 'bot-light.png', icon: 'bot', color: '#D4D4D4', strokeWidth: 2 },
+  { file: 'calendar-check-light.png', icon: 'calendar-check', color: '#D4D4D4', strokeWidth: 2 },
+  { file: 'file-text-light.png', icon: 'file-text', color: '#D4D4D4', strokeWidth: 2 },
+  { file: 'chevron-right-dim.png', icon: 'chevron-right', color: '#737373', strokeWidth: 2 },
 ];
 
 const outDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'flex');
