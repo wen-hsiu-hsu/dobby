@@ -26,8 +26,9 @@ parseCommand(text)
     ├── '@Dobby command/指令' → COMMAND_LIST
     ├── '@Dobby participants/people/報名人' → PARTICIPANTS
     ├── '@Dobby next'      → NEXT_EVENT（管理員）
-    ├── '@Dobby news/公告' → NEWS
-    └── '@Dobby payment/付款' → PAYMENT
+    ├── '@Dobby news/公告/announcement' → NEWS
+    ├── '@Dobby payment/付款' → PAYMENT
+    └── '@Dobby season 2026Q2' → SEASON_ANNOUNCEMENT（管理員）
 ```
 
 全形字元（＋／－）在解析前統一轉換為半形。
