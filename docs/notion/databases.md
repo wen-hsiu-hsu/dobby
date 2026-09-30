@@ -113,7 +113,13 @@ USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員�
 | `INTRODUCE` | `@Dobby` 自我介紹的內容 |
 | `NEW_SEASON` | `@Dobby season <季度>` 指令產生下一季公告草稿的模板，見 [commands.md](../commands.md#產生新一季公告草稿) |
 
-`getBlocks()` 會遞迴抓取 `has_children === true` 的區塊（toggle、巢狀清單等），每一層都用 `notionGetAllResults` 分頁抓完，超過 100 個區塊也不會被截斷。`blocksToText()` 輸出時子區塊依巢狀深度縮排（每層 2 個空白），`bulleted_list_item` 一律補 `• ` 前綴。`payment`、`news`、`introduce`、`WELCOME_MESSAGE`、`season` 都走這個共用實作。
+`getBlocks()` 會遞迴抓取 `has_children === true` 的區塊（toggle、巢狀清單等），每一層都用 `notionGetAllResults` 分頁抓完，超過 100 個區塊也不會被截斷。`blocksToText()` 輸出時子區塊依巢狀深度縮排（每層 2 個空白），`payment`、`news`、`introduce`、`WELCOME_MESSAGE`、`season` 都走這個共用實作。各種區塊的輸出方式：
+
+- `bulleted_list_item` 一律補 `• ` 前綴。
+- `divider`（在 Notion 打 `---` 產生的分隔線區塊）輸出成一個 `—`，跟模板裡手打的 `—` 一樣。它**不會**當成 `season` 模板切訊息用的 `————————`，那個仍要手打。
+- 空白段落（在 Notion 按 Enter 留下的空行）保留成空行；整段內容開頭和結尾的空行會被去掉。
+- 其他有 `rich_text` 的區塊（標題、引言、toggle、callout、程式碼、編號清單、待辦等）只取純文字，不加前綴；callout 的圖示、程式碼區塊的說明文字不會輸出。所有區塊的粗體、顏色等格式都會丟掉，超連結只留文字、網址會丟掉。
+- 沒有 `rich_text` 的區塊（圖片、影片、檔案、書籤、嵌入、公式區塊等）那一行略過。但如果它有子區塊，子區塊仍會輸出：分欄（`column_list`／`column`）、同步區塊（`synced_block`）裡的內容照樣出現，只是會多一層沒必要的縮排。表格例外，儲存格放在 `cells` 而不是 `rich_text`，所以整個表格的內容都不會出現。
 
 ### Placeholder 替換規則
 

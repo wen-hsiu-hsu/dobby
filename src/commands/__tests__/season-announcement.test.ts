@@ -211,4 +211,17 @@ describe('handleSeasonAnnouncement', () => {
     expect(messages).toHaveLength(1);
     expect((messages[0] as { text: string }).text).toContain('超過 LINE 單次回覆上限');
   });
+
+  it('does not split on Notion divider blocks — only a hand-typed 8-dash line splits the template', async () => {
+    vi.mocked(announcementRepo.getBlocks).mockImplementation(async (pageId: string) => {
+      if (pageId === 'ann-payment') return [bulletedListItemBlock('永豐')] as any;
+      return [paragraphBlock('上段'), { type: 'divider', divider: {} }, paragraphBlock('下段')] as any;
+    });
+
+    await handleSeasonAnnouncement('token', true, '2026Q2');
+
+    const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
+    expect(messages).toHaveLength(1);
+    expect((messages[0] as { text: string }).text).toBe('上段\n—\n下段');
+  });
 });
