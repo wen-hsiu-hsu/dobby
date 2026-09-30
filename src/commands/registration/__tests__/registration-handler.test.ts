@@ -9,6 +9,9 @@ import { replyMessage } from '../../../services/line/reply-service.js';
 import { logger } from '../../../utils/logger.js';
 import { getCurrentSeasonName, getSeasonNameForDate, formatDate, getNextSaturday } from '../../../utils/date-utils.js';
 import { replyText as sharedReplyText } from '../../../test-utils/index.js';
+import { FLEX_ICONS } from '../../../config/flex-assets.js';
+import { BADGE_COLORS } from '../flex-status-card.js';
+import { cardHeroSummary, guestRows } from './card-nav.js';
 
 vi.mock('../../../services/notion/calendar-repository.js');
 vi.mock('../../../services/notion/season-repository.js');
@@ -58,7 +61,7 @@ function baseCalendarEvent(overrides: Partial<Awaited<ReturnType<typeof calendar
   } as any;
 }
 
-function reply(): { type: string; text?: string; altText?: string } {
+function reply(): { type: string; text?: string; altText?: string; contents?: any } {
   const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
   return messages[0] as any;
 }
@@ -66,6 +69,12 @@ function reply(): { type: string; text?: string; altText?: string } {
 // text/textV2 → .text、flex → .altText——報名結果現在多半是 Flex 卡片，不能再假設是純文字。
 function replyText(): string {
   return sharedReplyText(reply() as any);
+}
+
+// 卡片 contents 本身（徽章底色／圖示／標題／副標題），見 card-nav.ts。呼叫端須確認
+// reply().type === 'flex'，否則 .contents 是 undefined。
+function cardSummary() {
+  return cardHeroSummary(reply().contents);
 }
 
 beforeEach(() => {
@@ -103,6 +112,12 @@ describe('handleRegistration', () => {
     expect(calendarRepo.updateGuests).toHaveBeenCalledWith('evt-1', ['Bob']);
     expect(replyText()).toContain('報名成功 ✅');
     expect(reply().type).toBe('flex');
+
+    const card = cardSummary();
+    expect(card.badgeColor).toBe(BADGE_COLORS.lime);
+    expect(card.badgeIconUrl.endsWith(FLEX_ICONS.checkDark)).toBe(true);
+    expect(card.title).toBe('報名成功');
+    expect(card.subtitle).toBe('Bob 報名 1 位');
   });
 
   it('caps a non-admin request that exceeds remaining capacity and reports cappedAt in the headline', async () => {
@@ -119,6 +134,12 @@ describe('handleRegistration', () => {
     );
     const text = replyText();
     expect(text).toContain('報名成功 ✅（名額已達上限，僅報名 6 位，您原本要求 10 位）');
+
+    const card = cardSummary();
+    expect(card.badgeColor).toBe(BADGE_COLORS.lime);
+    expect(card.badgeIconUrl.endsWith(FLEX_ICONS.checkDark)).toBe(true);
+    expect(card.title).toBe('報名成功');
+    expect(card.subtitle).toBe('Bob 報名 6 位（名額已滿，原本要求 10 位）');
   });
 
   it('caps +N against the calendar 場地數 when set, and shows the same total in the reply', async () => {
@@ -138,6 +159,21 @@ describe('handleRegistration', () => {
     const text = replyText();
     expect(text).toContain('僅報名 6 位');
     expect(text).toContain('零打名額 6 人');
+  });
+
+  it('marks only the newly added guest rows with the「新增」flag, not pre-existing ones', async () => {
+    vi.mocked(resolveTarget).mockResolvedValue({ personPageId: 'person-2', displayName: 'Bob', resolvedVia: 'mention' });
+    vi.mocked(calendarRepo.findByDate).mockResolvedValue(baseCalendarEvent({ guests: ['Existing'] }));
+    const event = makeEvent('@Dobby +2 @Bob', [{ type: 'user', userId: 'u-bob', index: 0, length: 4 }]);
+
+    await handleRegistration(event, 2, true);
+
+    expect(calendarRepo.updateGuests).toHaveBeenCalledWith('evt-1', ['Existing', 'Bob', 'Bob (2)']);
+    expect(guestRows(reply().contents)).toEqual([
+      { name: 'Existing', isNew: false },
+      { name: 'Bob', isNew: true },
+      { name: 'Bob (2)', isNew: true },
+    ]);
   });
 
   it('lets an admin register on behalf of another target even though target.isSelf is false', async () => {
@@ -288,6 +324,12 @@ describe('handleRegistration', () => {
     expect(calendarRepo.updateGuests).toHaveBeenCalledWith('evt-1', []);
     expect(replyText()).toContain('取消報名成功 ✅');
     expect(reply().type).toBe('flex');
+
+    const card = cardSummary();
+    expect(card.badgeColor).toBe(BADGE_COLORS.gray);
+    expect(card.badgeIconUrl.endsWith(FLEX_ICONS.minusWhite)).toBe(true);
+    expect(card.title).toBe('取消報名成功');
+    expect(card.subtitle).toBe('Alice 取消 1 位');
   });
 
   it('replies with an error and does not write when there is no matching registration to remove', async () => {
@@ -298,6 +340,11 @@ describe('handleRegistration', () => {
     expect(calendarRepo.updateGuests).not.toHaveBeenCalled();
     expect(replyText()).toContain('找不到 Alice 的報名紀錄');
     expect(reply().type).toBe('flex');
+
+    const card = cardSummary();
+    expect(card.badgeColor).toBe(BADGE_COLORS.orange);
+    expect(card.badgeIconUrl.endsWith(FLEX_ICONS.banDark)).toBe(true);
+    expect(card.title).toBe('無法取消');
   });
 
   describe('outcome log', () => {
@@ -381,6 +428,11 @@ describe('handleRegistration', () => {
 
       expect(calendarRepo.updateGuests).not.toHaveBeenCalled();
       expect(outcomeSummary()).toMatchObject({ outcome: 'zero-delta' });
+
+      const card = cardSummary();
+      expect(card.badgeColor).toBe(BADGE_COLORS.orange);
+      expect(card.badgeIconUrl.endsWith(FLEX_ICONS.banDark)).toBe(true);
+      expect(card.title).toBe('無法取消');
     });
 
     it('logs "full" with the capacity numbers when no slot is left', async () => {
@@ -389,6 +441,12 @@ describe('handleRegistration', () => {
       await handleRegistration(makeEvent('@Dobby +1'), 1, false);
 
       expect(outcomeSummary()).toMatchObject({ outcome: 'full', courts: 0, totalSlots: -1, guestCountBefore: 0 });
+
+      const card = cardSummary();
+      expect(card.badgeColor).toBe(BADGE_COLORS.orange);
+      expect(card.badgeIconUrl.endsWith(FLEX_ICONS.banDark)).toBe(true);
+      expect(card.title).toBe('名額不足');
+      expect(card.subtitle).toBe('名額不足，目前剩餘 0 個名額');
     });
 
     it('logs "paused" when the event is paused, even for an admin', async () => {
@@ -397,6 +455,12 @@ describe('handleRegistration', () => {
       await handleRegistration(makeEvent('@Dobby +1'), 1, true);
 
       expect(outcomeSummary()).toMatchObject({ outcome: 'paused', isAdmin: true });
+
+      const card = cardSummary();
+      expect(card.badgeColor).toBe(BADGE_COLORS.orange);
+      expect(card.badgeIconUrl.endsWith(FLEX_ICONS.banDark)).toBe(true);
+      expect(card.title).toBe('本週活動暫停');
+      expect(card.subtitle).toBe('本次活動已暫停，無法報名');
     });
 
     it('logs isSelfSeasonMember false when the target has no People page', async () => {

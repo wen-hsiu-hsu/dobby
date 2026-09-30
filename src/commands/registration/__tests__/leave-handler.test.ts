@@ -9,6 +9,9 @@ import { replyMessage } from '../../../services/line/reply-service.js';
 import { logger } from '../../../utils/logger.js';
 import { getCurrentSeasonName, getSeasonNameForDate, formatDate, getNextSaturday } from '../../../utils/date-utils.js';
 import { replyText as sharedReplyText } from '../../../test-utils/index.js';
+import { FLEX_ICONS } from '../../../config/flex-assets.js';
+import { BADGE_COLORS } from '../flex-status-card.js';
+import { cardHeroSummary } from './card-nav.js';
 
 vi.mock('../../../services/notion/calendar-repository.js');
 vi.mock('../../../services/notion/season-repository.js');
@@ -64,13 +67,19 @@ beforeEach(() => {
 });
 
 // text/textV2 → .text、flex → .altText——請假結果現在多半是 Flex 卡片，不能再假設是純文字。
-function reply(): { type: string; text?: string; altText?: string } {
+function reply(): { type: string; text?: string; altText?: string; contents?: any } {
   const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
   return messages[0] as any;
 }
 
 function replyText(): string {
   return sharedReplyText(reply() as any);
+}
+
+// 卡片 contents 本身（徽章底色／圖示／標題／副標題），見 card-nav.ts。呼叫端須確認
+// reply().type === 'flex'，否則 .contents 是 undefined。
+function cardSummary() {
+  return cardHeroSummary(reply().contents);
 }
 
 describe('handleLeave', () => {
@@ -172,6 +181,12 @@ describe('handleLeave', () => {
     expect(text).toContain('零打名額 14 人');
     expect(text).toContain('總人數：共');
     expect(reply().type).toBe('flex');
+
+    const card = cardSummary();
+    expect(card.badgeColor).toBe(BADGE_COLORS.blue);
+    expect(card.badgeIconUrl.endsWith(FLEX_ICONS.calendarXDark)).toBe(true);
+    expect(card.title).toBe('請假成功');
+    expect(card.subtitle).toBe('Alice 本週請假，零打名額 +1');
   });
 
   it('replies with full status (not a bare one-liner) when cancelling leave', async () => {
@@ -193,6 +208,12 @@ describe('handleLeave', () => {
     expect(text).toContain('請假：無');
     // courts(2) * 7 - members(1) + absentees(0, after cancel) = 13
     expect(text).toContain('零打名額 13 人');
+
+    const card = cardSummary();
+    expect(card.badgeColor).toBe(BADGE_COLORS.lime);
+    expect(card.badgeIconUrl.endsWith(FLEX_ICONS.calendarCheckDark)).toBe(true);
+    expect(card.title).toBe('銷假成功');
+    expect(card.subtitle).toBe('Alice 已銷假，零打名額 −1');
   });
 
   it('recomputes slots after cancelling leave with the calendar 場地數, not the season default', async () => {
@@ -231,6 +252,12 @@ describe('handleLeave', () => {
     expect(text).toContain('Alice 已請假，無需重複操作');
     expect(text).toContain('剩餘名額：');
     expect(reply().type).toBe('flex');
+
+    const card = cardSummary();
+    expect(card.badgeColor).toBe(BADGE_COLORS.gray);
+    expect(card.badgeIconUrl.endsWith(FLEX_ICONS.infoWhite)).toBe(true);
+    expect(card.title).toBe('已經請過假');
+    expect(card.subtitle).toBe('Alice 已請假，無需重複操作');
   });
 
   it('replies with full status + reason when cancelling leave without having leave recorded (no Notion write)', async () => {
@@ -241,6 +268,12 @@ describe('handleLeave', () => {
 
     expect(text).toContain('Alice 目前未請假');
     expect(text).toContain('剩餘名額：');
+
+    const card = cardSummary();
+    expect(card.badgeColor).toBe(BADGE_COLORS.gray);
+    expect(card.badgeIconUrl.endsWith(FLEX_ICONS.infoWhite)).toBe(true);
+    expect(card.title).toBe('目前未請假');
+    expect(card.subtitle).toBe('Alice 目前未請假');
   });
 
   it('replies with the parse error (not "你不是管理員") when a non-admin sends a malformed (non-@) target', async () => {
