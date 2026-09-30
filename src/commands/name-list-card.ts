@@ -16,9 +16,22 @@ import {
  *
  * 名單一律完整列出、單欄、名字過長就換行，不截斷也不用「…」／「等 N 人」。
  * `names` 是空陣列時整張卡只剩標題區（空狀態），不畫 body。
+ *
+ * 每列約 450 bytes，LINE 單一 bubble 的 JSON 上限 30KB，大約 60 人就會超過；超過時 LINE
+ * 會整則退回，而 reply-service 只記 warn，使用者什麼都收不到。呼叫端要先用
+ * `fitsBubbleSizeLimit()` 檢查，超過就改回純文字。
  */
 
 const ROW_BG = '#1F1F1F';
+// LINE 規定單一 bubble 的 JSON 最多 30KB（validate API 實測 65 人時回「Too large flex message」）。
+// 抓 30000 bytes，比 30KB 略保守。
+const BUBBLE_MAX_BYTES = 30000;
+// Notion 的 Name 沒填時會是空字串，Flex 的 text 不能是空字串（LINE 會整則退回）。
+const UNNAMED = '（未命名）';
+
+export function fitsBubbleSizeLimit(bubble: messagingApi.FlexBubble): boolean {
+  return Buffer.byteLength(JSON.stringify(bubble), 'utf8') <= BUBBLE_MAX_BYTES;
+}
 
 export interface NameListCardParams {
   /** 照片左上角的小字，例如季度；不給就不顯示。 */
@@ -56,7 +69,7 @@ function nameRow(n: number, name: string): messagingApi.FlexBox {
         paddingTop: '1px',
         contents: [{ type: 'text', text: String(n), size: 'xs', color: CARD_SUB, align: 'end' }],
       },
-      { type: 'text', text: name, size: 'sm', color: CARD_TEXT, flex: 1, wrap: true },
+      { type: 'text', text: name || UNNAMED, size: 'sm', color: CARD_TEXT, flex: 1, wrap: true },
     ],
   };
 }

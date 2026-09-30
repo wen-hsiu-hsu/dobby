@@ -3,8 +3,9 @@ import { flexAssetUrl, FLEX_ICONS } from '../config/flex-assets.js';
 
 /**
  * 深色螢光綠 Flex 卡片的共用色票與元件。報名／請假／週報狀態卡
- * （`registration/flex-status-card.ts`）跟指令清單卡（`command-list-card.ts`）
- * 共用同一張照片標題區、同樣的徽章與按鈕，改這裡兩張卡會一起變。
+ * （`registration/flex-status-card.ts`）、指令清單卡（`command-list-card.ts`）、
+ * 名單卡（`name-list-card.ts`：欠費、報名人）共用同一張照片標題區、同樣的徽章與按鈕，
+ * 改這裡所有卡片會一起變。
  */
 
 export const CARD_BG = '#161616';

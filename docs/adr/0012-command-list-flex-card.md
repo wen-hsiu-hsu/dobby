@@ -12,7 +12,7 @@
 
 **altText 列出卡片上每個指令的寫法，不只寫「指令清單」。** altText 是 LINE 通知、`/logs`、不支援 Flex 的舊版 LINE 唯一看得到的內容。指令清單卡沒有動態資料，但使用者看到 altText 時沒有卡片可以點，所以 altText 列出卡片上每個指令的寫法，管理員章節一樣只在 `isAdmin` 時加上。卡片和 altText 都只列中文關鍵字，改版前純文字清單列的英文別名（`owe`、`news`、`announcement`、`payment`、`people`、`command`）不再列出，但指令本身照樣能用（`docs/commands.md` 有完整別名）。
 
-**自我介紹（單獨的 `@Dobby`）不列在卡片上。** 自我介紹每次都會 @mention 管理員（`src/commands/introduce.ts`），做成一點就送的列，成員好奇點一下，管理員就多收一則通知。改版前的純文字清單有列它，這是刻意拿掉的；指令本身照樣能用。
+**自我介紹（單獨的 `@Dobby`）不列在卡片上。** 自我介紹會 @mention 管理員（Notion 的 INTRODUCE 內容有 `{MANAGER}`、而且找得到管理員時，見 `src/commands/introduce.ts`），做成一點就送的列，成員好奇點一下，管理員就多收一則通知。改版前的純文字清單有列它，這是刻意拿掉的；指令本身照樣能用。
 
 **拿掉原本的 quick reply。** 原本的四個 quick reply（報名人、公告、付款、未繳費）在卡片上都有對應的列，留著只是重複。Flex 訊息也可以掛 quick reply，之後要加回來不用改卡片。
 

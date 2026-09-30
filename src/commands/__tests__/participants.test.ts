@@ -3,6 +3,7 @@ import { createTestBot } from '../../test-utils/index.js';
 import * as notionFetch from '../../services/notion/notion-fetch.js';
 import { logger } from '../../utils/logger.js';
 import { BADGE_COLORS } from '../flex-card-parts.js';
+import { FLEX_ICONS } from '../../config/flex-assets.js';
 import { heroTitleOf, listNamesOf } from './name-list-nav.js';
 
 vi.mock('../../services/notion/notion-fetch.js');
@@ -51,7 +52,10 @@ describe('handleParticipants (@Dobby participants / people / 報名人)', () => 
     expect(messages[0]).toMatchObject({ type: 'flex', altText: '2026-Q2 目前沒有報名成員' });
     const bubble = (messages[0] as any).contents;
     expect(heroTitleOf(bubble)).toEqual({ badgeColor: BADGE_COLORS.gray, title: '本季報名人', countLabel: '0 位' });
+    expect(JSON.stringify(bubble.hero)).toContain(FLEX_ICONS.userXWhite);
     expect(bubble.body).toBeUndefined();
+    // 沒有成員時不查 People（findByPageIds 每頁一次 GET）
+    expect(vi.mocked(notionFetch.notionGet).mock.calls.some(([path]) => path.startsWith('/pages/'))).toBe(false);
   });
 
   it('replies with member count and a numbered, newline-separated name list in the normal case', async () => {
@@ -63,6 +67,7 @@ describe('handleParticipants (@Dobby participants / people / 報名人)', () => 
     const bubble = (messages[0] as any).contents;
     expect(heroTitleOf(bubble)).toEqual({ badgeColor: BADGE_COLORS.lime, title: '本季報名人', countLabel: '2 位' });
     expect(listNamesOf(bubble)).toEqual(['Alice', 'Bob']);
+    expect(JSON.stringify(bubble.hero)).toContain(FLEX_ICONS.usersDark);
     // 左上角是季度＋月份範圍；報名人卡沒有副標題、沒有按鈕（使用者定案）
     expect(JSON.stringify(bubble.hero)).toContain('2026 Q2（4~6月）');
     expect(JSON.stringify(bubble.body)).not.toContain('"action"');

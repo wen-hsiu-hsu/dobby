@@ -3,6 +3,7 @@ import { createTestBot } from '../../test-utils/index.js';
 import * as notionFetch from '../../services/notion/notion-fetch.js';
 import { logger } from '../../utils/logger.js';
 import { BADGE_COLORS } from '../flex-card-parts.js';
+import { FLEX_ICONS } from '../../config/flex-assets.js';
 import { heroTitleOf, listNamesOf } from './name-list-nav.js';
 
 vi.mock('../../services/notion/notion-fetch.js');
@@ -25,6 +26,7 @@ describe('handleOwe (@Dobby 欠 / owe)', () => {
     expect(messages[0]).toMatchObject({ type: 'flex', altText: '目前沒有未繳費成員 🎉' });
     const bubble = (messages[0] as any).contents;
     expect(heroTitleOf(bubble)).toEqual({ badgeColor: BADGE_COLORS.lime, title: '全部繳清', countLabel: undefined });
+    expect(JSON.stringify(bubble.hero)).toContain(FLEX_ICONS.checkDark);
     expect(bubble.body).toBeUndefined();
   });
 
@@ -37,8 +39,28 @@ describe('handleOwe (@Dobby 欠 / owe)', () => {
     const bubble = (messages[0] as any).contents;
     expect(heroTitleOf(bubble)).toEqual({ badgeColor: BADGE_COLORS.orange, title: '未繳費名單', countLabel: '2 位' });
     expect(listNamesOf(bubble)).toEqual(['Alice', 'Bob']);
+    expect(JSON.stringify(bubble.hero)).toContain(FLEX_ICONS.circleDollarSignDark);
     // 底部「付款資訊」按鈕送出的是付款指令（付款卡的觸發文字不能改）
     expect(JSON.stringify(bubble.body)).toContain('"text":"@Dobby 付款"');
+  });
+
+  it('falls back to plain text when the list is too long for one Flex bubble (LINE would reject it silently)', async () => {
+    const results = Array.from({ length: 70 }, (_, i) => ({
+      id: `person-${i + 1}`,
+      object: 'page',
+      properties: {
+        Name: { type: 'title', title: [{ plain_text: `成員${i + 1}`, type: 'text' }] },
+        '結清': { type: 'formula', formula: { type: 'boolean', boolean: false } },
+      },
+    }));
+    const bot = createTestBot({ people: { results } });
+    const messages = await bot.run('@Dobby 欠', { userId: 'user-alice' });
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.type).toBe('text');
+    const text = (messages[0] as { text: string }).text;
+    expect(text.startsWith('未繳費名單：\n1. 成員1\n')).toBe(true);
+    expect(text.endsWith('70. 成員70')).toBe(true);
   });
 
   it('replies with a system error message instead of throwing when the repository call fails', async () => {

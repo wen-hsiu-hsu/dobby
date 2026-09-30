@@ -40,7 +40,7 @@
   這是 bug，但目前還沒觀察到：
   - `notion-fetch.ts` 只對 429 重試（最多 3 次，第 74、121 行）；5xx、網路錯誤、429 重試用完都會直接 throw（`assertOk`，第 45-72 行）。本機 `logs/`（2026-09-21～27）沒有任何 `Error handling event` 或 `Notion API error`。
   - 從 n8n 遷移的第一版（commit `23c32a1`）就是這樣，當時的 try 也只包鎖內。
-  - 其他指令都自己 try/catch 並回「系統錯誤，請稍後再試」：`owe.ts:6-14`、`news.ts:59-84`、`participants.ts:8-22`、`payment.ts:7-16`、`next-event.ts:13-27`、`season-announcement.ts:56-150`、`introduce.ts:12-42`。`message-handler.ts:48-54` 的 `findByUserId` 也在 commit `5ef200d` 補過同一種缺口。只有報名／請假漏掉。
+  - 其他指令都自己 try/catch 並回「系統錯誤，請稍後再試」：`owe.ts:9-42`、`news.ts:59-84`、`participants.ts:11-42`、`payment.ts:7-16`、`next-event.ts:13-27`、`season-announcement.ts:56-150`、`introduce.ts:12-42`。`message-handler.ts:48-54` 的 `findByUserId` 也在 commit `5ef200d` 補過同一種缺口。只有報名／請假漏掉。
   - 2026-09-28 把兩個查詢改成並行後，多了一種觸發情況：對象查無（`resolved` 為 null）而 Season 查詢 throw。舊版依序執行，會先回「找不到您的帳號」；現在 `Promise.all` 整個 reject，不回覆。其他組合的行為跟舊版相同。
   - 影響：使用者以為 bot 沒收到，通常會再打一次。這段在任何寫入之前，所以重打不會重複報名，只是體驗差。
 
@@ -195,7 +195,7 @@
   sleep 是 commit `8a4ed71`（2026-09-18）加的。當時原本用 `Promise.all` 完全平行，怕瞬間超過約 3 req/s，就比照 `display-name-update.ts` 改成依序＋400ms。commit 沒提到真的遇過 429，是預防性的節流。
 
   呼叫端：
-  - `participants.ts:19`：推估 1＋N 次呼叫（N≈11 位季租成員），約 7 秒。log 裡沒有這個指令，數字是用單次 GET 約 280ms＋sleep 400ms 推算的。
+  - `participants.ts:18`：推估 1＋N 次呼叫（N≈11 位季租成員），約 7 秒。log 裡沒有這個指令，數字是用單次 GET 約 280ms＋sleep 400ms 推算的。
   - `news.ts:75-76`：實測 2 次，都是 29 次呼叫（11 次姓名 GET＋13 次活動 GET＋5 次其他），耗時 11.3 和 11.7 秒。兩組 GET 各自拖了 7～9.5 秒，其中 sleep 約佔各組的 55～60%，約佔整個指令的 40%。兩組用 `Promise.all`（`news.ts:73-77`）同時跑，平均合計約 2.5～3 req/s，任 1 秒窗口瞬間最多 4 個 GET，靠 Notion 容許的短暫突發撐住，沒有出現 429。
   - `season-announcement.ts:90-91`：管理員專用（產生新一季公告草稿），頻率很低，優先度比 news／participants 更低。
   - `weekly-status-message.ts:22`
