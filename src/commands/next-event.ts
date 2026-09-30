@@ -1,5 +1,5 @@
 import { getEventOccupancy } from '../services/notion/event-occupancy.js';
-import { buildWeeklyStatusMessage } from './weekly-status-message.js';
+import { buildWeeklyStatusReply } from './weekly-status-message.js';
 import { replyMessage } from '../services/line/reply-service.js';
 import { formatDate, getNextSaturday } from '../utils/date-utils.js';
 import { logger } from '../utils/logger.js';
@@ -21,9 +21,9 @@ export async function handleNextEvent(replyToken: string, isAdmin: boolean): Pro
       return;
     }
 
-    const text = await buildWeeklyStatusMessage(occupancy, dateStr);
+    const reply = await buildWeeklyStatusReply(occupancy, dateStr);
 
-    await replyMessage(replyToken, [{ type: 'text', text }]);
+    await replyMessage(replyToken, [reply]);
   } catch (err) {
     logger.error({ err }, 'Next event handler error');
     await replyMessage(replyToken, [{ type: 'text', text: '系統錯誤，請稍後再試' }]);
