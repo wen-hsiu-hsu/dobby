@@ -194,7 +194,10 @@ export function buildStatusCardBubble(params: StatusCardParams): messagingApi.Fl
 
   const filled = guests.length;
   const remaining = Math.max(0, totalSlots - filled);
-  // totalSlots 理論上可能因季資料異動算出 0 或負數（見 capacity-calculator.ts），
+  // totalSlots 理論上可能因季資料異動算出 0 或負數（見 capacity-calculator.ts:45-47，
+  // 例如 courts=0）。displayTotalSlots 只給顯示用，避免卡片出現「0 / -1」這種負數名額；
+  // 名額判斷本身仍然用原始 totalSlots（calculateAddCapacity 已經處理過負數的情況）。
+  const displayTotalSlots = Math.max(0, totalSlots);
   // 這裡防除以 0／負數導致 pct 變成 NaN 或負百分比。
   const pct = totalSlots > 0 ? Math.round(Math.min(1, filled / totalSlots) * 100) : 0;
 
@@ -226,7 +229,7 @@ export function buildStatusCardBubble(params: StatusCardParams): messagingApi.Fl
   // guests 尾端 newGuestCount 筆是這次新增的（calculateAddCapacity 接在既有條目後面）。
   const newStartIndex = filled - newGuestCount;
   const guestSectionContents: messagingApi.FlexComponent[] = [
-    headRow(FLEX_ICONS.usersGray, '零打名單', `${filled} / ${totalSlots}`),
+    headRow(FLEX_ICONS.usersGray, '零打名單', `${filled} / ${displayTotalSlots}`),
     ...guests.map((name, i) => guestRow(i + 1, name, newGuestCount > 0 && i >= newStartIndex)),
   ];
   if (remaining > 0) {
@@ -396,11 +399,13 @@ const ALT_TEXT_MAX = 400;
 export function buildStatusCardAltText(params: StatusCardParams): string {
   const { headline, date, totalSlots, guestFee, guests, presentSeasonMembers, absenteeNames } = params;
   const remaining = Math.max(0, totalSlots - guests.length);
+  // 同 buildStatusCardBubble：totalSlots 可能因資料異動算出負數，顯示用一律 clamp 到 0。
+  const displayTotalSlots = Math.max(0, totalSlots);
   const guestLines = guests.map((g, i) => `${i + 1}. ${g}`).join('\n');
   const absenteeText = absenteeNames.length > 0 ? absenteeNames.join('、') : '無';
   const totalPeople = presentSeasonMembers + guests.length;
 
-  const lines = [headline, '', date, `零打名額 ${totalSlots} 人 | $${guestFee}/人`];
+  const lines = [headline, '', date, `零打名額 ${displayTotalSlots} 人 | $${guestFee}/人`];
   if (guestLines) lines.push(guestLines);
   lines.push(`剩餘名額：${remaining} 人`, `請假：${absenteeText}`, `總人數：共 ${totalPeople} 人`);
 

@@ -93,6 +93,32 @@ describe('buildStatusCardBubble', () => {
     });
   });
 
+  describe('totalSlots 為 0／負數時（資料異動，見 capacity-calculator.ts）不顯示負數或 NaN', () => {
+    it('headRow 的名額顯示 clamp 到 0，不是「0 / -1」', () => {
+      const bubble = buildStatusCardBubble(baseParams({ guests: [], totalSlots: -1, newGuestCount: 0 }));
+      const rows = guestSectionRows(bubble);
+      expect(rows[0].contents[1]).toMatchObject({ text: '0 / 0' });
+    });
+
+    it('剩餘名額不是負數，顯示「已額滿」', () => {
+      const bubble = buildStatusCardBubble(baseParams({ guests: [], totalSlots: -1, newGuestCount: 0 }));
+      const titleRow = heroTitleRow(bubble);
+      expect(titleRow.contents[2]).toMatchObject({ text: '已額滿' });
+    });
+
+    it('進度條不是 NaN%（totalSlots <= 0 時維持 0 條）', () => {
+      const bubble = buildStatusCardBubble(baseParams({ guests: [], totalSlots: 0, newGuestCount: 0 }));
+      const bar = heroOverlay(bubble).contents[1].contents[2];
+      expect(bar.contents).toEqual([{ type: 'filler' }]);
+    });
+
+    it('altText 的零打名額顯示也 clamp 到 0', () => {
+      const altText = buildStatusCardAltText(baseParams({ guests: [], totalSlots: -1, newGuestCount: 0 }));
+      expect(altText).toContain('零打名額 0 人');
+      expect(altText).not.toContain('零打名額 -1');
+    });
+  });
+
   describe('進度條', () => {
     it('零打數為 0 時不放內層 filled bar（只有 filler）', () => {
       const bubble = buildStatusCardBubble(baseParams({ guests: [], totalSlots: 6, newGuestCount: 0 }));
