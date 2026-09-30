@@ -112,7 +112,7 @@ export function photoHero(topText: string | undefined, bottom: messagingApi.Flex
 
 const ALT_TEXT_MAX = 400;
 
-/** altText 上限 400 字（LINE 規定），超過就截斷並補「…」。 */
+/** altText 統一截在 400 字（沿用改 Flex 前就有的上限），超過就截斷並補「…」。 */
 export function truncateAltText(text: string): string {
   return text.length > ALT_TEXT_MAX ? text.slice(0, ALT_TEXT_MAX - 1) + '…' : text;
 }

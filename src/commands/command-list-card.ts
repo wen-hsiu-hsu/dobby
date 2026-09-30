@@ -68,7 +68,7 @@ function rowLabels(label: string, detail: string): messagingApi.FlexBox {
     flex: 1,
     contents: [
       { type: 'text', text: label, size: 'sm', weight: 'bold', color: CARD_TEXT },
-      { type: 'text', text: detail, size: 'xs', color: CARD_SUB, margin: '2px' },
+      { type: 'text', text: detail, size: 'xs', color: CARD_SUB, margin: '2px', wrap: true },
     ],
   };
 }
@@ -157,7 +157,7 @@ export function buildCommandListBubble({ isAdmin, nextSeasonName }: CommandListC
       section(sectionHead(FLEX_ICONS.shieldGray, '管理員專用'), [
         commandRow(FLEX_ICONS.calendarCheckLight, '本週打球資訊', '@Dobby next'),
         commandRow(FLEX_ICONS.fileTextLight, '下一季公告草稿', `@Dobby season ${seasonArg(nextSeasonName)}`),
-        hintRow(FLEX_ICONS.userPlusGray, '代他人報名／請假', '自己輸入 @Dobby +N @名字'),
+        hintRow(FLEX_ICONS.userPlusGray, '代他人報名／請假', '自己輸入 @Dobby +N @名字\n或 @Dobby @名字 假'),
       ])
     );
   }
@@ -203,7 +203,8 @@ export function buildCommandListBubble({ isAdmin, nextSeasonName }: CommandListC
 
 /**
  * altText：LINE 推播通知、/logs、不支援 Flex 的舊版 LINE 都只看得到這段，
- * 所以列出完整指令寫法（精簡版），不只寫「指令清單」四個字。
+ * 所以列出卡片上每個指令的寫法，不只寫「指令清單」四個字。跟卡片一樣只列中文關鍵字，
+ * 英文別名（owe、news、payment…）仍然能用，只是不列出來。
  */
 export function buildCommandListAltText({ isAdmin, nextSeasonName }: CommandListCardParams): string {
   const lines = [
@@ -216,7 +217,7 @@ export function buildCommandListAltText({ isAdmin, nextSeasonName }: CommandList
     '@Dobby 假／銷假（季租成員限定）',
   ];
   if (isAdmin) {
-    lines.push('【管理員專用】', '@Dobby next', `@Dobby season ${seasonArg(nextSeasonName)}`, '@Dobby +N @Name');
+    lines.push('【管理員專用】', '@Dobby next', `@Dobby season ${seasonArg(nextSeasonName)}`, '@Dobby +N @名字', '@Dobby @名字 假／銷假');
   }
   return truncateAltText(lines.join('\n'));
 }

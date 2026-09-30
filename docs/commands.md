@@ -23,9 +23,9 @@ Dobby 會介紹自己並 @mention 觸發者和管理員。
 
 - 不需要參數的指令一列一個（顯示中文名稱＋實際指令文字），點下去等同使用者自己打那行指令：`報名人`、`公告`、`付款`、`欠`、`@Dobby`（自我介紹）。
 - 報名／請假區是四顆按鈕：`+1 零打`（`@Dobby +1`）、`−1 零打`（`@Dobby -1`）、`請假`（`@Dobby 假`）、`銷假`（`@Dobby 銷假`）。一次報名多位只放文字提示，要自己輸入 `@Dobby +2`。
-- 管理員專用區只在觸發者是管理員時出現，一般成員完全看不到這個章節存在：`本週打球資訊`（`@Dobby next`）、`下一季公告草稿`（`@Dobby season YYYYQn`，季度依今天日期算出下一季）、代他人操作（只放文字提示 `@Dobby +N @名字`）。
+- 管理員專用區只在觸發者是管理員時出現，一般成員完全看不到這個章節存在：`本週打球資訊`（`@Dobby next`）、`下一季公告草稿`（`@Dobby season YYYYQn`，季度依今天日期算出下一季）、代他人操作（只放文字提示 `@Dobby +N @名字`、`@Dobby @名字 假`）。
 
-卡片由 `src/commands/command-list-card.ts` 組裝，handler 是 `src/commands/command-list.ts`。altText（通知、`/logs`、不支援 Flex 的舊版 LINE 看到的）是精簡版的完整指令寫法。設計取捨見 [ADR 0012](adr/0012-command-list-flex-card.md)。
+卡片由 `src/commands/command-list-card.ts` 組裝，handler 是 `src/commands/command-list.ts`。altText（通知、`/logs`、不支援 Flex 的舊版 LINE 看到的）列出卡片上每個指令的寫法。卡片和 altText 都只列中文關鍵字，英文別名照樣能用，只是不列出來。設計取捨見 [ADR 0012](adr/0012-command-list-flex-card.md)。
 
 ---
 
