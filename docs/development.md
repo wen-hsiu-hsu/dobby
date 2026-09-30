@@ -160,7 +160,7 @@ docker run -p 3000:3000 --env-file .env dobby
 2. 在 `src/commands/command-parser.ts` 新增解析邏輯
 3. 在 `src/commands/` 建立 handler 檔案
 4. 在 `src/commands/command-router.ts` 新增路由
-5. 決定這個指令要不要列進 `src/commands/command-list.ts` 的 `@Dobby command` 輸出，若列的話是否為管理員限定（管理員限定指令只接在 `isAdmin === true` 時回傳的章節裡，一般成員完全看不到）
+5. 決定這個指令要不要列進 `@Dobby command` 的指令清單卡（`src/commands/command-list-card.ts`，卡片本身跟 altText 兩處都要加），若列的話是否為管理員限定（管理員限定指令只放在 `isAdmin === true` 才加上的章節裡，一般成員完全看不到）
 6. 更新 `docs/commands.md`
 
 ## Notion Rate Limit

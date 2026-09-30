@@ -62,7 +62,7 @@ Capacity Calculator
 | 已經請過假（請假但已在請假名單，no-op） | gray `#737373` | `info-white.png` | 已經請過假 | `{name} 已請假，無需重複操作` |
 | 目前未請假（銷假但沒請過假，no-op） | gray `#737373` | `info-white.png` | 目前未請假 | `{name} 目前未請假` |
 
-顏色定義在 `flex-status-card.ts` 的 `BADGE_COLORS`；圖示檔名在 `src/config/flex-assets.ts` 的 `FLEX_ICONS`。零打名單那行的「N / 總名額」若 `totalSlots` 因資料異動算出負數，顯示層一律 clamp 到 0（`Math.max(0, totalSlots)`），不影響名額判斷本身的計算。
+顏色定義在 `src/commands/flex-card-parts.ts` 的 `BADGE_COLORS`（跟指令清單卡共用，`flex-status-card.ts` 轉出同名 export）；圖示檔名在 `src/config/flex-assets.ts` 的 `FLEX_ICONS`。零打名單那行的「N / 總名額」若 `totalSlots` 因資料異動算出負數，顯示層一律 clamp 到 0（`Math.max(0, totalSlots)`），不影響名額判斷本身的計算。
 
 **altText（精簡文字版）**：`buildStatusCardAltText()` 另外組一段純文字，保留 headline（含 ✅ 等既有措辭）、日期、零打名額與費用、只列已報名者的編號名單（不含空位列）、剩餘名額、請假名單、總人數；不含舊版「若要報名請輸入 @Dobby +1」這類提示。這段文字身兼三種用途：LINE 推播通知顯示的內容、`/logs` 看得到的內容（`reply-service.ts` 把 flex 訊息記成 `[flex] ${altText}`）、以及測試斷言的來源（`src/test-utils/reply-text.ts` 的 `replyText()`）。超過 400 字會截斷並以「…」結尾。
 

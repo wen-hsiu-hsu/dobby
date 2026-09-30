@@ -19,7 +19,13 @@ Dobby 會介紹自己並 @mention 觸發者和管理員。
 @Dobby command
 @Dobby 指令
 ```
-回覆內容依觸發者身分不同：一般成員只看得到本節（一般指令）跟下面「報名或請假類」；管理員額外多一個「管理員專用」章節（`next`、`season`、代他人報名），一般成員完全看不到這個章節存在（見 `src/commands/command-list.ts`）。
+回覆是 LINE Flex 卡片（跟報名狀態卡同一套照片標題區與深色配色），分成「查詢」「本週報名／請假」「管理員專用」三區：
+
+- 不需要參數的指令一列一個（顯示中文名稱＋實際指令文字），點下去等同使用者自己打那行指令：`報名人`、`公告`、`付款`、`欠`、`@Dobby`（自我介紹）。
+- 報名／請假區是四顆按鈕：`+1 零打`（`@Dobby +1`）、`−1 零打`（`@Dobby -1`）、`請假`（`@Dobby 假`）、`銷假`（`@Dobby 銷假`）。一次報名多位只放文字提示，要自己輸入 `@Dobby +2`。
+- 管理員專用區只在觸發者是管理員時出現，一般成員完全看不到這個章節存在：`本週打球資訊`（`@Dobby next`）、`下一季公告草稿`（`@Dobby season YYYYQn`，季度依今天日期算出下一季）、代他人操作（只放文字提示 `@Dobby +N @名字`）。
+
+卡片由 `src/commands/command-list-card.ts` 組裝，handler 是 `src/commands/command-list.ts`。altText（通知、`/logs`、不支援 Flex 的舊版 LINE 看到的）是精簡版的完整指令寫法。設計取捨見 [ADR 0012](adr/0012-command-list-flex-card.md)。
 
 ---
 
@@ -132,7 +138,7 @@ Notion 內容裡的 `bulleted_list_item`（項目符號清單）在輸出時會�
 @Dobby -1 @Vic        ← 幫 Vic 取消報名
 ```
 
-報名／取消報名時 `+N`/`-N` 跟 `@mention` 的前後順序皆可解析（`@Dobby @Vic +1` 也可以），上面採用跟 `@Dobby command` 指令說明文字（`src/commands/command-list.ts`）一致的順序。
+報名／取消報名時 `+N`/`-N` 跟 `@mention` 的前後順序皆可解析（`@Dobby @Vic +1` 也可以），上面採用跟 `@Dobby command` 指令清單卡（`src/commands/command-list-card.ts`）一致的順序。
 
 **注意：** 電腦版 LINE 的 @mention 有時無法正確傳遞，建議用手機操作代他人指令。
 
