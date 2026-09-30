@@ -13,7 +13,7 @@ export async function buildWeeklyStatusMessage(occupancy: EventOccupancy, dateSt
     return [`${dateStr} 不能到請喊聲`, `⛔ 本週活動暫停`].join('\n');
   }
 
-  // Show all slots including empty ones, matching buildEventStatusMessage's guest list.
+  // Show all slots including empty ones, matching buildEventStatusReply's guest list.
   const displaySlots = Math.max(totalSlots, event.guests.length);
   const guestLines = Array.from({ length: displaySlots }, (_, i) => `${i + 1}. ${event.guests[i] ?? ''}`).join('\n');
 

@@ -40,7 +40,31 @@ Capacity Calculator
 釋放 Mutex
 ```
 
-失敗或邊界情況（名額不足、重複請假、未請假卻銷假等）也會回覆同一種「完整名額狀態」格式，只是第一行換成對應的說明，而不是只回一句話（`src/commands/registration/event-status-message.ts`）。從取鎖開始的流程中，只有 `withFreshCalendarEvent` 統一處理的三種情況只回一句話：找不到活動、mutex 逾時（見下方「Mutex 保護」）、其他非預期錯誤（「系統錯誤，請稍後再試」）。例外情況見下方「請假邏輯」一節。
+失敗或邊界情況（名額不足、重複請假、未請假卻銷假等）也會回覆同一種「完整名額狀態」卡片，只是徽章顏色／圖示、標題、副標題換成對應的說明，而不是只回一句話。從取鎖開始的流程中，只有 `withFreshCalendarEvent` 統一處理的三種情況維持純文字：找不到活動、mutex 逾時（見下方「Mutex 保護」）、其他非預期錯誤（「系統錯誤，請稍後再試」）。取鎖前的檢查（指定對象語法錯誤、非管理員代操、查無對象、查無季資料、對象不是季租成員）也都是純文字，因為這些情況還沒有活動資料可以組卡片。例外情況見下方「請假邏輯」一節。
+
+### 狀態卡（Flex）
+
+報名／請假操作後的完整回覆是 LINE Flex 卡片：日期＋零打費用、徽章（顏色／圖示＋標題／副標題）、目前完整零打名單（空位合併成一行「還有 N 個空位」／「尚無人報名」，不逐格列出）、這次新增的條目標「新增」＋淺綠底色、請假名單（永遠完整列出，不截斷）、本週出席人數，底部三顆按鈕（`+1 零打`／`−1 零打`／`請假`，見 `docs/commands.md`）。卡片 JSON 由純函式 `buildStatusCardBubble()` 組裝（`src/commands/registration/flex-status-card.ts`），`buildEventStatusReply()`（`src/commands/registration/event-status-message.ts`）另外把請假人 pageId 查成姓名，再組出完整的 `{ type: 'flex', altText, contents }` 訊息。改用卡片的取捨（altText 的用途、按鈕為何用 message action、圖片資產怎麼部署）見 [ADR 0010](adr/0010-registration-status-flex-card.md)。
+
+各結束分支對應的徽章與文案（`{name}` 是操作對象的顯示名稱）：
+
+| 情境 | 徽章顏色 | 徽章圖示 | 標題 | 副標題 |
+|------|----------|----------|------|--------|
+| 報名成功 | lime `#A3E635` | `check-dark.png` | 報名成功 | `{name} 報名 N 位` |
+| 報名成功（被截斷，超過剩餘名額） | lime `#A3E635` | `check-dark.png` | 報名成功 | `{name} 報名 {實際位數} 位（名額已滿，原本要求 N 位）` |
+| 取消報名成功 | gray `#737373` | `minus-white.png` | 取消報名成功 | `{name} 取消 N 位` |
+| 名額不足（剩餘名額 ≤ 0） | orange `#FB923C` | `ban-dark.png` | 名額不足 | `名額不足，目前剩餘 0 個名額`（負數也顯示 0，見下方容量計算公式） |
+| 本週活動暫停 | orange `#FB923C` | `ban-dark.png` | 本週活動暫停 | `本次活動已暫停，無法報名` |
+| 無法取消（找不到報名紀錄） | orange `#FB923C` | `ban-dark.png` | 無法取消 | `找不到 {name} 的報名紀錄` |
+| 無法取消（`+0`／`-0`，實際刪除數為 0） | orange `#FB923C` | `ban-dark.png` | 無法取消 | `取消數量需大於 0` |
+| 請假成功 | blue `#60A5FA` | `calendar-x-dark.png` | 請假成功 | `{name} 本週請假，零打名額 +1` |
+| 銷假成功 | lime `#A3E635` | `calendar-check-dark.png` | 銷假成功 | `{name} 已銷假，零打名額 −1` |
+| 已經請過假（請假但已在請假名單，no-op） | gray `#737373` | `info-white.png` | 已經請過假 | `{name} 已請假，無需重複操作` |
+| 目前未請假（銷假但沒請過假，no-op） | gray `#737373` | `info-white.png` | 目前未請假 | `{name} 目前未請假` |
+
+顏色定義在 `flex-status-card.ts` 的 `BADGE_COLORS`；圖示檔名在 `src/config/flex-assets.ts` 的 `FLEX_ICONS`。零打名單那行的「N / 總名額」若 `totalSlots` 因資料異動算出負數，顯示層一律 clamp 到 0（`Math.max(0, totalSlots)`），不影響名額判斷本身的計算。
+
+**altText（精簡文字版）**：`buildStatusCardAltText()` 另外組一段純文字，保留 headline（含 ✅ 等既有措辭）、日期、零打名額與費用、只列已報名者的編號名單（不含空位列）、剩餘名額、請假名單、總人數；不含舊版「若要報名請輸入 @Dobby +1」這類提示。這段文字身兼三種用途：LINE 推播通知顯示的內容、`/logs` 看得到的內容（`reply-service.ts` 把 flex 訊息記成 `[flex] ${altText}`）、以及測試斷言的來源（`src/test-utils/reply-text.ts` 的 `replyText()`）。超過 400 字會截斷並以「…」結尾。
 
 季度是用**活動日**判斷，不是用今天：季末最後一週報名時，下週六可能已經屬於下一季，要用下一季的季租名單判斷身分與名額。原因與事故背景見 [ADR 0008](adr/0008-season-derived-from-event-date.md)。
 
@@ -194,7 +218,7 @@ LINE 電腦版和手機版的 `mentionees` 行為不一致：
 outcome 行不是「每個事件恰好一行」，例外有這些：
 
 - **mutex 逾時**：當下沒有 outcome，wrapper 已有 warn。背景的讀寫跑完後，它自己的 outcome 仍會用同一個 reqId 寫出，時間軸上排在 `Event processed` 之後。例外：背景 refetch 才發現沒有活動時，`EventNotFoundError` 會被 mutex 吞掉，不會有 `event-not-found` 行（很少見）。
-- **鎖內非預期錯誤**：wrapper 的 `… error` 那行就是結果。outcome 是在判斷完、組回覆訊息之前記的，所以如果是組訊息時（`buildEventStatusMessage` 查請假人姓名）才 throw，會同時有 outcome 行和 error 行——outcome 代表判斷結果（寫入成功的分支代表已經寫入），error 代表回覆沒送出。
+- **鎖內非預期錯誤**：wrapper 的 `… error` 那行就是結果。outcome 是在判斷完、組回覆訊息之前記的，所以如果是組訊息時（`buildEventStatusReply` 查請假人姓名）才 throw，會同時有 outcome 行和 error 行——outcome 代表判斷結果（寫入成功的分支代表已經寫入），error 代表回覆沒送出。
 - **取鎖前的查詢 throw**（`resolveTarget`／`seasonRepo.findByName`）：沒有 outcome，也不經過 wrapper，只有 event-router 的 error（使用者也收不到回覆，見 `TODO.md`「已知問題」）。
 
 報名被拒的四種（`paused`／`full`／`no-registration`／`zero-delta`）是 handler 依 `delta` 和 `isPaused` 推出來的（`registration-handler.ts` 的 `rejectionOutcome()`），因為 `CapacityResult` 只有給使用者看的錯誤文字。**`capacity-calculator.ts` 如果新增拒絕路徑，`rejectionOutcome()` 要一起改**，不然會被歸成 `full` 或 `no-registration`。
