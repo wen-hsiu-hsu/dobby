@@ -22,6 +22,20 @@ export const FLEX_ICONS = {
   usersGray: 'users-gray.png',
   calendarXGray: 'calendar-x-gray.png',
   userCheckGray: 'user-check-gray.png',
+  // 指令清單卡
+  listDark: 'list-dark.png',
+  searchGray: 'search-gray.png',
+  calendarGray: 'calendar-gray.png',
+  shieldGray: 'shield-gray.png',
+  userPlusGray: 'user-plus-gray.png',
+  usersLight: 'users-light.png',
+  megaphoneLight: 'megaphone-light.png',
+  creditCardLight: 'credit-card-light.png',
+  circleDollarSignLight: 'circle-dollar-sign-light.png',
+  botLight: 'bot-light.png',
+  calendarCheckLight: 'calendar-check-light.png',
+  fileTextLight: 'file-text-light.png',
+  chevronRightDim: 'chevron-right-dim.png',
 } as const;
 
 export function flexAssetUrl(filename: string): string {

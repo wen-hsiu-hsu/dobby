@@ -10,22 +10,23 @@ describe('Command routing integration', () => {
     vi.resetAllMocks();
   });
 
-  it('@Dobby command → replies with command list text', async () => {
+  it('@Dobby command → replies with the command list Flex card', async () => {
     const bot = createTestBot();
     const messages = await bot.run('@Dobby command', { userId: 'user-alice' });
 
     expect(messages.length).toBeGreaterThan(0);
-    expect(messages[0]).toMatchObject({ type: 'text' });
+    expect(messages[0]).toMatchObject({ type: 'flex' });
   });
 
   it('@Dobby command（一般成員）→ 不含管理員限定指令', async () => {
     const bot = createTestBot();
     const messages = await bot.run('@Dobby command', { userId: 'user-alice' });
 
-    const text = (messages[0] as any)?.text ?? '';
+    // 卡片 JSON（按鈕送出的指令、列上的文字）跟 altText 一起檢查
+    const text = JSON.stringify(messages[0]);
     expect(text).not.toContain('next');
     expect(text).not.toContain('season');
-    expect(text).not.toContain('代為報名');
+    expect(text).not.toContain('代他人');
     expect(text).not.toContain('管理員專用');
   });
 
@@ -51,11 +52,11 @@ describe('Command routing integration', () => {
     });
     const messages = await bot.run('@Dobby command', { userId: 'admin-user' });
 
-    const text = (messages[0] as any)?.text ?? '';
+    const text = JSON.stringify(messages[0]);
     expect(text).toContain('管理員專用');
     expect(text).toContain('@Dobby next');
-    expect(text).toContain('@Dobby season 2026Q2');
-    expect(text).toContain('代為報名');
+    expect(text).toContain('@Dobby season ');
+    expect(text).toContain('代他人報名');
   });
 
   it('@Dobby → replies with introduce text from announcement fixture', async () => {

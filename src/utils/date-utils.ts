@@ -114,6 +114,18 @@ export function getPreviousSeasonName(seasonName: string): string {
 }
 
 /**
+ * Returns the season name immediately after `seasonName` (canonical "YYYY-QN" form).
+ * Wraps across year boundaries: the season after "YYYY-Q4" is "(YYYY+1)-Q1".
+ */
+export function getNextSeasonName(seasonName: string): string {
+  const match = seasonName.match(/^(\d{4})-Q([1-4])$/);
+  if (!match) throw new Error(`Invalid season name: ${seasonName}`);
+  const year = Number(match[1]);
+  const quarter = Number(match[2]);
+  return quarter === 4 ? `${year + 1}-Q1` : `${year}-Q${quarter + 1}`;
+}
+
+/**
  * Formats a season name for display in the season announcement template.
  * "2026-Q2" → "2026 Q2 (4~6月)" (default), or "2026 Q2" when `withMonthRange` is false.
  */

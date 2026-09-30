@@ -10,6 +10,7 @@ import {
   getSeasonQuarter,
   getSeasonNameForDate,
   getPreviousSeasonName,
+  getNextSeasonName,
   formatSeasonTitle,
 } from '../date-utils.js';
 
@@ -186,6 +187,20 @@ describe('getPreviousSeasonName', () => {
 
   it('throws for an invalid season name', () => {
     expect(() => getPreviousSeasonName('not-a-season')).toThrow();
+  });
+});
+
+describe('getNextSeasonName', () => {
+  it('returns the following quarter within the same year', () => {
+    expect(getNextSeasonName('2026-Q3')).toBe('2026-Q4');
+  });
+
+  it('wraps to Q1 of the next year when crossing a year boundary', () => {
+    expect(getNextSeasonName('2026-Q4')).toBe('2027-Q1');
+  });
+
+  it('throws for an invalid season name', () => {
+    expect(() => getNextSeasonName('not-a-season')).toThrow();
   });
 });
 
