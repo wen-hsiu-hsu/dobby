@@ -350,6 +350,10 @@ describe('buildStatusCardAltText', () => {
     expect(altText).toContain('總人數：共 10 人');
   });
 
+  it('空白名字的請假人跟卡片一樣顯示「（未命名）」', () => {
+    expect(buildStatusCardAltText(baseParams({ absenteeNames: ['', '佩琪'] }))).toContain('請假：（未命名）、佩琪');
+  });
+
   it('不含空位列，也不含「若要報名請輸入 @Dobby +1」', () => {
     const altText = buildStatusCardAltText(baseParams({ guests: ['Alice的朋友'], totalSlots: 6, newGuestCount: 0 }));
     expect(altText).not.toContain('若要報名');

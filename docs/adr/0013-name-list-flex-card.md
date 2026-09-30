@@ -2,7 +2,7 @@
 
 `@Dobby 欠` 和 `@Dobby 報名人` 原本回一段「標題＋編號名單」的純文字。報名狀態卡、指令清單卡改成 Flex 後（[ADR 0010](0010-registration-status-flex-card.md)、[ADR 0012](0012-command-list-flex-card.md)），這兩個也改成同風格的卡片。兩者資料形狀一樣（一串人名），所以共用 `src/commands/name-list-card.ts` 的 `buildNameListBubble()`，照片標題區、徽章、按鈕沿用 `flex-card-parts.ts`。以下記錄幾個取捨。
 
-**名單一律單欄、完整列出，名字過長就換行。** mockup 比較過單欄、兩欄、超過 10 人自動改兩欄、用「、」串成一段四種排法，使用者選單欄。兩欄每欄只放得下約 6 個中文字，Flex 的 text 超出寬度會被截掉尾巴，長的英文暱稱會看不完整；單欄讓名字 `wrap: true` 換行，不會截斷。人多時卡片會比較長（20 人約多出 340px），這是接受的代價。名單不用「…」或「等 N 人」省略，跟請假名單的規則一樣。
+**名單一律單欄、完整列出，名字過長就換行。** mockup 比較過單欄、兩欄、超過 10 人自動改兩欄、用「、」串成一段四種排法，使用者選單欄。兩欄每欄只放得下約 6 個中文字，Flex 的 text 超出寬度會被截掉尾巴，長的英文暱稱會看不完整；單欄讓名字 `wrap: true` 換行，不會截斷。人多時卡片會比較長，這是接受的代價。名單不用「…」或「等 N 人」省略，跟請假名單的規則一樣。
 
 **空狀態只剩標題區，不畫 body。** 沒人欠費、本季沒有成員時，`names` 是空陣列，卡片只有照片標題區：欠費改成螢光綠徽章＋「全部繳清」＋副標題「目前沒有未繳費成員」；報名人改成灰色徽章＋「0 位」。欠費卡的「付款資訊」按鈕也不顯示，因為沒有人需要付款。
 
@@ -10,7 +10,7 @@
 
 **欠費卡的「付款資訊」按鈕送出 `@Dobby 付款`。** 看到自己在名單上的人可以直接點開付款方式。付款指令之後若改成卡片或改關鍵字，這顆按鈕要一起改；`owe.test.ts` 斷言了按鈕送出的文字。
 
-**名單太長時改回純文字。** LINE 規定單一 bubble 的 JSON 不能超過 30KB，名單每列約 450 bytes，validate API 實測 60 人可以、65 人被退回（「Too large flex message」）。被退回時 `reply-service.ts` 只記一筆 warn，handler 的 catch 接不到，群組裡連「系統錯誤」都不會出現。所以 `owe.ts`、`participants.ts` 送出前用 `fitsBubbleSizeLimit()`（30000 bytes，略保守）檢查，超過就改送改版前的純文字名單（完整、不截斷）。2026-10-01 正式資料欠費 10 人，離上限很遠，這是保險；`@Dobby 欠` 比較可能碰到，因為它不分季度，累積所有還沒結清的人。
+**名單太長時改回純文字。** LINE 規定單一 bubble 的 JSON 不能超過 30KB，名單每列約 450 bytes，validate API 實測 60 人可以、65 人被退回（「Too large flex message」）。被退回時 `reply-service.ts` 只記一筆 warn，handler 的 catch 接不到，群組裡連「系統錯誤」都不會出現。所以 `owe.ts`、`participants.ts` 送出前用 `fitsBubbleSizeLimit()`（30000 bytes，略保守）檢查，超過就改送改版前的純文字名單（完整、不截斷）。2026-10-01 用 `findAllUnpaid()` 查正式 Notion，欠費 10 人，離上限很遠，這是保險；`@Dobby 欠` 比較可能碰到，因為它不分季度，累積所有還沒結清的人。
 
 **Notion 名字空白時顯示「（未命名）」。** Flex 的 text 不能是空字串，LINE 會整則退回（validate API 實測回「must be non-empty text」）。人員清單的 Name 沒填時 `getTitle` 回傳空字串，所以名單卡在這種情況顯示「（未命名）」。改版前的純文字只會多一行「3. 」。
 

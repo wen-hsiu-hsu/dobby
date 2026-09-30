@@ -73,6 +73,51 @@ describe('handleParticipants (@Dobby participants / people / 報名人)', () => 
     expect(JSON.stringify(bubble.body)).not.toContain('"action"');
   });
 
+  it('falls back to plain text when the member list is too long for one Flex bubble', async () => {
+    const memberIds = Array.from({ length: 70 }, (_, i) => `person-${i + 1}`);
+    const bot = createTestBot({
+      season: {
+        results: [
+          {
+            id: 'season-page-1',
+            object: 'page',
+            properties: {
+              '季租時段': { type: 'title', title: [{ plain_text: '2026-Q2', type: 'text' }] },
+              '報名人': { type: 'relation', relation: memberIds.map((id) => ({ id })), has_more: false },
+              '場地數': { type: 'number', number: 3 },
+              '零打費用': { type: 'number', number: 200 },
+            },
+          },
+        ],
+      },
+      people: {
+        results: memberIds.map((id, i) => ({
+          id,
+          object: 'page',
+          properties: {
+            Name: { type: 'title', title: [{ plain_text: `成員${i + 1}`, type: 'text' }] },
+            '結清': { type: 'formula', formula: { type: 'boolean', boolean: true } },
+          },
+        })),
+      },
+    });
+    // findByPageIds 每頁之間 sleep 400ms，70 人要 28 秒；用假計時器快轉
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    try {
+      const pending = bot.run('@Dobby 報名人', { userId: 'user-alice' });
+      await vi.runAllTimersAsync();
+      const messages = await pending;
+
+      expect(messages).toHaveLength(1);
+      expect(messages[0]?.type).toBe('text');
+      const text = (messages[0] as { text: string }).text;
+      expect(text.startsWith('2026-Q2 報名人（70 位）：\n1. 成員1\n')).toBe(true);
+      expect(text.endsWith('70. 成員70')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('replies with a system error message instead of throwing when the repository call fails', async () => {
     const bot = createTestBot();
     // Only fail the Season DB query (findByName) — let the Users DB lookup that

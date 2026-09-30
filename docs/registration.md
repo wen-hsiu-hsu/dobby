@@ -64,7 +64,7 @@ Capacity Calculator
 
 顏色定義在 `src/commands/flex-card-parts.ts` 的 `BADGE_COLORS`（跟指令清單卡、名單卡共用，`flex-status-card.ts` 轉出同名 export）；圖示檔名在 `src/config/flex-assets.ts` 的 `FLEX_ICONS`。零打名單那行的「N / 總名額」若 `totalSlots` 因資料異動算出負數，顯示層一律 clamp 到 0（`Math.max(0, totalSlots)`），不影響名額判斷本身的計算。
 
-**altText（精簡文字版）**：`buildStatusCardAltText()` 另外組一段純文字，保留 headline（含 ✅ 等既有措辭）、日期、零打名額與費用、只列已報名者的編號名單（不含空位列）、剩餘名額、請假名單、總人數；不含舊版「若要報名請輸入 @Dobby +1」這類提示。這段文字身兼三種用途：LINE 推播通知顯示的內容、`/logs` 看得到的內容（`reply-service.ts` 把 flex 訊息記成 `[flex] ${altText}`）、以及測試斷言的來源（`src/test-utils/reply-text.ts` 的 `replyText()`）。超過 400 字會截斷並以「…」結尾。
+**altText（精簡文字版）**：`buildStatusCardAltText()` 另外組一段純文字，保留 headline（含 ✅ 等既有措辭）、日期、零打名額與費用、只列已報名者的編號名單（不含空位列）、剩餘名額、請假名單（空白名字一樣顯示「（未命名）」）、總人數；不含舊版「若要報名請輸入 @Dobby +1」這類提示。這段文字身兼三種用途：LINE 推播通知顯示的內容、`/logs` 看得到的內容（`reply-service.ts` 把 flex 訊息記成 `[flex] ${altText}`）、以及測試斷言的來源（`src/test-utils/reply-text.ts` 的 `replyText()`）。超過 400 字會截斷並以「…」結尾。
 
 季度是用**活動日**判斷，不是用今天：季末最後一週報名時，下週六可能已經屬於下一季，要用下一季的季租名單判斷身分與名額。原因與事故背景見 [ADR 0008](adr/0008-season-derived-from-event-date.md)。
 
