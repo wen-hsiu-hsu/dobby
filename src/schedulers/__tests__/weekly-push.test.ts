@@ -7,6 +7,7 @@ import { pushMessage } from '../../services/line/push-service.js';
 import { logger } from '../../utils/logger.js';
 import { env } from '../../config/env.js';
 import { formatDate, getNextSaturday } from '../../utils/date-utils.js';
+import { cardHeroSummary } from '../../commands/registration/__tests__/card-nav.js';
 import type { CalendarEvent, SeasonRecord, PersonRecord } from '../../types/notion-models.js';
 
 // Fixed so `getNextSaturday()` inside weekly-push.ts always resolves the same way,
@@ -72,9 +73,17 @@ function makePerson(overrides: Partial<PersonRecord> = {}): PersonRecord {
   };
 }
 
-function pushedText(): string {
+// 推播訊息現在是 Flex 卡片（見 weekly-status-message.ts 的 buildWeeklyStatusReply），
+// 沒有 .text 欄位——用 altText 當精簡文字版斷言內容，跟報名／請假卡片的既有測試
+// 慣例（test-utils/reply-text.ts 的 replyText()）一致。
+function pushedAltText(): string {
   const [, messages] = pushMessageMock.mock.calls[0]!;
-  return (messages[0] as { text: string }).text;
+  return (messages[0] as { altText: string }).altText;
+}
+
+function pushedBubble(): any {
+  const [, messages] = pushMessageMock.mock.calls[0]!;
+  return (messages[0] as { contents: unknown }).contents;
 }
 
 describe('sendWeeklyPush', () => {
@@ -126,15 +135,29 @@ describe('sendWeeklyPush', () => {
     );
   });
 
-  it('shows a paused message instead of attendance count when the event is paused', async () => {
+  it('pushes a flex status card, not a plain-text message', async () => {
+    await sendWeeklyPush();
+
+    const [, messages] = pushMessageMock.mock.calls[0]!;
+    expect(messages[0]!.type).toBe('flex');
+    const summary = cardHeroSummary(pushedBubble());
+    expect(summary.title).toBe('本週打球');
+  });
+
+  it('shows the paused card (title「本週活動暫停」, no footer/capacity) instead of the attendance card when the event is paused', async () => {
     findByDateMock.mockResolvedValue(makeCalendarEvent({ date: nextSaturday, isPaused: true }));
 
     await sendWeeklyPush();
 
-    const text = pushedText();
-    expect(text).toContain(`${nextSaturday} 不能到請喊聲`);
-    expect(text).toContain('⛔ 本週活動暫停');
-    expect(text).not.toContain('應到');
+    const bubble = pushedBubble();
+    const titleRow = bubble.hero.contents[1].contents[1].contents[0];
+    expect(titleRow.contents[1]).toMatchObject({ text: '本週活動暫停' });
+    expect(bubble.footer).toBeUndefined();
+
+    const altText = pushedAltText();
+    expect(altText).toContain(nextSaturday);
+    expect(altText).toContain('本週活動暫停');
+    expect(altText).not.toContain('應到');
   });
 
   it('builds a numbered guest list with filled and empty slots, and reports courts/fee/attendance', async () => {
@@ -146,16 +169,25 @@ describe('sendWeeklyPush', () => {
 
     await sendWeeklyPush();
 
-    const text = pushedText();
-    expect(text).toContain(`${nextSaturday} 不能到請喊聲`);
-    expect(text).toContain('零打名額：4人 $200/人');
-    expect(text).toContain('1. 小明');
-    expect(text).toContain('2. 小華');
-    expect(text).toContain('3. ');
-    expect(text).toContain('4. ');
-    expect(text).toContain('場地：1 面');
-    expect(text).toContain('應到：3 人');
-    expect(text).toContain('請假：無');
+    const bubble = pushedBubble();
+    const summary = cardHeroSummary(bubble);
+    // 行事曆 event.courts 未填，resolveCourts 用季預設(1)，跟季預設本身相同 -> 沒有「本週調整」
+    expect(summary.subtitle).toBe('不能到請喊聲');
+
+    const guestSection = bubble.body.contents[0].contents;
+    expect(guestSection.map((row: any) => row.contents?.[1]?.text)).toEqual(
+      expect.arrayContaining(['小明', '小華'])
+    );
+
+    const altText = pushedAltText();
+    expect(altText).toContain(nextSaturday);
+    expect(altText).toContain('零打名額 4 人 | $200/人');
+    expect(altText).toContain('1. 小明');
+    expect(altText).toContain('2. 小華');
+    expect(altText).toContain('場地：1 面');
+    expect(altText).not.toContain('本週調整');
+    expect(altText).toContain('總人數：共 5 人'); // presentSeasonMembers(3) + guests(2)
+    expect(altText).toContain('請假：無');
   });
 
   it('resolves absentee names and joins them with 、 when there are absentees', async () => {
@@ -165,8 +197,10 @@ describe('sendWeeklyPush', () => {
     await sendWeeklyPush();
 
     expect(findByPageIdsMock).toHaveBeenCalledWith(['p-a', 'p-b']);
-    const text = pushedText();
-    expect(text).toContain('請假：小美、小強');
+    const bubble = pushedBubble();
+    const leaveSection = bubble.body.contents[2];
+    expect(leaveSection.contents[1].text).toBe('小美、小強');
+    expect(pushedAltText()).toContain('請假：小美、小強');
   });
 
   it('shows 無 for absentees when there are none', async () => {
@@ -175,8 +209,10 @@ describe('sendWeeklyPush', () => {
     await sendWeeklyPush();
 
     expect(findByPageIdsMock).not.toHaveBeenCalled();
-    const text = pushedText();
-    expect(text).toContain('請假：無');
+    const bubble = pushedBubble();
+    const leaveSection = bubble.body.contents[2];
+    expect(leaveSection.contents[1].text).toBe('無');
+    expect(pushedAltText()).toContain('請假：無');
   });
 
   it('pushes to every configured group when there are multiple targets and all succeed', async () => {

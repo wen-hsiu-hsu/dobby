@@ -1,7 +1,7 @@
 import cron from 'node-cron';
 import { pushMessage } from '../services/line/push-service.js';
 import { getEventOccupancy } from '../services/notion/event-occupancy.js';
-import { buildWeeklyStatusMessage } from '../commands/weekly-status-message.js';
+import { buildWeeklyStatusReply } from '../commands/weekly-status-message.js';
 import { env } from '../config/env.js';
 import { formatDate, getNextSaturday } from '../utils/date-utils.js';
 import { logger } from '../utils/logger.js';
@@ -31,9 +31,9 @@ async function doSendWeeklyPush(): Promise<void> {
       return;
     }
 
-    const text = await buildWeeklyStatusMessage(occupancy, nextSaturday);
+    const reply = await buildWeeklyStatusReply(occupancy, nextSaturday);
 
-    const messages = [{ type: 'text' as const, text }];
+    const messages = [reply];
 
     let succeeded = 0;
     let failed = 0;
