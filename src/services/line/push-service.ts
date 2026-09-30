@@ -2,6 +2,7 @@ import type { messagingApi } from '@line/bot-sdk';
 import { randomBytes } from 'node:crypto';
 import { lineClient } from '../../config/line.js';
 import { logger } from '../../utils/logger.js';
+import { summarizeMessageForLog } from './message-summary.js';
 
 type Message = messagingApi.Message;
 
@@ -15,9 +16,7 @@ export async function pushMessage(
   to: string,
   messages: Message[]
 ): Promise<void> {
-  const messageContents = messages.map((m) =>
-    m.type === 'text' ? (m as { type: string; text: string }).text : `[${m.type}]`
-  );
+  const messageContents = messages.map(summarizeMessageForLog);
   // sendId correlates this call's start/sent/failure/payload log lines so
   // log-grouping.ts can pair them without relying on `to`/`messages` content
   // (which is now debug-only — see docs/adr/0005-purpose-context-layered-on-reqid.md

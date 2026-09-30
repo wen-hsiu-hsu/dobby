@@ -67,6 +67,30 @@ describe('pushMessage', () => {
     expect(sendIds[0]).not.toBe(sendIds[1]);
   });
 
+  it('logs a flex message as "[flex] <altText>" instead of "[flex]" alone, so /logs shows what was actually pushed', async () => {
+    mockPushMessage.mockResolvedValue({ sentMessages: [] });
+
+    await pushMessage('group-1', [
+      { type: 'flex', altText: '本週打球・不能到請喊聲', contents: { type: 'bubble' } } as any,
+    ]);
+
+    expect(logger.debug).toHaveBeenCalledWith(
+      expect.objectContaining({ messages: ['[flex] 本週打球・不能到請喊聲'] }),
+      'LINE push payload',
+    );
+  });
+
+  it('still logs "[type]" for other non-text message types (e.g. sticker)', async () => {
+    mockPushMessage.mockResolvedValue({ sentMessages: [] });
+
+    await pushMessage('group-1', [{ type: 'sticker', packageId: '1', stickerId: '2' } as any]);
+
+    expect(logger.debug).toHaveBeenCalledWith(
+      expect.objectContaining({ messages: ['[sticker]'] }),
+      'LINE push payload',
+    );
+  });
+
   it('does not include message content in the error log on failure', async () => {
     const err = new Error('boom');
     mockPushMessage.mockRejectedValue(err);
