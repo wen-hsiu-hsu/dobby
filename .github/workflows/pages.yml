@@ -1,0 +1,37 @@
+# 把 assets/ 發布到 GitHub Pages，給 LINE Flex 卡片讀圖片用
+# （https://wen-hsiu-hsu.github.io/dobby/flex/<檔名>）。
+# 只發布 assets/，不發布整個 repo。
+# 需要在 repo 的 Settings → Pages → Source 選「GitHub Actions」才會生效。
+name: Deploy assets to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'assets/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: assets
+      - id: deployment
+        uses: actions/deploy-pages@v4
