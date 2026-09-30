@@ -66,6 +66,8 @@ docker compose down
 - **Cloudflare Tunnel**：outbound-only 連線，Pi 不用在路由器開任何 inbound port，家用（浮動）IP 不會曝光。同一個 tunnel 下用多條 Public Hostname 規則分流到 Pi 上不同的服務，dobby 分到的 hostname 導到 `localhost:<PORT>`（實際 port 看 Pi 上那份 `.env` 的 `PORT` 值，見下方）。`/webhook`、`/health`、`/logs` 三個端點都走同一個 hostname，沒有分開設定。
 - **pi-deployer**：Pi 上自架的通用 webhook 部署服務（不是 dobby 的一部分），GitHub push 新 commit 到這個 repo 時觸發自動 `git pull` + `docker compose up -d --build`，取代手動 SSH 上去部署。這代表每次 push 到 `main` 都直接上正式環境，push 前要先在本機跑過測試。
 
+**Flex 卡片的圖片不在 Pi 上**：報名／請假回覆、週報推播與 `@Dobby next` 的卡片，標題照片和圖示都讀 GitHub Pages（`https://wen-hsiu-hsu.github.io/dobby/flex/`），由 `.github/workflows/pages.yml` 在 `assets/` 有變動並 push 到 `main` 時發布，不進 Docker image。repo 的 Settings → Pages → Source 必須是「GitHub Actions」；Pages 停掉或檔案被刪，卡片會破圖。改圖要換檔名、不能覆蓋舊檔，理由見 [ADR 0010](adr/0010-registration-status-flex-card.md)。
+
 **`/logs` 沒有額外套 Cloudflare Access 保護**——這是討論過的既定決定，維持現有的 `LOGS_ACCESS_TOKEN` 機制即可，不是遺漏。`/webhook` 的安全性一樣不靠曝露方式本身，靠的是 `@line/bot-sdk` 內建的 signature 驗證（見上方「Webhook 端點」）；Tunnel 只是換掉封包怎麼送到 Pi，不影響、也不能取代這層驗證。
 
 `docker-compose.yml` 的 `ports: "${PORT:-3000}:${PORT:-3000}"` 是特意保留給 Pi host 上的 Cloudflare Tunnel / pi-deployer 用的，不要因為「反正走 tunnel 不需要開 port」而誤刪——host 上這兩個服務都是透過這個對外的 port mapping 打到 container 裡的 app，不是走 docker network 內部解析。這裡的 `${PORT}` 是 Compose 在解析這份 YAML 時，從專案根目錄的 `.env` 讀值替換（跟同一個 `.env` 透過 `env_file:` 注入到容器內部是兩個不同機制，只是剛好共用同一份檔案），沒設的話 fallback 回 `3000`，跟 `src/config/env.ts` 的 zod schema 預設值一致。要換 port 只需要改 `.env` 的 `PORT`，不用再動這個檔案；但如果啟動 `docker compose` 的 shell 本身也 export 了 `PORT`，會蓋過 `.env` 裡的值，要注意這個優先順序。

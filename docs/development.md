@@ -53,6 +53,8 @@ npm run dev:docker
 - ngrok 面板在 `http://localhost:4040`（可以看到每次 webhook 的原始 request/response，比對簽章驗證失敗時很好用）
 - 把 `https://<NGROK_DOMAIN>/webhook` 填到 LINE Developers Console 的 Webhook URL 欄位，設定一次之後網址不會變，不用每次重啟都重新貼
 
+Flex 卡片的圖片在本機開發時一樣讀正式的 GitHub Pages（`src/config/flex-assets.ts`，不分環境）。新增或換掉 `assets/flex/` 的圖片後，要等它 push 到 `main`、Pages 發布完成，ngrok 測試時才看得到；在那之前卡片會顯示成破圖，不是程式錯誤（見 [ADR 0010](adr/0010-registration-status-flex-card.md)）。
+
 `docker-compose.dev.yml` 的 `app` service 只把 `npm ci` 的結果 bake 進 image（`Dockerfile` 的 `dev` stage），原始碼是 bind mount 進去的，所以改 TypeScript 檔案會即時重啟，不用重建 image；只有改 `package.json` 才需要 `npm run dev:docker` 重新 `--build`。
 
 `docker-compose.dev.yml` 跟正式的 `docker-compose.yml` 各自用 `name:` 指定了不同的 compose project 名稱（`dobby-dev` / `dobby`）。兩者預設都會用資料夾名稱當 project 名稱，沒特別指定的話會撞名——`up` 其中一個會把另一個正在跑的 container 悄悄換掉，`down -v` 打錯檔案也會把對方的 volume 一起清掉。改指令時不要拿掉這個 `name:`。
