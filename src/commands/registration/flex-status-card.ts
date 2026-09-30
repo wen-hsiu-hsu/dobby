@@ -51,6 +51,18 @@ export interface StatusCardParams {
   guestFee: number;
   /** 已查好姓名的請假名單，依序；永遠完整列出，不截斷。 */
   absenteeNames: string[];
+  /**
+   * 暫停週卡片專用（見 `../weekly-status-message.ts`）。true 時只保留 hero 的照片／
+   * 日期與費用行／徽章／標題，拿掉標題列右側「剩 N 位／已額滿」與副標題、進度條；
+   * body 拿掉零打名單／請假／本週出席三段，改顯示 `pausedNote` 一行灰字；footer
+   * 三顆按鈕整個拿掉（暫停週沒有可操作的動作）。
+   *
+   * 預設 `undefined`（視同 `false`）——報名／請假的所有結束分支都不會設這個欄位，
+   * 輸出跟這個欄位加入前完全相同，不需要另外改呼叫端。
+   */
+  paused?: boolean;
+  /** `paused=true` 時 body 顯示的說明文字，例如「本週因故暫停，恢復後另行公告」。`paused` 為 false／undefined 時忽略。 */
+  pausedNote?: string;
 }
 
 function numberBox(n: number): messagingApi.FlexBox {
@@ -190,6 +202,8 @@ export function buildStatusCardBubble(params: StatusCardParams): messagingApi.Fl
     presentSeasonMembers,
     guestFee,
     absenteeNames,
+    paused = false,
+    pausedNote,
   } = params;
 
   const filled = guests.length;
@@ -240,84 +254,39 @@ export function buildStatusCardBubble(params: StatusCardParams): messagingApi.Fl
 
   const absenteeText = absenteeNames.length > 0 ? absenteeNames.join('、') : '無';
 
-  return {
-    type: 'bubble',
-    size: 'mega',
-    hero: {
-      type: 'box',
-      layout: 'vertical',
-      paddingAll: '0px',
-      contents: [
-        {
-          type: 'image',
-          url: flexAssetUrl(FLEX_ICONS.headerShuttle),
-          size: 'full',
-          aspectMode: 'cover',
-          aspectRatio: '300:170',
-        },
-        {
-          type: 'box',
-          layout: 'vertical',
-          position: 'absolute',
-          offsetTop: '0px',
-          offsetBottom: '0px',
-          offsetStart: '0px',
-          offsetEnd: '0px',
-          paddingTop: '14px',
-          paddingBottom: '14px',
-          paddingStart: '20px',
-          paddingEnd: '20px',
-          justifyContent: 'space-between',
-          background: {
-            type: 'linearGradient',
-            angle: '0deg',
-            startColor: '#000000D9',
-            centerColor: '#0000001A',
-            endColor: '#00000059',
-            centerPosition: '65%',
-          },
-          contents: [
-            { type: 'text', text: `${formatCardDateLabel(date)}・零打 $${guestFee}/人`, size: 'sm', weight: 'bold', color: '#FFFFFF' },
-            {
-              type: 'box',
-              layout: 'vertical',
-              contents: [
-                {
-                  type: 'box',
-                  layout: 'horizontal',
-                  spacing: 'md',
-                  alignItems: 'center',
-                  contents: [
-                    badgeBox(badgeColor, badgeIcon),
-                    { type: 'text', text: title, size: 'xl', weight: 'bold', color: '#FFFFFF', flex: 1 },
-                    {
-                      type: 'text',
-                      text: remaining > 0 ? `剩 ${remaining} 位` : '已額滿',
-                      size: 'md',
-                      weight: 'bold',
-                      color: '#FFFFFF',
-                      align: 'end',
-                      flex: 0,
-                    },
-                  ],
-                },
-                { type: 'text', text: subtitle, size: 'sm', color: '#FFFFFF', margin: 'xs', wrap: true },
-                bar,
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    body: {
-      type: 'box',
-      layout: 'vertical',
-      spacing: 'lg',
-      paddingTop: '14px',
-      paddingBottom: '8px',
-      paddingStart: '20px',
-      paddingEnd: '20px',
-      contents: [
+  // 暫停週：標題列只留徽章＋標題，不顯示「剩 N 位／已額滿」；innerBox 底下也不接
+  // 副標題、進度條——這三個都是「還能不能報名」的資訊，暫停週沒有這個概念。
+  const titleRowContents: messagingApi.FlexComponent[] = [
+    badgeBox(badgeColor, badgeIcon),
+    { type: 'text', text: title, size: 'xl', weight: 'bold', color: '#FFFFFF', flex: 1 },
+  ];
+  if (!paused) {
+    titleRowContents.push({
+      type: 'text',
+      text: remaining > 0 ? `剩 ${remaining} 位` : '已額滿',
+      size: 'md',
+      weight: 'bold',
+      color: '#FFFFFF',
+      align: 'end',
+      flex: 0,
+    });
+  }
+
+  const innerBoxContents: messagingApi.FlexComponent[] = [
+    { type: 'box', layout: 'horizontal', spacing: 'md', alignItems: 'center', contents: titleRowContents },
+  ];
+  if (!paused) {
+    innerBoxContents.push(
+      { type: 'text', text: subtitle, size: 'sm', color: '#FFFFFF', margin: 'xs', wrap: true },
+      bar
+    );
+  }
+
+  // 暫停週：body 拿掉零打名單／請假／本週出席三段，改放一行灰字說明；footer 三顆
+  // 按鈕整個拿掉（暫停週沒有可操作的動作，見 StatusCardParams.paused 的說明）。
+  const bodyContents: messagingApi.FlexComponent[] = paused
+    ? [{ type: 'text', text: pausedNote ?? '', size: 'sm', color: SUB, wrap: true }]
+    : [
         { type: 'box', layout: 'vertical', spacing: 'xs', contents: guestSectionContents },
         { type: 'separator', color: DIV },
         {
@@ -364,9 +333,70 @@ export function buildStatusCardBubble(params: StatusCardParams): messagingApi.Fl
             },
           ],
         },
+      ];
+
+  const bubble: messagingApi.FlexBubble = {
+    type: 'bubble',
+    size: 'mega',
+    hero: {
+      type: 'box',
+      layout: 'vertical',
+      paddingAll: '0px',
+      contents: [
+        {
+          type: 'image',
+          url: flexAssetUrl(FLEX_ICONS.headerShuttle),
+          size: 'full',
+          aspectMode: 'cover',
+          aspectRatio: '300:170',
+        },
+        {
+          type: 'box',
+          layout: 'vertical',
+          position: 'absolute',
+          offsetTop: '0px',
+          offsetBottom: '0px',
+          offsetStart: '0px',
+          offsetEnd: '0px',
+          paddingTop: '14px',
+          paddingBottom: '14px',
+          paddingStart: '20px',
+          paddingEnd: '20px',
+          justifyContent: 'space-between',
+          background: {
+            type: 'linearGradient',
+            angle: '0deg',
+            startColor: '#000000D9',
+            centerColor: '#0000001A',
+            endColor: '#00000059',
+            centerPosition: '65%',
+          },
+          contents: [
+            { type: 'text', text: `${formatCardDateLabel(date)}・零打 $${guestFee}/人`, size: 'sm', weight: 'bold', color: '#FFFFFF' },
+            { type: 'box', layout: 'vertical', contents: innerBoxContents },
+          ],
+        },
       ],
     },
-    footer: {
+    body: {
+      type: 'box',
+      layout: 'vertical',
+      spacing: 'lg',
+      paddingTop: '14px',
+      paddingBottom: '8px',
+      paddingStart: '20px',
+      paddingEnd: '20px',
+      contents: bodyContents,
+    },
+    styles: {
+      hero: { backgroundColor: '#000000' },
+      body: { backgroundColor: BG },
+      ...(paused ? {} : { footer: { backgroundColor: BG } }),
+    },
+  };
+
+  if (!paused) {
+    bubble.footer = {
       type: 'box',
       layout: 'horizontal',
       spacing: 'sm',
@@ -379,13 +409,10 @@ export function buildStatusCardBubble(params: StatusCardParams): messagingApi.Fl
         footerButton('−1 零打', '@Dobby -1', 1, false),
         footerButton('請假', '@Dobby 假', 1, false),
       ],
-    },
-    styles: {
-      hero: { backgroundColor: '#000000' },
-      body: { backgroundColor: BG },
-      footer: { backgroundColor: BG },
-    },
-  };
+    };
+  }
+
+  return bubble;
 }
 
 const ALT_TEXT_MAX = 400;
@@ -397,7 +424,16 @@ const ALT_TEXT_MAX = 400;
  * 少了空位列和「若要報名請輸入 @Dobby +1」。
  */
 export function buildStatusCardAltText(params: StatusCardParams): string {
-  const { headline, date, totalSlots, guestFee, guests, presentSeasonMembers, absenteeNames } = params;
+  const { headline, date, totalSlots, guestFee, guests, presentSeasonMembers, absenteeNames, paused, pausedNote } = params;
+
+  // 暫停週沒有名額／零打名單／請假可講，altText 只留 headline＋日期＋說明文字。
+  if (paused) {
+    const pausedLines = [headline, '', date];
+    if (pausedNote) pausedLines.push(pausedNote);
+    const pausedText = pausedLines.join('\n');
+    return pausedText.length > ALT_TEXT_MAX ? pausedText.slice(0, ALT_TEXT_MAX - 1) + '…' : pausedText;
+  }
+
   const remaining = Math.max(0, totalSlots - guests.length);
   // 同 buildStatusCardBubble：totalSlots 可能因資料異動算出負數，顯示用一律 clamp 到 0。
   const displayTotalSlots = Math.max(0, totalSlots);

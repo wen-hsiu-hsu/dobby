@@ -268,6 +268,69 @@ describe('buildStatusCardBubble', () => {
   });
 });
 
+describe('buildStatusCardBubble（paused，週報／next 暫停週卡片用，見 weekly-status-message.ts）', () => {
+  function pausedParams(overrides: Partial<StatusCardParams> = {}): StatusCardParams {
+    return baseParams({
+      title: '本週活動暫停',
+      badgeColor: 'gray',
+      badgeIcon: FLEX_ICONS.banDark,
+      guests: [],
+      newGuestCount: 0,
+      absenteeNames: [],
+      paused: true,
+      pausedNote: '本週因故暫停，恢復後另行公告',
+      ...overrides,
+    });
+  }
+
+  it('標題列只有徽章＋標題，沒有「剩 N 位／已額滿」', () => {
+    const bubble = buildStatusCardBubble(pausedParams());
+    const titleRow = heroTitleRow(bubble);
+    expect(titleRow.contents).toHaveLength(2);
+    expect(titleRow.contents[1]).toMatchObject({ text: '本週活動暫停' });
+  });
+
+  it('沒有副標題、沒有進度條（innerBox 只有標題列一個元素）', () => {
+    const bubble = buildStatusCardBubble(pausedParams());
+    const innerBox = heroOverlay(bubble).contents[1];
+    expect(innerBox.contents).toHaveLength(1);
+  });
+
+  it('日期與費用行仍然保留（跟正常週同格式）', () => {
+    const bubble = buildStatusCardBubble(pausedParams({ date: '2026-10-03', guestFee: 200 }));
+    const dateText = heroOverlay(bubble).contents[0];
+    expect(dateText.text).toBe('10/03（六）・零打 $200/人');
+  });
+
+  it('body 沒有零打名單／請假／本週出席三段，只有一行灰字說明', () => {
+    const bubble = buildStatusCardBubble(pausedParams());
+    const rows = (bubble.body as any).contents;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ type: 'text', text: '本週因故暫停，恢復後另行公告', color: '#A3A3A3' });
+  });
+
+  it('沒有 footer（暫停週沒有可操作的按鈕）', () => {
+    const bubble = buildStatusCardBubble(pausedParams());
+    expect(bubble.footer).toBeUndefined();
+    expect((bubble.styles as any).footer).toBeUndefined();
+  });
+});
+
+describe('buildStatusCardAltText（paused）', () => {
+  it('只含 headline、日期、pausedNote，沒有名額／零打名單／請假', () => {
+    const altText = buildStatusCardAltText(
+      baseParams({
+        headline: '本週活動暫停',
+        date: '2026-09-26',
+        paused: true,
+        pausedNote: '本週因故暫停，恢復後另行公告',
+      })
+    );
+
+    expect(altText).toBe('本週活動暫停\n\n2026-09-26\n本週因故暫停，恢復後另行公告');
+  });
+});
+
 describe('buildStatusCardAltText', () => {
   it('保留 headline、日期、零打名額與費用、剩餘名額、請假、總人數', () => {
     const altText = buildStatusCardAltText(baseParams({ newGuestCount: 0 }));
