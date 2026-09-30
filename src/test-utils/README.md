@@ -21,15 +21,24 @@ vi.mock('../services/mutex.js');
 然後在測試中：
 
 ```ts
+import { replyText } from '../../../test-utils/index.js';
+
 const bot = createTestBot();
 const messages = await bot.run('@Dobby +1', { userId: 'user-alice' });
 
-// 直接看訊息內容
-expect(messages[0].text).toContain('報名成功');
+// 直接看訊息內容——不要假設 messages[0] 一定有 .text：報名／請假的回覆現在
+// 多半是 Flex 卡片（type: 'flex'），沒有 .text 欄位，只有 .altText。
+expect(replyText(messages[0])).toContain('報名成功');
 
 // 確認 Notion 有被寫入
 expect(bot.notionPatchSpy).toHaveBeenCalledTimes(1);
 ```
+
+### `replyText(message)`
+
+`src/test-utils/reply-text.ts`。`text`/`textV2` 訊息回傳 `.text`，`flex` 訊息回傳 `.altText`（卡片的精簡文字版，規則見 `src/commands/registration/flex-status-card.ts` 的 `buildStatusCardAltText`）。讓測試不用關心某個分支現在是純文字還是卡片，繼續用字串斷言內容；其他訊息型別會 throw，提醒你這個型別還沒被涵蓋。
+
+**什麼時候不夠、要直接斷言卡片 contents**：`replyText()` 只看得到 altText 這一段精簡文字，卡片本身的徽章底色（`badgeColor`）、徽章圖示（`badgeIcon`）不會反映在 altText 裡——handler 把這兩個參數接錯，altText 斷言不會失敗。要驗證這類「卡片專屬」的欄位，得直接讀 `messages[0].contents`（`messagingApi.FlexBubble`），照卡片的巢狀 box/contents 結構往下找。`src/commands/registration/__tests__/flex-status-card.test.ts` 有一組導覽用小工具（`heroTitleRow`、`guestSectionRows` 等）；跨測試檔共用的版本在 `src/commands/registration/__tests__/card-nav.ts`（`cardHeroSummary`、`guestRows`），`registration-handler.test.ts`／`leave-handler.test.ts` 的每個結束分支都用它斷言徽章顏色／圖示／標題／副標題。
 
 ### Fixture Override（特定情境）
 
