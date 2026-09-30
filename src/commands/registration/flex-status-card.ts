@@ -1,5 +1,17 @@
 import type { messagingApi } from '@line/bot-sdk';
 import { flexAssetUrl, FLEX_ICONS } from '../../config/flex-assets.js';
+import {
+  CARD_BG as BG,
+  CARD_TEXT as TXT,
+  CARD_SUB as SUB,
+  CARD_DIVIDER as DIV,
+  CARD_LIME as LIME,
+  badgeBox,
+  messageButton,
+  photoHero,
+  truncateAltText,
+  type BadgeColorName,
+} from '../flex-card-parts.js';
 
 /**
  * 報名／請假結果的 Flex 狀態卡——純 JSON 組裝，不打任何 Notion／LINE API，
@@ -8,22 +20,11 @@ import { flexAssetUrl, FLEX_ICONS } from '../../config/flex-assets.js';
  * 只把暫代的文字符號徽章換成真的 PNG 圖示、範例資料換成呼叫端傳入的真實資料。
  */
 
-const BG = '#161616';
-const TXT = '#F5F5F5';
-const SUB = '#A3A3A3';
-const DIV = '#2E2E2E';
-const LIME = '#A3E635'; // 也是進度條／主按鈕／「新增」標記的強調色
+// LIME 也是進度條／「新增」標記的強調色。色票、徽章、按鈕、照片標題區跟指令清單卡共用，見 ../flex-card-parts.ts。
 const NEW_ENTRY_BG = '#26331A';
 const EMPTY_ROW_BG = '#222222';
 
-/** 徽章底色，key 是 event-status-message.ts 呼叫端要指定的名稱。 */
-export const BADGE_COLORS = {
-  lime: LIME,
-  gray: '#737373',
-  orange: '#FB923C',
-  blue: '#60A5FA',
-} as const;
-export type BadgeColorName = keyof typeof BADGE_COLORS;
+export { BADGE_COLORS, type BadgeColorName } from '../flex-card-parts.js';
 
 export interface StatusCardParams {
   /** 活動日 "YYYY-MM-DD"（下週六）。 */
@@ -135,42 +136,6 @@ function headRow(iconFile: string, label: string, right: string): messagingApi.F
       },
       { type: 'text', text: right, size: 'xs', weight: 'bold', color: SUB, align: 'end' },
     ],
-  };
-}
-
-function footerButton(label: string, text: string, flex: number, primary: boolean): messagingApi.FlexBox {
-  // Flex 的 button component 不能設粗體，所以三顆都自己用 box + text 畫。
-  const b: messagingApi.FlexBox = {
-    type: 'box',
-    layout: 'vertical',
-    flex,
-    height: '40px',
-    cornerRadius: '8px',
-    justifyContent: 'center',
-    action: { type: 'message', label, text },
-    contents: [{ type: 'text', text: label, size: 'sm', weight: 'bold', align: 'center', color: primary ? '#111111' : TXT }],
-  };
-  if (primary) {
-    b.backgroundColor = LIME;
-  } else {
-    b.borderWidth = '1px';
-    b.borderColor = '#3F3F3F';
-  }
-  return b;
-}
-
-function badgeBox(colorName: BadgeColorName, iconFile: string): messagingApi.FlexBox {
-  return {
-    type: 'box',
-    layout: 'vertical',
-    width: '28px',
-    height: '28px',
-    cornerRadius: '14px',
-    flex: 0,
-    backgroundColor: BADGE_COLORS[colorName],
-    justifyContent: 'center',
-    alignItems: 'center',
-    contents: [{ type: 'image', url: flexAssetUrl(iconFile), size: '16px', aspectMode: 'fit', aspectRatio: '1:1' }],
   };
 }
 
@@ -338,46 +303,11 @@ export function buildStatusCardBubble(params: StatusCardParams): messagingApi.Fl
   const bubble: messagingApi.FlexBubble = {
     type: 'bubble',
     size: 'mega',
-    hero: {
+    hero: photoHero(`${formatCardDateLabel(date)}・零打 $${guestFee}/人`, {
       type: 'box',
       layout: 'vertical',
-      paddingAll: '0px',
-      contents: [
-        {
-          type: 'image',
-          url: flexAssetUrl(FLEX_ICONS.headerShuttle),
-          size: 'full',
-          aspectMode: 'cover',
-          aspectRatio: '300:170',
-        },
-        {
-          type: 'box',
-          layout: 'vertical',
-          position: 'absolute',
-          offsetTop: '0px',
-          offsetBottom: '0px',
-          offsetStart: '0px',
-          offsetEnd: '0px',
-          paddingTop: '14px',
-          paddingBottom: '14px',
-          paddingStart: '20px',
-          paddingEnd: '20px',
-          justifyContent: 'space-between',
-          background: {
-            type: 'linearGradient',
-            angle: '0deg',
-            startColor: '#000000D9',
-            centerColor: '#0000001A',
-            endColor: '#00000059',
-            centerPosition: '65%',
-          },
-          contents: [
-            { type: 'text', text: `${formatCardDateLabel(date)}・零打 $${guestFee}/人`, size: 'sm', weight: 'bold', color: '#FFFFFF' },
-            { type: 'box', layout: 'vertical', contents: innerBoxContents },
-          ],
-        },
-      ],
-    },
+      contents: innerBoxContents,
+    }),
     body: {
       type: 'box',
       layout: 'vertical',
@@ -405,17 +335,15 @@ export function buildStatusCardBubble(params: StatusCardParams): messagingApi.Fl
       paddingStart: '16px',
       paddingEnd: '16px',
       contents: [
-        footerButton('+1 零打', '@Dobby +1', 2, true),
-        footerButton('−1 零打', '@Dobby -1', 1, false),
-        footerButton('請假', '@Dobby 假', 1, false),
+        messageButton('+1 零打', '@Dobby +1', 2, true),
+        messageButton('−1 零打', '@Dobby -1', 1, false),
+        messageButton('請假', '@Dobby 假', 1, false),
       ],
     };
   }
 
   return bubble;
 }
-
-const ALT_TEXT_MAX = 400;
 
 /**
  * altText（精簡文字版）：LINE 推播通知跟 /logs 都只看得到這個字串，不是卡片
@@ -430,8 +358,7 @@ export function buildStatusCardAltText(params: StatusCardParams): string {
   if (paused) {
     const pausedLines = [headline, '', date];
     if (pausedNote) pausedLines.push(pausedNote);
-    const pausedText = pausedLines.join('\n');
-    return pausedText.length > ALT_TEXT_MAX ? pausedText.slice(0, ALT_TEXT_MAX - 1) + '…' : pausedText;
+    return truncateAltText(pausedLines.join('\n'));
   }
 
   const remaining = Math.max(0, totalSlots - guests.length);
@@ -445,6 +372,5 @@ export function buildStatusCardAltText(params: StatusCardParams): string {
   if (guestLines) lines.push(guestLines);
   lines.push(`剩餘名額：${remaining} 人`, `請假：${absenteeText}`, `總人數：共 ${totalPeople} 人`);
 
-  const text = lines.join('\n');
-  return text.length > ALT_TEXT_MAX ? text.slice(0, ALT_TEXT_MAX - 1) + '…' : text;
+  return truncateAltText(lines.join('\n'));
 }
