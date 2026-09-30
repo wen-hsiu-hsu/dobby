@@ -20,7 +20,7 @@ import {
  * 只把暫代的文字符號徽章換成真的 PNG 圖示、範例資料換成呼叫端傳入的真實資料。
  */
 
-// LIME 也是進度條／「新增」標記的強調色。色票、徽章、按鈕、照片標題區跟指令清單卡共用，見 ../flex-card-parts.ts。
+// LIME 也是進度條／「新增」標記的強調色。色票、徽章、按鈕、照片標題區跟指令清單卡、名單卡共用，見 ../flex-card-parts.ts。
 const NEW_ENTRY_BG = '#26331A';
 const EMPTY_ROW_BG = '#222222';
 
@@ -366,7 +366,8 @@ export function buildStatusCardAltText(params: StatusCardParams): string {
   // 同 buildStatusCardBubble：totalSlots 可能因資料異動算出負數，顯示用一律 clamp 到 0。
   const displayTotalSlots = Math.max(0, totalSlots);
   const guestLines = guests.map((g, i) => `${i + 1}. ${g}`).join('\n');
-  const absenteeText = absenteeNames.length > 0 ? absenteeNames.join('、') : '無';
+  // 跟卡片一致，空白名字顯示「（未命名）」
+  const absenteeText = absenteeNames.length > 0 ? absenteeNames.map((n) => n || '（未命名）').join('、') : '無';
   const totalPeople = presentSeasonMembers + guests.length;
 
   const lines = [headline, '', date, `零打名額 ${displayTotalSlots} 人 | $${guestFee}/人`];

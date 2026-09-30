@@ -44,7 +44,7 @@ Capacity Calculator
 
 ### 狀態卡（Flex）
 
-報名／請假操作後的完整回覆是 LINE Flex 卡片：日期＋零打費用、徽章（顏色／圖示＋標題／副標題）、目前完整零打名單（空位合併成一行「還有 N 個空位」／「尚無人報名」，不逐格列出）、這次新增的條目標「新增」＋淺綠底色、請假名單（永遠完整列出，不截斷）、本週出席人數，底部三顆按鈕（`+1 零打`／`−1 零打`／`請假`，見 `docs/commands.md`）。卡片 JSON 由純函式 `buildStatusCardBubble()` 組裝（`src/commands/registration/flex-status-card.ts`），`buildEventStatusReply()`（`src/commands/registration/event-status-message.ts`）另外把請假人 pageId 查成姓名，再組出完整的 `{ type: 'flex', altText, contents }` 訊息。改用卡片的取捨（altText 的用途、按鈕為何用 message action、圖片資產怎麼部署）見 [ADR 0010](adr/0010-registration-status-flex-card.md)。
+報名／請假操作後的完整回覆是 LINE Flex 卡片：日期＋零打費用、徽章（顏色／圖示＋標題／副標題）、目前完整零打名單（空位合併成一行「還有 N 個空位」／「尚無人報名」，不逐格列出）、這次新增的條目標「新增」＋淺綠底色、請假名單（Notion 名字空白的人顯示「（未命名）」，因為 LINE 不收空字串的 text；永遠完整列出，不截斷）、本週出席人數，底部三顆按鈕（`+1 零打`／`−1 零打`／`請假`，見 `docs/commands.md`）。卡片 JSON 由純函式 `buildStatusCardBubble()` 組裝（`src/commands/registration/flex-status-card.ts`），`buildEventStatusReply()`（`src/commands/registration/event-status-message.ts`）另外把請假人 pageId 查成姓名，再組出完整的 `{ type: 'flex', altText, contents }` 訊息。改用卡片的取捨（altText 的用途、按鈕為何用 message action、圖片資產怎麼部署）見 [ADR 0010](adr/0010-registration-status-flex-card.md)。
 
 各結束分支對應的徽章與文案（`{name}` 是操作對象的顯示名稱）：
 

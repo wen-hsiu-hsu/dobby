@@ -10,7 +10,7 @@
  */
 export const FLEX_ASSET_ROOT = 'https://wen-hsiu-hsu.github.io/dobby/flex/';
 
-/** assets/flex/ 底下的檔名，供狀態卡組裝時取用。 */
+/** assets/flex/ 底下的檔名，所有 Flex 卡片（狀態卡、指令清單卡、名單卡）組裝時取用。 */
 export const FLEX_ICONS = {
   headerShuttle: 'header-shuttle.jpg',
   checkDark: 'check-dark.png',

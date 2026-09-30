@@ -36,9 +36,9 @@ expect(bot.notionPatchSpy).toHaveBeenCalledTimes(1);
 
 ### `replyText(message)`
 
-`src/test-utils/reply-text.ts`。`text`/`textV2` 訊息回傳 `.text`，`flex` 訊息回傳 `.altText`（卡片的精簡文字版，規則見 `src/commands/registration/flex-status-card.ts` 的 `buildStatusCardAltText`）。讓測試不用關心某個分支現在是純文字還是卡片，繼續用字串斷言內容；其他訊息型別會 throw，提醒你這個型別還沒被涵蓋。
+`src/test-utils/reply-text.ts`。`text`/`textV2` 訊息回傳 `.text`，`flex` 訊息回傳 `.altText`（卡片的精簡文字版；狀態卡的規則見 `src/commands/registration/flex-status-card.ts` 的 `buildStatusCardAltText`，指令清單卡、名單卡見 ADR 0012、0013）。讓測試不用關心某個分支現在是純文字還是卡片，繼續用字串斷言內容；其他訊息型別會 throw，提醒你這個型別還沒被涵蓋。
 
-**什麼時候不夠、要直接斷言卡片 contents**：`replyText()` 只看得到 altText 這一段精簡文字，卡片本身的徽章底色（`badgeColor`）、徽章圖示（`badgeIcon`）不會反映在 altText 裡——handler 把這兩個參數接錯，altText 斷言不會失敗。要驗證這類「卡片專屬」的欄位，得直接讀 `messages[0].contents`（`messagingApi.FlexBubble`），照卡片的巢狀 box/contents 結構往下找。`src/commands/registration/__tests__/flex-status-card.test.ts` 有一組導覽用小工具（`heroTitleRow`、`guestSectionRows` 等）；跨測試檔共用的版本在 `src/commands/registration/__tests__/card-nav.ts`（`cardHeroSummary`、`guestRows`），`registration-handler.test.ts`／`leave-handler.test.ts` 的每個結束分支都用它斷言徽章顏色／圖示／標題／副標題。
+**什麼時候不夠、要直接斷言卡片 contents**：`replyText()` 只看得到 altText 這一段精簡文字，卡片本身的徽章底色（`badgeColor`）、徽章圖示（`badgeIcon`）不會反映在 altText 裡——handler 把這兩個參數接錯，altText 斷言不會失敗。要驗證這類「卡片專屬」的欄位，得直接讀 `messages[0].contents`（`messagingApi.FlexBubble`），照卡片的巢狀 box/contents 結構往下找。`src/commands/registration/__tests__/flex-status-card.test.ts` 有一組導覽用小工具（`heroTitleRow`、`guestSectionRows` 等）；跨測試檔共用的版本在 `src/commands/registration/__tests__/card-nav.ts`（`cardHeroSummary`、`guestRows`），`registration-handler.test.ts`／`leave-handler.test.ts` 的每個結束分支都用它斷言徽章顏色／圖示／標題／副標題。名單卡（欠費、報名人）的版本在 `src/commands/__tests__/name-list-nav.ts`（`heroTitleOf`、`listNamesOf`）。
 
 ### Fixture Override（特定情境）
 

@@ -160,7 +160,7 @@ docker run -p 3000:3000 --env-file .env dobby
 2. 在 `src/commands/command-parser.ts` 新增解析邏輯
 3. 在 `src/commands/` 建立 handler 檔案
 4. 在 `src/commands/command-router.ts` 新增路由
-5. 決定這個指令要不要列進 `@Dobby command` 的指令清單卡（`src/commands/command-list-card.ts`，卡片本身跟 altText 兩處都要加），若列的話是否為管理員限定（管理員限定指令只放在 `isAdmin === true` 才加上的章節裡，一般成員完全看不到）
+5. 決定這個指令要不要列進 `@Dobby command` 的指令清單卡（`src/commands/command-list-card.ts`，卡片本身跟 altText 兩處都要加），若列的話是否為管理員限定（管理員限定指令只放在 `isAdmin === true` 才加上的章節裡，一般成員完全看不到）。`command-list.test.ts` 斷言了卡片上完整的按鈕清單，加一列要同步改測試；需要新圖示的話加進 `scripts/generate-flex-icons.mjs` 產生 PNG，而且圖示要先推上 `main`、GitHub Pages 發布完成，程式才能部署
 6. 更新 `docs/commands.md`
 
 ## Notion Rate Limit
