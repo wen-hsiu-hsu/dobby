@@ -113,7 +113,7 @@ USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員�
 | `INTRODUCE` | `@Dobby` 自我介紹的內容 |
 | `NEW_SEASON` | `@Dobby season <季度>` 指令產生下一季公告草稿的模板，見 [commands.md](../commands.md#產生新一季公告草稿) |
 
-`getBlocks()` 會遞迴抓取 `has_children === true` 的區塊（toggle、巢狀清單等），`blocksToText()` 輸出時子區塊依巢狀深度縮排（每層 2 個空白），`bulleted_list_item` 一律補 `• ` 前綴。`payment`、`news`、`introduce`、`WELCOME_MESSAGE`、`season` 都走這個共用實作。
+`getBlocks()` 會遞迴抓取 `has_children === true` 的區塊（toggle、巢狀清單等），每一層都用 `notionGetAllResults` 分頁抓完，超過 100 個區塊也不會被截斷。`blocksToText()` 輸出時子區塊依巢狀深度縮排（每層 2 個空白），`bulleted_list_item` 一律補 `• ` 前綴。`payment`、`news`、`introduce`、`WELCOME_MESSAGE`、`season` 都走這個共用實作。
 
 ### Placeholder 替換規則
 

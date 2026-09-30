@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { notionGet, notionPost } from '../notion-fetch.js';
+import { notionGetAllResults, notionPost } from '../notion-fetch.js';
 import { findByName, getBlocks } from '../announcement-repository.js';
 
 vi.mock('../notion-fetch.js');
 
-const notionGetMock = vi.mocked(notionGet);
+const notionGetAllResultsMock = vi.mocked(notionGetAllResults);
 const notionPostMock = vi.mocked(notionPost);
 
 function block(
@@ -23,7 +23,7 @@ function block(
 
 describe('announcement-repository', () => {
   beforeEach(() => {
-    notionGetMock.mockReset();
+    notionGetAllResultsMock.mockReset();
     notionPostMock.mockReset();
   });
 
@@ -37,30 +37,26 @@ describe('announcement-repository', () => {
 
   describe('getBlocks', () => {
     it('returns flat blocks as-is when none have children', async () => {
-      notionGetMock.mockResolvedValue({
-        results: [block('paragraph', 'hello'), block('paragraph', 'world')],
-      });
+      notionGetAllResultsMock.mockResolvedValue([block('paragraph', 'hello'), block('paragraph', 'world')]);
 
       const blocks = await getBlocks('page-1');
 
-      expect(notionGetMock).toHaveBeenCalledTimes(1);
-      expect(notionGetMock).toHaveBeenCalledWith('/blocks/page-1/children');
+      expect(notionGetAllResultsMock).toHaveBeenCalledTimes(1);
+      expect(notionGetAllResultsMock).toHaveBeenCalledWith('/blocks/page-1/children');
       expect(blocks).toHaveLength(2);
       expect(blocks[0]?.children).toBeUndefined();
     });
 
     it('recurses into has_children blocks and attaches their children', async () => {
-      notionGetMock.mockImplementation(async (path: string) => {
+      notionGetAllResultsMock.mockImplementation(async (path: string) => {
         if (path === '/blocks/page-1/children') {
-          return {
-            results: [
-              block('paragraph', 'intro'),
-              block('toggle', '詳細規則', { has_children: true, id: 'toggle-1' }),
-            ],
-          };
+          return [
+            block('paragraph', 'intro'),
+            block('toggle', '詳細規則', { has_children: true, id: 'toggle-1' }),
+          ];
         }
         if (path === '/blocks/toggle-1/children') {
-          return { results: [block('bulleted_list_item', '第一條')] };
+          return [block('bulleted_list_item', '第一條')];
         }
         throw new Error(`unexpected path: ${path}`);
       });
@@ -76,17 +72,15 @@ describe('announcement-repository', () => {
     });
 
     it('recurses through multiple nesting levels', async () => {
-      notionGetMock.mockImplementation(async (path: string) => {
+      notionGetAllResultsMock.mockImplementation(async (path: string) => {
         if (path === '/blocks/page-1/children') {
-          return { results: [block('toggle', 'L1', { has_children: true, id: 'l1' })] };
+          return [block('toggle', 'L1', { has_children: true, id: 'l1' })];
         }
         if (path === '/blocks/l1/children') {
-          return {
-            results: [block('bulleted_list_item', 'L2', { has_children: true, id: 'l2' })],
-          };
+          return [block('bulleted_list_item', 'L2', { has_children: true, id: 'l2' })];
         }
         if (path === '/blocks/l2/children') {
-          return { results: [block('paragraph', 'L3')] };
+          return [block('paragraph', 'L3')];
         }
         throw new Error(`unexpected path: ${path}`);
       });
@@ -103,16 +97,14 @@ describe('announcement-repository', () => {
       vi.useFakeTimers();
       try {
         const setTimeoutSpy = vi.spyOn(global, 'setTimeout');
-        notionGetMock.mockImplementation(async (path: string) => {
+        notionGetAllResultsMock.mockImplementation(async (path: string) => {
           if (path === '/blocks/page-1/children') {
-            return {
-              results: [
-                block('toggle', 'A', { has_children: true, id: 'child-a' }),
-                block('toggle', 'B', { has_children: true, id: 'child-b' }),
-              ],
-            };
+            return [
+              block('toggle', 'A', { has_children: true, id: 'child-a' }),
+              block('toggle', 'B', { has_children: true, id: 'child-b' }),
+            ];
           }
-          return { results: [] };
+          return [];
         });
 
         const promise = getBlocks('page-1');

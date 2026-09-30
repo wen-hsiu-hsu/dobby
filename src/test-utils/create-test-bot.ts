@@ -190,6 +190,17 @@ export function createTestBot(overrides: FixtureOverrides = {}): TestBot {
     return routeGet(path, overrides);
   });
 
+  // Configure paginated GET mock — only block children are routed (same
+  // fixtures, returned as a single page's results; fixtures never set has_more).
+  // Anything else throws: routeGet would answer e.g. the relation-pagination
+  // path with a people page, which would silently turn into an empty list.
+  vi.mocked(notionFetch.notionGetAllResults).mockImplementation(async (path: string) => {
+    if (!/\/blocks\/[^/]+\/children/.test(path)) {
+      throw new Error(`createTestBot: notionGetAllResults has no fixture routing for ${path}`);
+    }
+    return (routeGet(path, overrides) as { results: unknown[] }).results;
+  });
+
   // Configure Notion PATCH mock — no-op with spy
   const notionPatchSpy = vi.mocked(notionFetch.notionPatch).mockResolvedValue({});
 

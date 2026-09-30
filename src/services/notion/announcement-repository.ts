@@ -1,5 +1,5 @@
 import { env } from '../../config/env.js';
-import { notionGet, notionPost } from './notion-fetch.js';
+import { notionGetAllResults, notionPost } from './notion-fetch.js';
 import { getTitle } from './property-helpers.js';
 import { withPurpose } from '../../utils/request-context.js';
 import type { NestedBlock } from './blocks-to-text.js';
@@ -25,9 +25,15 @@ export async function findByName(name: string): Promise<AnnouncementRecord | nul
 
 /**
  * Recursively resolves `has_children` blocks (toggles, nested lists, …) into a
- * shared counter tracking how many `/blocks/*\/children` calls have been made
- * across the whole recursion, so every call after the first is throttled —
- * matches the 400ms delay pattern in schedulers/display-name-update.ts.
+ * NestedBlock tree. `callCount` is a shared counter tracking how many
+ * `/blocks/*\/children` calls have been made across the whole recursion, so
+ * every call after the first is throttled — matches the 400ms delay pattern in
+ * schedulers/display-name-update.ts.
+ *
+ * Each level is fetched with `notionGetAllResults` so a page over Notion's
+ * 100-block page size isn't silently truncated. The extra pages of a single
+ * level aren't throttled — that only kicks in past 100 blocks, which no
+ * template comes near, and notion-fetch's 429 retry covers it if it ever does.
  */
 async function fetchBlocksRecursive(
   blockId: string,
@@ -36,8 +42,7 @@ async function fetchBlocksRecursive(
   if (callCount.current > 0) await new Promise((r) => setTimeout(r, 400)); // Notion rate limit
   callCount.current++;
 
-  const response = await notionGet(`/blocks/${blockId}/children`) as any;
-  const blocks = response.results as BlockObjectResponse[];
+  const blocks = await notionGetAllResults(`/blocks/${blockId}/children`) as BlockObjectResponse[];
 
   const result: NestedBlock[] = [];
   for (const block of blocks) {
