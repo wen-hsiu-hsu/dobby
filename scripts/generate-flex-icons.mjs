@@ -42,6 +42,10 @@ const ICONS = [
   { file: 'calendar-check-light.png', icon: 'calendar-check', color: '#D4D4D4', strokeWidth: 2 },
   { file: 'file-text-light.png', icon: 'file-text', color: '#D4D4D4', strokeWidth: 2 },
   { file: 'chevron-right-dim.png', icon: 'chevron-right', color: '#737373', strokeWidth: 2 },
+  // 名單卡（src/commands/name-list-card.ts：欠費名單、本季報名人）
+  { file: 'circle-dollar-sign-dark.png', icon: 'circle-dollar-sign', color: '#111111', strokeWidth: 2.5 },
+  { file: 'users-dark.png', icon: 'users', color: '#111111', strokeWidth: 2.5 },
+  { file: 'user-x-white.png', icon: 'user-x', color: '#FFFFFF', strokeWidth: 2.5 },
 ];
 
 const outDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'flex');
