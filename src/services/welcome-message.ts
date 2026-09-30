@@ -15,9 +15,9 @@ function mentionUser(userId: string): messagingApi.MentionSubstitutionObject {
   return { type: 'mention', mentionee: { type: 'user', userId } };
 }
 
-const FALLBACK_JOIN_TEXT = `大家好！我是 Dobby 🧤\n有任何問題歡迎輸入 @Dobby 查看指令列表！`;
+const FALLBACK_JOIN_TEXT = `大家好！我是 Dobby 🧤\n有任何問題歡迎輸入 @Dobby 指令 查看指令列表！`;
 const FALLBACK_MEMBER_TEXT = (displayName: string) =>
-  `歡迎 ${displayName} 加入！\n輸入 @Dobby 查看我能做什麼！`;
+  `歡迎 ${displayName} 加入！\n輸入 @Dobby 指令 查看我能做什麼！`;
 
 /**
  * Build welcome message when the bot joins a group.
