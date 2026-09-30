@@ -12,33 +12,37 @@
 
 1. 讀取 `DOBBY_GROUP_IDS` 環境變數（逗號分隔字串），解析成多個推播目標的 LINE 群組 ID 清單
 2. 計算下一個週六的日期
-3. 呼叫 `getEventOccupancy(nextSaturday)`（`src/services/notion/event-occupancy.ts`）取得該日行事曆活動、活動日所屬季度的 season 資料（不是推播當天的季度，見 [ADR 0008](adr/0008-season-derived-from-event-date.md)）、總名額（`totalSlots`）與應到人數（`presentSeasonMembers`）——這個 helper 也被 `next-event.ts`、報名/請假流程共用，名額計算邏輯統一在一處，這支排程沒有另外算一次。活動或季資料任一個查不到時回 `null`，排程記 `Weekly push aborted: no calendar/season data for date` 後中止；是哪一個缺，看同一事件裡 `getEventOccupancy` 記的 info `Event occupancy unavailable: no event or season for date`（`{date, hasEvent, hasSeason}`）
-4. 把 `occupancy` 交給 `buildWeeklyStatusMessage()`（`src/commands/weekly-status-message.ts`）組出訊息文字——這個 builder 同時也是 `@Dobby next`（`docs/commands.md`）的訊息來源，兩邊共用同一套格式，不是各自維護一份
+3. 呼叫 `getEventOccupancy(nextSaturday)`（`src/services/notion/event-occupancy.ts`）取得該日行事曆活動、活動日所屬季度的 season 資料（不是推播當天的季度，見 [ADR 0008](adr/0008-season-derived-from-event-date.md)）、總名額（`totalSlots`）與季租出席人數（`presentSeasonMembers`）——這個 helper 也被 `next-event.ts`、報名/請假流程共用，名額計算邏輯統一在一處，這支排程沒有另外算一次。活動或季資料任一個查不到時回 `null`，排程記 `Weekly push aborted: no calendar/season data for date` 後中止；是哪一個缺，看同一事件裡 `getEventOccupancy` 記的 info `Event occupancy unavailable: no event or season for date`（`{date, hasEvent, hasSeason}`）
+4. 把 `occupancy` 交給 `buildWeeklyStatusReply()`（`src/commands/weekly-status-message.ts`）組出 Flex 訊息——這個 builder 同時也是 `@Dobby next`（`docs/commands.md`）的訊息來源，兩邊輸出**完全相同的卡片**，不是各自維護一份格式：`next` 除了讓管理員查看目前狀態，也是這支推播失敗時的手動補發手段，見 [ADR 0011](adr/0011-weekly-status-flex-card.md)
 5. 逐一發送 Push Message 到每個群組，個別 try/catch（單一群組失敗只記 log、不影響其他群組、不重試），跑完後記一行總結 log（成功/失敗/總數）
 
 ### 訊息格式
 
-```
-2026-09-26 不能到請喊聲
-零打名額：4人 $170/人
-1. 許文修的朋友
-2. 
-3. 
-4. 
+推播的是 LINE Flex 卡片，不是純文字——版面（照片、徽章、進度條、零打名單、請假名單、底部按鈕）跟報名／請假的狀態卡是同一套產生器（`src/commands/registration/flex-status-card.ts`），細節見 [registration.md](registration.md#狀態卡flex)。正常週徽章灰底＋calendar-check-dark 圖示，標題「本週打球」，副標題「不能到請喊聲」（場地數跟季預設不同時是「不能到請喊聲・本週 N 面場」）；「本週出席」＝季租出席（`presentSeasonMembers`）＋零打數，不是只算季租——這是刻意的語意變更，舊文字版的「應到」只算季租，理由見 ADR 0011。
 
-請假：官穗妙
+卡片帶不了單一字串，`/logs` 頁面跟 LINE 推播通知彈出的內容都是 `buildStatusCardAltText()` 組出的精簡文字版（altText），例如：
+
+```
+本週打球・不能到請喊聲
 場地：2 面
-應到：10 人
+
+2026-09-26
+零打名額 4 人 | $170/人
+1. 許文修的朋友
+剩餘名額：3 人
+請假：官穗妙
+總人數：共 11 人
 ```
 
-`場地` 行顯示本週實際採用的場地數（行事曆 `場地數` 優先，未填用季預設，見 [registration.md](registration.md#容量計算公式)）；若跟季預設不同，會加註「（本週調整）」，例如 `場地：1 面（本週調整）`，讓換季複製頁面帶錯的值在週日推播時被看到。
+`場地` 行顯示本週實際採用的場地數（行事曆 `場地數` 優先，未填用季預設，見 [registration.md](registration.md#容量計算公式)）；若跟季預設不同，會加註「（本週調整）」，例如 `場地：1 面（本週調整）`，讓換季複製頁面帶錯的值在週日推播時被看到。卡片本身的零打名單只列已報名者，空位合併成一行「還有 N 個空位」（額滿時不出現這行）；`請假` 有多人時用頓號（`、`）分隔真實姓名，沒人請假顯示「無」，永遠完整列出不截斷。
 
-零打名額那幾行印到 `Math.max(totalSlots, 已報名人數)`（沒人報名的格子留空），不是只列出已報名的零打名單；正常情況下等於 `totalSlots`，但已報名人數超過 `totalSlots` 的邊界情況下會印出更多行，不會截斷。`請假` 有多人時用頓號（`、`）分隔真實姓名，沒人請假顯示「無」。
+若活動狀態為「打球暫停」，卡片改用簡化版：只留照片、日期與費用行、徽章（灰底＋ban-dark 圖示）、標題「本週活動暫停」，拿掉右上剩餘名額／進度條、零打名單／請假／本週出席三段內文、底部按鈕，內文改放一行灰字「本週因故暫停，恢復後另行公告」。altText：
 
-若活動狀態為「打球暫停」，訊息改用簡化版，但沿用同一個標頭樣式：
 ```
-2026-09-26 不能到請喊聲
-⛔ 本週活動暫停
+本週活動暫停
+
+2026-09-26
+本週因故暫停，恢復後另行公告
 ```
 
 ### 除錯
@@ -47,6 +51,7 @@
 - `DOBBY_GROUP_IDS` 環境變數是否有設定（沒設定會記一行 `Weekly push aborted: DOBBY_GROUP_IDS is not set` 並跳過，不會讓 app 啟動失敗）
 - 下一個週六是否有對應的行事曆頁面
 - 伺服器時區是否正確（應為 Asia/Taipei）
+- 若卡片有送出但照片／圖示破圖，先查 GitHub Pages 圖片網址（`https://wen-hsiu-hsu.github.io/dobby/flex/`）是不是能回 200——這不是這支排程獨有的問題，卡片圖片資產的部署方式跟已知限制見 [ADR 0010](adr/0010-registration-status-flex-card.md)
 
 `sendWeeklyPush()` 整次執行包在 `runWithContext()` 裡，每次觸發都有自己的 `reqId`，在 `/logs` 頁面會是一個獨立的「排程」事件（不會跟其他次執行混在一起），見 `docs/logging.md`。
 

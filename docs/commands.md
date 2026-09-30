@@ -140,7 +140,7 @@ Notion 內容裡的 `bulleted_list_item`（項目符號清單）在輸出時會�
 ```
 @Dobby next
 ```
-管理員可查看下次打球的完整資訊。回覆內容跟每週打球資訊推播（`docs/schedulers.md`）完全同一套訊息格式，由 `src/commands/weekly-status-message.ts` 的 `buildWeeklyStatusMessage()` 共用產生 —— `next` 只是手動查看目前狀態的方式，不是另一種摘要格式。
+管理員可查看下次打球的完整資訊。回覆是跟每週打球資訊推播（`docs/schedulers.md`）**完全相同的 Flex 卡片**，由 `src/commands/weekly-status-message.ts` 的 `buildWeeklyStatusReply()` 共用產生（同一份卡片產生器 `registration/flex-status-card.ts`）—— `next` 只是手動查看目前狀態的方式，不是另一種摘要格式；也因為輸出完全一樣，`next` 可以在週報推播失敗（例如 `DOBBY_GROUP_IDS` 沒設或找不到活動）時，由管理員在群組手動補發同一份內容。卡片底部保留跟報名卡片相同的三顆按鈕（`+1 零打`／`−1 零打`／`請假`），一律作用在目前這一場活動、操作者自己身上，規則跟「報名指令」一節相同。非管理員仍回一句純文字拒絕訊息，見 [ADR 0011](adr/0011-weekly-status-flex-card.md)。
 
 ### 產生新一季公告草稿
 ```
