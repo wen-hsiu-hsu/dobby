@@ -27,9 +27,13 @@ export async function replyMessage(
   messages: Message[]
 ): Promise<void> {
   const messagesToSend = withQuoteToken(messages);
-  const messageContents = messages.map((m) =>
-    m.type === 'text' ? (m as { type: string; text: string }).text : `[${m.type}]`
-  );
+  const messageContents = messages.map((m) => {
+    if (m.type === 'text') return (m as { type: string; text: string }).text;
+    // altText 是精簡文字版，比 `[flex]` 本身更有用：/logs 的卡片預覽、事件時間軸、
+    // LINE 推播通知看到的都是同一段文字，不用另外開 Flex JSON 才知道這次回了什麼。
+    if (m.type === 'flex') return `[flex] ${(m as { type: string; altText: string }).altText}`;
+    return `[${m.type}]`;
+  });
   const sendId = randomBytes(3).toString('hex');
   logger.info({ method: METHOD, path: PATH, sendId, messageCount: messages.length }, 'LINE reply');
   logger.debug(

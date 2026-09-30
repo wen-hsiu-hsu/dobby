@@ -89,6 +89,26 @@ describe('replyMessage', () => {
     );
   });
 
+  it('logs a flex message as "[flex] <altText>" instead of "[flex]" alone, so /logs shows what was actually sent', async () => {
+    await replyMessage('token', [
+      { type: 'flex', altText: '報名成功 ✅', contents: { type: 'bubble' } } as any,
+    ]);
+
+    expect(logger.debug).toHaveBeenCalledWith(
+      expect.objectContaining({ messages: ['[flex] 報名成功 ✅'] }),
+      'LINE reply payload',
+    );
+  });
+
+  it('still logs "[type]" for other non-text message types (e.g. sticker)', async () => {
+    await replyMessage('token', [{ type: 'sticker', packageId: '1', stickerId: '2' } as any]);
+
+    expect(logger.debug).toHaveBeenCalledWith(
+      expect.objectContaining({ messages: ['[sticker]'] }),
+      'LINE reply payload',
+    );
+  });
+
   it('generates a distinct sendId for each call', async () => {
     await replyMessage('token', [{ type: 'text', text: 'hello' }]);
     await replyMessage('token', [{ type: 'text', text: 'hello' }]);
