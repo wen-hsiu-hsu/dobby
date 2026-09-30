@@ -1,9 +1,18 @@
+import type { messagingApi } from '@line/bot-sdk';
 import * as peopleRepo from '../../services/notion/people-repository.js';
+import { buildStatusCardBubble, buildStatusCardAltText, type BadgeColorName, type StatusCardParams } from './flex-status-card.js';
 
 export interface EventStatusParams {
   date: string;
+  /** 既有的一句話摘要（含 ✅ 等既有措辭），拿來組 altText；卡片本身不顯示這個字串，顯示的是 title/subtitle。 */
   headline: string;
+  badgeColor: BadgeColorName;
+  badgeIcon: string;
+  title: string;
+  subtitle: string;
   guests: string[];
+  /** guests 尾端有幾筆是這次新增的條目，預設 0；只有報名成功（含被截斷）時非 0。 */
+  newGuestCount?: number;
   totalSlots: number;
   presentSeasonMembers: number;
   guestFee: number;
@@ -11,38 +20,35 @@ export interface EventStatusParams {
 }
 
 /**
- * Renders the full weekly status block (guest list, remaining slots, absentee list, totals)
- * with an arbitrary headline. Used for both success and failure/no-op replies so the user
- * always sees the current state, not just a bare one-line message.
+ * 組出報名／請假操作後要回覆的 Flex 狀態卡（含 altText）。成功、失敗、no-op
+ * 每個結束分支都呼叫這裡，使用者永遠看到目前完整的名額狀態，不是只有一句話。
+ *
+ * 卡片 JSON 本身（buildStatusCardBubble/buildStatusCardAltText，見 flex-status-card.ts）
+ * 是純函式，這裡只多做一件事：把 absenteePageIds 查成姓名（Notion 呼叫），所以整個
+ * 函式是 async。
  */
-export async function buildEventStatusMessage(params: EventStatusParams): Promise<string> {
-  const { date, headline, guests, totalSlots, presentSeasonMembers, guestFee, absenteePageIds } = params;
-  const remainingSlots = Math.max(0, totalSlots - guests.length);
+export async function buildEventStatusReply(params: EventStatusParams): Promise<messagingApi.FlexMessage> {
+  const absenteeNames =
+    params.absenteePageIds.length > 0 ? (await peopleRepo.findByPageIds(params.absenteePageIds)).map((p) => p.name) : [];
 
-  // Numbered guest list (show all slots including empty ones)
-  const displaySlots = Math.max(totalSlots, guests.length);
-  const guestLines = Array.from({ length: displaySlots }, (_, i) =>
-    `${i + 1}. ${guests[i] ?? ''}`,
-  ).join('\n');
+  const cardParams: StatusCardParams = {
+    date: params.date,
+    headline: params.headline,
+    badgeColor: params.badgeColor,
+    badgeIcon: params.badgeIcon,
+    title: params.title,
+    subtitle: params.subtitle,
+    guests: params.guests,
+    newGuestCount: params.newGuestCount ?? 0,
+    totalSlots: params.totalSlots,
+    presentSeasonMembers: params.presentSeasonMembers,
+    guestFee: params.guestFee,
+    absenteeNames,
+  };
 
-  let absenteeText = '無';
-  if (absenteePageIds.length > 0) {
-    const absentees = await peopleRepo.findByPageIds(absenteePageIds);
-    absenteeText = absentees.map((p) => p.name).join('、');
-  }
-
-  const totalPeople = presentSeasonMembers + guests.length;
-
-  return [
-    headline,
-    '',
-    date,
-    `零打名額 ${totalSlots} 人 | $${guestFee}/人`,
-    guestLines,
-    `剩餘名額：${remainingSlots} 人`,
-    `請假：${absenteeText}`,
-    '',
-    `若要報名請輸入 @Dobby +1`,
-    `總人數：共 ${totalPeople} 人`,
-  ].join('\n');
+  return {
+    type: 'flex',
+    altText: buildStatusCardAltText(cardParams),
+    contents: buildStatusCardBubble(cardParams),
+  };
 }

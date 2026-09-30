@@ -6,7 +6,8 @@ import { withFreshCalendarEvent } from './with-fresh-calendar-event.js';
 import { resolveTarget } from './target-resolver.js';
 import { calculateAddCapacity, calculateRemoveCapacity } from './capacity-calculator.js';
 import { parseRegistrationTarget } from './registration-parser.js';
-import { buildEventStatusMessage } from './event-status-message.js';
+import { buildEventStatusReply } from './event-status-message.js';
+import { FLEX_ICONS } from '../../config/flex-assets.js';
 import { logOutcome, describeTargetRequest, type RegistrationOutcome } from './outcome-log.js';
 import { formatDate, getNextSaturday, getSeasonNameForDate } from '../../utils/date-utils.js';
 import type { NotionUser } from '../../types/notion-models.js';
@@ -98,17 +99,22 @@ export async function handleRegistration(
       };
 
       if (!result.canAdd) {
-        logOutcome(LOG_CONTEXT, { outcome: rejectionOutcome(delta, freshEvent.isPaused), ...lockedSummary }, targetDetail);
-        const replyText = await buildEventStatusMessage({
+        const outcome = rejectionOutcome(delta, freshEvent.isPaused);
+        logOutcome(LOG_CONTEXT, { outcome, ...lockedSummary }, targetDetail);
+        const reply = await buildEventStatusReply({
           date: nextSaturday,
           headline: result.error ?? '操作失敗',
+          badgeColor: 'orange',
+          badgeIcon: FLEX_ICONS.banDark,
+          title: rejectionCardTitle(outcome),
+          subtitle: result.error ?? '操作失敗',
           guests: freshEvent.guests,
           totalSlots: occupancy.totalSlots,
           presentSeasonMembers: occupancy.presentSeasonMembers,
           guestFee: occupancy.season.guestFee,
           absenteePageIds: freshEvent.absentees,
         });
-        await replyMessage(event.replyToken, [{ type: 'text', text: replyText }]);
+        await replyMessage(event.replyToken, [reply]);
         return;
       }
 
@@ -131,24 +137,46 @@ export async function handleRegistration(
       );
 
       let headline: string;
+      let badgeColor: 'lime' | 'gray';
+      let badgeIcon: string;
+      let title: string;
+      let subtitle: string;
+      let newGuestCount = 0;
       if (delta <= 0) {
         headline = '取消報名成功 ✅';
-      } else if (result.cappedAt !== undefined) {
-        headline = `報名成功 ✅（名額已達上限，僅報名 ${result.cappedAt} 位，您原本要求 ${delta} 位）`;
+        badgeColor = 'gray';
+        badgeIcon = FLEX_ICONS.minusWhite;
+        title = '取消報名成功';
+        subtitle = `${resolved.displayName} 取消 ${result.removedGuests?.length ?? 0} 位`;
       } else {
-        headline = '報名成功 ✅';
+        badgeColor = 'lime';
+        badgeIcon = FLEX_ICONS.checkDark;
+        title = '報名成功';
+        newGuestCount = updatedGuests.length - freshEvent.guests.length;
+        if (result.cappedAt !== undefined) {
+          headline = `報名成功 ✅（名額已達上限，僅報名 ${result.cappedAt} 位，您原本要求 ${delta} 位）`;
+          subtitle = `${resolved.displayName} 報名 ${result.cappedAt} 位（名額已滿，原本要求 ${delta} 位）`;
+        } else {
+          headline = '報名成功 ✅';
+          subtitle = `${resolved.displayName} 報名 ${delta} 位`;
+        }
       }
 
-      const replyText = await buildEventStatusMessage({
+      const reply = await buildEventStatusReply({
         date: nextSaturday,
         headline,
+        badgeColor,
+        badgeIcon,
+        title,
+        subtitle,
         guests: updatedGuests,
+        newGuestCount,
         totalSlots: occupancy.totalSlots,
         presentSeasonMembers: occupancy.presentSeasonMembers,
         guestFee: occupancy.season.guestFee,
         absenteePageIds: freshEvent.absentees,
       });
-      await replyMessage(event.replyToken, [{ type: 'text', text: replyText }]);
+      await replyMessage(event.replyToken, [reply]);
     }
   );
 }
@@ -165,4 +193,22 @@ export async function handleRegistration(
 function rejectionOutcome(delta: number, isPaused: boolean): RegistrationOutcome {
   if (delta > 0) return isPaused ? 'paused' : 'full';
   return delta === 0 ? 'zero-delta' : 'no-registration';
+}
+
+/**
+ * 拒絕卡片的標題文字，依 rejectionOutcome() 的四種結果對應。跟 outcome log 共用同一個
+ * outcome 值，避免「Notion 呼叫/log 判斷是這個分支，卡片標題卻用另一套邏輯」兩邊漂移。
+ */
+function rejectionCardTitle(outcome: RegistrationOutcome): string {
+  switch (outcome) {
+    case 'full':
+      return '名額不足';
+    case 'paused':
+      return '本週活動暫停';
+    case 'no-registration':
+    case 'zero-delta':
+      return '無法取消';
+    default:
+      return '操作失敗';
+  }
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { createTestBot } from '../test-utils/index.js';
+import { createTestBot, replyText } from '../test-utils/index.js';
 import { notionPost } from '../services/notion/notion-fetch.js';
 
 vi.mock('../services/notion/notion-fetch.js');
@@ -18,7 +18,8 @@ describe('Registration flow', () => {
 
     expect(messages.length).toBeGreaterThan(0);
     const msg = messages[0] as any;
-    expect(msg.text).toContain('報名成功');
+    expect(replyText(msg)).toContain('報名成功');
+    expect(msg.type).toBe('flex');
     // Notion PATCH should have been called once to update guests
     expect(bot.notionPatchSpy).toHaveBeenCalledTimes(1);
   });
@@ -36,7 +37,7 @@ describe('Registration flow', () => {
     const messages = await bot.run('@Dobby +1', { userId: 'user-alice' });
 
     const msg = messages[0] as any;
-    expect(msg.text).toContain('找不到');
+    expect(replyText(msg)).toContain('找不到');
     expect(bot.notionPatchSpy).not.toHaveBeenCalled();
   });
 
@@ -45,7 +46,7 @@ describe('Registration flow', () => {
     const messages = await bot.run('@Dobby +1', { userId: 'user-alice' });
 
     const msg = messages[0] as any;
-    expect(msg.text).toContain('季租');
+    expect(replyText(msg)).toContain('季租');
     expect(bot.notionPatchSpy).not.toHaveBeenCalled();
   });
 
@@ -54,7 +55,7 @@ describe('Registration flow', () => {
     const messages = await bot.run('@Dobby +1', { userId: 'unknown-user' });
 
     const msg = messages[0] as any;
-    expect(msg.text).toContain('找不到');
+    expect(replyText(msg)).toContain('找不到');
     expect(bot.notionPatchSpy).not.toHaveBeenCalled();
   });
 
@@ -64,7 +65,8 @@ describe('Registration flow', () => {
     const messages = await bot.run('@Dobby 假', { userId: 'user-alice' });
 
     const msg = messages[0] as any;
-    expect(msg.text).toContain('請假成功');
+    expect(replyText(msg)).toContain('請假成功');
+    expect(msg.type).toBe('flex');
     // updateAbsentees should have been called
     expect(bot.notionPatchSpy).toHaveBeenCalledTimes(1);
   });
@@ -90,9 +92,9 @@ describe('Registration flow', () => {
     const messages = await bot.run('@Dobby +1', { userId: 'user-alice' });
 
     const msg = messages[0] as any;
-    expect(msg.text).toContain('名額不足');
-    expect(msg.text).toContain('剩餘名額：');
-    expect(msg.text).toContain('總人數：共');
+    expect(replyText(msg)).toContain('名額不足');
+    expect(replyText(msg)).toContain('剩餘名額：');
+    expect(replyText(msg)).toContain('總人數：共');
     expect(bot.notionPatchSpy).not.toHaveBeenCalled();
   });
 
@@ -117,11 +119,11 @@ describe('Registration flow', () => {
     const messages = await bot.run('@Dobby +7', { userId: 'user-alice' });
 
     const msg = messages[0] as any;
-    expect(msg.text).toContain('報名成功');
-    expect(msg.text).toContain('名額已達上限，僅報名 5 位，您原本要求 7 位');
-    expect(msg.text).toContain('Alice的朋友 (5)');
-    expect(msg.text).not.toContain('Alice的朋友 (6)');
-    expect(msg.text).toContain('剩餘名額：0 人');
+    expect(replyText(msg)).toContain('報名成功');
+    expect(replyText(msg)).toContain('名額已達上限，僅報名 5 位，您原本要求 7 位');
+    expect(replyText(msg)).toContain('Alice的朋友 (5)');
+    expect(replyText(msg)).not.toContain('Alice的朋友 (6)');
+    expect(replyText(msg)).toContain('剩餘名額：0 人');
     expect(bot.notionPatchSpy).toHaveBeenCalledTimes(1);
   });
 
@@ -131,7 +133,8 @@ describe('Registration flow', () => {
     const messages = await bot.run('@Dobby @Bob +1', { userId: 'user-alice' });
 
     const msg = messages[0] as any;
-    expect(msg.text).toBe('你不是管理員');
+    expect(replyText(msg)).toBe('你不是管理員');
+    expect(msg.type).toBe('text');
     expect(bot.notionPatchSpy).not.toHaveBeenCalled();
   });
 
@@ -140,7 +143,8 @@ describe('Registration flow', () => {
     const messages = await bot.run('@Dobby @Bob 假', { userId: 'user-alice' });
 
     const msg = messages[0] as any;
-    expect(msg.text).toBe('你不是管理員');
+    expect(replyText(msg)).toBe('你不是管理員');
+    expect(msg.type).toBe('text');
     expect(bot.notionPatchSpy).not.toHaveBeenCalled();
   });
 
@@ -168,7 +172,7 @@ describe('Registration flow', () => {
     const messages = await bot.run('@Dobby @Bob +1', { userId: 'user-boss' });
 
     const msg = messages[0] as any;
-    expect(msg.text).toContain('報名成功');
+    expect(replyText(msg)).toContain('報名成功');
     expect(bot.notionPatchSpy).toHaveBeenCalledTimes(1);
   });
 
@@ -198,7 +202,7 @@ describe('Registration flow', () => {
     const messages = await bot.run('@Dobby 假', { userId: 'user-guest' });
 
     const msg = messages[0] as any;
-    expect(msg.text).toContain('季租');
+    expect(replyText(msg)).toContain('季租');
     expect(bot.notionPatchSpy).not.toHaveBeenCalled();
   });
 });

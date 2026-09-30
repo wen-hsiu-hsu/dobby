@@ -5,7 +5,8 @@ import { getEventOccupancy } from '../../services/notion/event-occupancy.js';
 import { calculateTotalSlots } from './capacity-calculator.js';
 import { resolveTarget } from './target-resolver.js';
 import { parseRegistrationTarget } from './registration-parser.js';
-import { buildEventStatusMessage } from './event-status-message.js';
+import { buildEventStatusReply } from './event-status-message.js';
+import { FLEX_ICONS } from '../../config/flex-assets.js';
 import { formatDate, getNextSaturday, getSeasonNameForDate } from '../../utils/date-utils.js';
 import { withFreshCalendarEvent } from './with-fresh-calendar-event.js';
 import { logOutcome, describeTargetRequest } from './outcome-log.js';
@@ -101,31 +102,41 @@ export async function handleLeave(
 
       if (!isCancel && isCurrentlyAbsent) {
         logOutcome(LOG_CONTEXT, { outcome: 'already-absent', ...lockedSummary }, targetDetail);
-        const replyText = await buildEventStatusMessage({
+        const headline = `${resolved.displayName} 已請假，無需重複操作`;
+        const reply = await buildEventStatusReply({
           date: nextSaturday,
-          headline: `${resolved.displayName} 已請假，無需重複操作`,
+          headline,
+          badgeColor: 'gray',
+          badgeIcon: FLEX_ICONS.infoWhite,
+          title: '已經請過假',
+          subtitle: headline,
           guests: freshEvent.guests,
           totalSlots: occupancy.totalSlots,
           presentSeasonMembers: occupancy.presentSeasonMembers,
           guestFee: freshSeason.guestFee,
           absenteePageIds: freshEvent.absentees,
         });
-        await replyMessage(event.replyToken, [{ type: 'text', text: replyText }]);
+        await replyMessage(event.replyToken, [reply]);
         return;
       }
 
       if (isCancel && !isCurrentlyAbsent) {
         logOutcome(LOG_CONTEXT, { outcome: 'not-absent', ...lockedSummary }, targetDetail);
-        const replyText = await buildEventStatusMessage({
+        const headline = `${resolved.displayName} 目前未請假`;
+        const reply = await buildEventStatusReply({
           date: nextSaturday,
-          headline: `${resolved.displayName} 目前未請假`,
+          headline,
+          badgeColor: 'gray',
+          badgeIcon: FLEX_ICONS.infoWhite,
+          title: '目前未請假',
+          subtitle: headline,
           guests: freshEvent.guests,
           totalSlots: occupancy.totalSlots,
           presentSeasonMembers: occupancy.presentSeasonMembers,
           guestFee: freshSeason.guestFee,
           absenteePageIds: freshEvent.absentees,
         });
-        await replyMessage(event.replyToken, [{ type: 'text', text: replyText }]);
+        await replyMessage(event.replyToken, [reply]);
         return;
       }
 
@@ -150,16 +161,20 @@ export async function handleLeave(
         },
         targetDetail
       );
-      const replyText = await buildEventStatusMessage({
+      const reply = await buildEventStatusReply({
         date: nextSaturday,
         headline: isCancel ? '銷假成功 ✅' : '請假成功 ✅',
+        badgeColor: isCancel ? 'lime' : 'blue',
+        badgeIcon: isCancel ? FLEX_ICONS.calendarCheckDark : FLEX_ICONS.calendarXDark,
+        title: isCancel ? '銷假成功' : '請假成功',
+        subtitle: isCancel ? `${resolved.displayName} 已銷假，零打名額 −1` : `${resolved.displayName} 本週請假，零打名額 +1`,
         guests: freshEvent.guests,
         totalSlots: newTotalSlots,
         presentSeasonMembers: newPresentSeasonMembers,
         guestFee: freshSeason.guestFee,
         absenteePageIds: newAbsentees,
       });
-      await replyMessage(event.replyToken, [{ type: 'text', text: replyText }]);
+      await replyMessage(event.replyToken, [reply]);
     }
   );
 }

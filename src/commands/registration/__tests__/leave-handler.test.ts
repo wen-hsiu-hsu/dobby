@@ -8,6 +8,7 @@ import { resolveTarget } from '../target-resolver.js';
 import { replyMessage } from '../../../services/line/reply-service.js';
 import { logger } from '../../../utils/logger.js';
 import { getCurrentSeasonName, getSeasonNameForDate, formatDate, getNextSaturday } from '../../../utils/date-utils.js';
+import { replyText as sharedReplyText } from '../../../test-utils/index.js';
 
 vi.mock('../../../services/notion/calendar-repository.js');
 vi.mock('../../../services/notion/season-repository.js');
@@ -62,6 +63,16 @@ beforeEach(() => {
   vi.mocked(mutex.withMutex).mockImplementation(async (_pageId, fn) => fn());
 });
 
+// text/textV2 → .text、flex → .altText——請假結果現在多半是 Flex 卡片，不能再假設是純文字。
+function reply(): { type: string; text?: string; altText?: string } {
+  const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
+  return messages[0] as any;
+}
+
+function replyText(): string {
+  return sharedReplyText(reply() as any);
+}
+
 describe('handleLeave', () => {
   it("looks up the event date's season by name, not just the first season record", async () => {
     await handleLeave(event, false, false);
@@ -96,8 +107,7 @@ describe('handleLeave', () => {
 
       await handleLeave(event, false, false);
 
-      const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
-      expect((messages[0] as { text: string }).text).toBe('請假/銷假功能僅限季租成員使用');
+      expect(replyText()).toBe('請假/銷假功能僅限季租成員使用');
       expect(calendarRepo.updateAbsentees).not.toHaveBeenCalled();
     });
 
@@ -106,8 +116,7 @@ describe('handleLeave', () => {
 
       await handleLeave(event, false, false);
 
-      const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
-      expect((messages[0] as { text: string }).text).toBe('找不到 2026-Q4 季租資料');
+      expect(replyText()).toBe('找不到 2026-Q4 季租資料');
       expect(calendarRepo.findByDate).not.toHaveBeenCalled();
     });
   });
@@ -117,8 +126,7 @@ describe('handleLeave', () => {
 
     await handleLeave({ ...event, message: { text: '@Dobby 假 @Charlie' } }, false, true);
 
-    const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
-    expect((messages[0] as { text: string }).text).toBe('找不到「Charlie」的資料，請確認名稱與人員清單一致');
+    expect(replyText()).toBe('找不到「Charlie」的資料，請確認名稱與人員清單一致');
   });
 
   it('still replies "not found" (not the season error) when both lookups come back empty', async () => {
@@ -127,8 +135,7 @@ describe('handleLeave', () => {
 
     await handleLeave(event, false, false);
 
-    const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
-    expect((messages[0] as { text: string }).text).toBe('找不到您的資料');
+    expect(replyText()).toBe('找不到您的資料');
   });
 
   it('passes the actor snapshot to resolveTarget and looks up the season without waiting for it', async () => {
@@ -156,8 +163,7 @@ describe('handleLeave', () => {
   it('replies with the full weekly status (not a bare one-liner) after leave is recorded', async () => {
     await handleLeave(event, false, false);
 
-    const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
-    const text = (messages[0] as { text: string }).text;
+    const text = replyText();
 
     expect(text).toContain('請假成功 ✅');
     expect(text).toContain('剩餘名額：');
@@ -165,6 +171,7 @@ describe('handleLeave', () => {
     // courts(2) * 7 - members(1) + absentees(1, after leave) = 14
     expect(text).toContain('零打名額 14 人');
     expect(text).toContain('總人數：共');
+    expect(reply().type).toBe('flex');
   });
 
   it('replies with full status (not a bare one-liner) when cancelling leave', async () => {
@@ -180,8 +187,7 @@ describe('handleLeave', () => {
     await handleLeave(event, true, false);
 
     expect(calendarRepo.updateAbsentees).toHaveBeenCalledWith('evt-1', []);
-    const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
-    const text = (messages[0] as { text: string }).text;
+    const text = replyText();
 
     expect(text).toContain('銷假成功 ✅');
     expect(text).toContain('請假：無');
@@ -201,8 +207,7 @@ describe('handleLeave', () => {
 
     await handleLeave(event, true, false);
 
-    const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
-    const text = (messages[0] as { text: string }).text;
+    const text = replyText();
     expect(text).toContain('銷假成功 ✅');
     // calendar courts(1) * 7 - members(1) + absentees(0, after cancel) = 6 (season default would give 13)
     expect(text).toContain('零打名額 6 人');
@@ -221,19 +226,18 @@ describe('handleLeave', () => {
     await handleLeave(event, false, false);
 
     expect(calendarRepo.updateAbsentees).not.toHaveBeenCalled();
-    const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
-    const text = (messages[0] as { text: string }).text;
+    const text = replyText();
 
     expect(text).toContain('Alice 已請假，無需重複操作');
     expect(text).toContain('剩餘名額：');
+    expect(reply().type).toBe('flex');
   });
 
   it('replies with full status + reason when cancelling leave without having leave recorded (no Notion write)', async () => {
     await handleLeave(event, true, false);
 
     expect(calendarRepo.updateAbsentees).not.toHaveBeenCalled();
-    const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
-    const text = (messages[0] as { text: string }).text;
+    const text = replyText();
 
     expect(text).toContain('Alice 目前未請假');
     expect(text).toContain('剩餘名額：');
@@ -252,9 +256,9 @@ describe('handleLeave', () => {
 
     await handleLeave(malformedEvent, false, false);
 
-    const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
-    const text = (messages[0] as { text: string }).text;
+    const text = replyText();
     expect(text).toBe('指令格式錯誤：指定對象需使用 @Name');
+    expect(reply().type).toBe('text');
     expect(seasonRepo.findByName).not.toHaveBeenCalled();
     expect(calendarRepo.updateAbsentees).not.toHaveBeenCalled();
   });
@@ -273,8 +277,7 @@ describe('handleLeave', () => {
 
     await handleLeave(mentionEvent, false, false);
 
-    const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
-    const text = (messages[0] as { text: string }).text;
+    const text = replyText();
     expect(text).toBe('你不是管理員');
     expect(seasonRepo.findByName).not.toHaveBeenCalled();
     expect(calendarRepo.updateAbsentees).not.toHaveBeenCalled();

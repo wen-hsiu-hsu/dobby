@@ -8,6 +8,7 @@ import { resolveTarget } from '../target-resolver.js';
 import { replyMessage } from '../../../services/line/reply-service.js';
 import { logger } from '../../../utils/logger.js';
 import { getCurrentSeasonName, getSeasonNameForDate, formatDate, getNextSaturday } from '../../../utils/date-utils.js';
+import { replyText as sharedReplyText } from '../../../test-utils/index.js';
 
 vi.mock('../../../services/notion/calendar-repository.js');
 vi.mock('../../../services/notion/season-repository.js');
@@ -57,9 +58,14 @@ function baseCalendarEvent(overrides: Partial<Awaited<ReturnType<typeof calendar
   } as any;
 }
 
-function replyText(): string {
+function reply(): { type: string; text?: string; altText?: string } {
   const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
-  return (messages[0] as { text: string }).text;
+  return messages[0] as any;
+}
+
+// text/textV2 → .text、flex → .altText——報名結果現在多半是 Flex 卡片，不能再假設是純文字。
+function replyText(): string {
+  return sharedReplyText(reply() as any);
 }
 
 beforeEach(() => {
@@ -96,6 +102,7 @@ describe('handleRegistration', () => {
 
     expect(calendarRepo.updateGuests).toHaveBeenCalledWith('evt-1', ['Bob']);
     expect(replyText()).toContain('報名成功 ✅');
+    expect(reply().type).toBe('flex');
   });
 
   it('caps a non-admin request that exceeds remaining capacity and reports cappedAt in the headline', async () => {
@@ -150,6 +157,7 @@ describe('handleRegistration', () => {
     await handleRegistration(event, 1, false);
 
     expect(replyText()).toBe('你不是管理員');
+    expect(reply().type).toBe('text');
     expect(seasonRepo.findByName).not.toHaveBeenCalled();
     expect(calendarRepo.updateGuests).not.toHaveBeenCalled();
   });
@@ -160,6 +168,7 @@ describe('handleRegistration', () => {
     await handleRegistration(event, 1, true);
 
     expect(replyText()).toBe('指令格式錯誤：指定對象需使用 @Name');
+    expect(reply().type).toBe('text');
     expect(seasonRepo.findByName).not.toHaveBeenCalled();
     expect(calendarRepo.updateGuests).not.toHaveBeenCalled();
   });
@@ -184,6 +193,7 @@ describe('handleRegistration', () => {
     await handleRegistration(event, 1, false);
 
     expect(replyText()).toBe('找不到您的帳號，請先向管理員登記');
+    expect(reply().type).toBe('text');
     expect(calendarRepo.updateGuests).not.toHaveBeenCalled();
   });
 
@@ -277,6 +287,7 @@ describe('handleRegistration', () => {
 
     expect(calendarRepo.updateGuests).toHaveBeenCalledWith('evt-1', []);
     expect(replyText()).toContain('取消報名成功 ✅');
+    expect(reply().type).toBe('flex');
   });
 
   it('replies with an error and does not write when there is no matching registration to remove', async () => {
@@ -286,6 +297,7 @@ describe('handleRegistration', () => {
 
     expect(calendarRepo.updateGuests).not.toHaveBeenCalled();
     expect(replyText()).toContain('找不到 Alice 的報名紀錄');
+    expect(reply().type).toBe('flex');
   });
 
   describe('outcome log', () => {
