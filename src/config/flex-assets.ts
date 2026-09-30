@@ -35,6 +35,10 @@ export const FLEX_ICONS = {
   calendarCheckLight: 'calendar-check-light.png',
   fileTextLight: 'file-text-light.png',
   chevronRightDim: 'chevron-right-dim.png',
+  // 名單卡
+  circleDollarSignDark: 'circle-dollar-sign-dark.png',
+  usersDark: 'users-dark.png',
+  userXWhite: 'user-x-white.png',
 } as const;
 
 export function flexAssetUrl(filename: string): string {

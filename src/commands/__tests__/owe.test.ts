@@ -2,6 +2,8 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createTestBot } from '../../test-utils/index.js';
 import * as notionFetch from '../../services/notion/notion-fetch.js';
 import { logger } from '../../utils/logger.js';
+import { BADGE_COLORS } from '../flex-card-parts.js';
+import { heroTitleOf, listNamesOf } from './name-list-nav.js';
 
 vi.mock('../../services/notion/notion-fetch.js');
 vi.mock('../../config/line.js');
@@ -15,12 +17,15 @@ describe('handleOwe (@Dobby 欠 / owe)', () => {
     vi.resetAllMocks();
   });
 
-  it('replies "目前沒有未繳費成員 🎉" when no one owes payment', async () => {
+  it('replies an all-paid card (header only, no list or button) when no one owes payment', async () => {
     const bot = createTestBot({ people: { results: [] } });
     const messages = await bot.run('@Dobby 欠', { userId: 'user-alice' });
 
     expect(messages).toHaveLength(1);
-    expect(messages[0]).toMatchObject({ type: 'text', text: '目前沒有未繳費成員 🎉' });
+    expect(messages[0]).toMatchObject({ type: 'flex', altText: '目前沒有未繳費成員 🎉' });
+    const bubble = (messages[0] as any).contents;
+    expect(heroTitleOf(bubble)).toEqual({ badgeColor: BADGE_COLORS.lime, title: '全部繳清', countLabel: undefined });
+    expect(bubble.body).toBeUndefined();
   });
 
   it('replies with a numbered, newline-separated unpaid list when there is an unpaid list', async () => {
@@ -28,9 +33,12 @@ describe('handleOwe (@Dobby 欠 / owe)', () => {
     const messages = await bot.run('@Dobby owe', { userId: 'user-alice' });
 
     expect(messages).toHaveLength(1);
-    const msg = messages[0] as { type: string; text: string };
-    expect(msg.type).toBe('text');
-    expect(msg.text).toBe('未繳費名單：\n1. Alice\n2. Bob');
+    expect(messages[0]).toMatchObject({ type: 'flex', altText: '未繳費名單：\n1. Alice\n2. Bob' });
+    const bubble = (messages[0] as any).contents;
+    expect(heroTitleOf(bubble)).toEqual({ badgeColor: BADGE_COLORS.orange, title: '未繳費名單', countLabel: '2 位' });
+    expect(listNamesOf(bubble)).toEqual(['Alice', 'Bob']);
+    // 底部「付款資訊」按鈕送出的是付款指令（付款卡的觸發文字不能改）
+    expect(JSON.stringify(bubble.body)).toContain('"text":"@Dobby 付款"');
   });
 
   it('replies with a system error message instead of throwing when the repository call fails', async () => {

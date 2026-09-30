@@ -2,6 +2,8 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createTestBot } from '../../test-utils/index.js';
 import * as notionFetch from '../../services/notion/notion-fetch.js';
 import { logger } from '../../utils/logger.js';
+import { BADGE_COLORS } from '../flex-card-parts.js';
+import { heroTitleOf, listNamesOf } from './name-list-nav.js';
 
 vi.mock('../../services/notion/notion-fetch.js');
 vi.mock('../../config/line.js');
@@ -25,7 +27,7 @@ describe('handleParticipants (@Dobby participants / people / 報名人)', () => 
     expect(msg.text).toMatch(/^找不到 .+ 季租資料$/);
   });
 
-  it('replies "目前沒有報名成員" when the season exists but has no members', async () => {
+  it('replies a header-only card with "0 位" when the season exists but has no members', async () => {
     const bot = createTestBot({
       season: {
         results: [
@@ -46,7 +48,10 @@ describe('handleParticipants (@Dobby participants / people / 報名人)', () => 
     const messages = await bot.run('@Dobby people', { userId: 'user-alice' });
 
     expect(messages).toHaveLength(1);
-    expect(messages[0]).toMatchObject({ type: 'text', text: '2026-Q2 目前沒有報名成員' });
+    expect(messages[0]).toMatchObject({ type: 'flex', altText: '2026-Q2 目前沒有報名成員' });
+    const bubble = (messages[0] as any).contents;
+    expect(heroTitleOf(bubble)).toEqual({ badgeColor: BADGE_COLORS.gray, title: '本季報名人', countLabel: '0 位' });
+    expect(bubble.body).toBeUndefined();
   });
 
   it('replies with member count and a numbered, newline-separated name list in the normal case', async () => {
@@ -54,9 +59,13 @@ describe('handleParticipants (@Dobby participants / people / 報名人)', () => 
     const messages = await bot.run('@Dobby 報名人', { userId: 'user-alice' });
 
     expect(messages).toHaveLength(1);
-    const msg = messages[0] as { type: string; text: string };
-    expect(msg.type).toBe('text');
-    expect(msg.text).toBe('2026-Q2 報名人（2 位）：\n1. Alice\n2. Bob');
+    expect(messages[0]).toMatchObject({ type: 'flex', altText: '2026-Q2 報名人（2 位）：\n1. Alice\n2. Bob' });
+    const bubble = (messages[0] as any).contents;
+    expect(heroTitleOf(bubble)).toEqual({ badgeColor: BADGE_COLORS.lime, title: '本季報名人', countLabel: '2 位' });
+    expect(listNamesOf(bubble)).toEqual(['Alice', 'Bob']);
+    // 左上角是季度＋月份範圍；報名人卡沒有副標題、沒有按鈕（使用者定案）
+    expect(JSON.stringify(bubble.hero)).toContain('2026 Q2（4~6月）');
+    expect(JSON.stringify(bubble.body)).not.toContain('"action"');
   });
 
   it('replies with a system error message instead of throwing when the repository call fails', async () => {
