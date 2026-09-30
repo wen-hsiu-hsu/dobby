@@ -12,6 +12,8 @@
 
 **altText 列出卡片上每個指令的寫法，不只寫「指令清單」。** altText 是 LINE 通知、`/logs`、不支援 Flex 的舊版 LINE 唯一看得到的內容。指令清單卡沒有動態資料，但使用者看到 altText 時沒有卡片可以點，所以 altText 列出卡片上每個指令的寫法，管理員章節一樣只在 `isAdmin` 時加上。卡片和 altText 都只列中文關鍵字，改版前純文字清單列的英文別名（`owe`、`news`、`announcement`、`payment`、`people`、`command`）不再列出，但指令本身照樣能用（`docs/commands.md` 有完整別名）。
 
+**自我介紹（單獨的 `@Dobby`）不列在卡片上。** 自我介紹每次都會 @mention 管理員（`src/commands/introduce.ts`），做成一點就送的列，成員好奇點一下，管理員就多收一則通知。改版前的純文字清單有列它，這是刻意拿掉的；指令本身照樣能用。
+
 **拿掉原本的 quick reply。** 原本的四個 quick reply（報名人、公告、付款、未繳費）在卡片上都有對應的列，留著只是重複。Flex 訊息也可以掛 quick reply，之後要加回來不用改卡片。
 
 **按鈕文字都要能被 `parseCommand()` 解析成真的指令。** 測試（`src/commands/__tests__/command-list.test.ts`）把卡片上每個按鈕送出的文字都丟給 `parseCommand()`，確認每顆按鈕都解析成那一列該有的指令類型（季度參數也要能通過 `parseSeasonInput()`），沒有按了沒反應或觸發錯指令的按鈕。之後改指令關鍵字時，這個測試會提醒要同步改卡片。

@@ -38,7 +38,6 @@ const ICONS = [
   { file: 'megaphone-light.png', icon: 'megaphone', color: '#D4D4D4', strokeWidth: 2 },
   { file: 'credit-card-light.png', icon: 'credit-card', color: '#D4D4D4', strokeWidth: 2 },
   { file: 'circle-dollar-sign-light.png', icon: 'circle-dollar-sign', color: '#D4D4D4', strokeWidth: 2 },
-  { file: 'bot-light.png', icon: 'bot', color: '#D4D4D4', strokeWidth: 2 },
   { file: 'calendar-check-light.png', icon: 'calendar-check', color: '#D4D4D4', strokeWidth: 2 },
   { file: 'file-text-light.png', icon: 'file-text', color: '#D4D4D4', strokeWidth: 2 },
   { file: 'chevron-right-dim.png', icon: 'chevron-right', color: '#737373', strokeWidth: 2 },

@@ -130,7 +130,6 @@ export function buildCommandListBubble({ isAdmin, nextSeasonName }: CommandListC
       commandRow(FLEX_ICONS.megaphoneLight, '最新公告', '@Dobby 公告'),
       commandRow(FLEX_ICONS.creditCardLight, '付款資訊', '@Dobby 付款'),
       commandRow(FLEX_ICONS.circleDollarSignLight, '未繳費名單', '@Dobby 欠'),
-      commandRow(FLEX_ICONS.botLight, 'Dobby 自我介紹', '@Dobby'),
     ]),
     separator,
     section(sectionHead(FLEX_ICONS.calendarGray, '本週報名／請假'), [
@@ -211,7 +210,6 @@ export function buildCommandListAltText({ isAdmin, nextSeasonName }: CommandList
     '🛠️ 指令列表',
     '【查詢】',
     '@Dobby 報名人／公告／付款／欠',
-    '@Dobby（自我介紹）',
     '【報名或請假】',
     '@Dobby +N／-N',
     '@Dobby 假／銷假（季租成員限定）',
