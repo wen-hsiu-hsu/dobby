@@ -19,6 +19,7 @@
 - [ ] 報名／請假狀態回覆改用 Flex 卡片後（見 [ADR 0010](docs/adr/0010-registration-status-flex-card.md)），部署後在真實 LINE（iOS、Android、電腦版、深色模式）分別看一次報名／請假卡片：標題照片（`header-shuttle.jpg`）與各徽章圖示有正常顯示、文字疊在照片上仍然讀得清楚（深色模式跟淺色模式的漸層遮罩都要看）、卡片底部三顆按鈕（`+1 零打`／`−1 零打`／`請假`）按下去有送出正確的指令文字、LINE 推播通知彈出的內容跟 `/logs` 顯示的內容是 altText（不是卡片 JSON 或空白）。**前置條件**：repo 的 Settings → Pages → Source 要選「GitHub Actions」（見 `.github/workflows/pages.yml`），且 `https://wen-hsiu-hsu.github.io/dobby/flex/` 底下的圖片網址要能回 200——這件事要先確認完成，才能讓 bot 部署接真實流量，否則卡片會整張破圖。
 - [ ] 指令清單改用 Flex 卡片後（見 [ADR 0012](docs/adr/0012-command-list-flex-card.md)），部署後在真實 LINE（iOS、Android、電腦版）用一般成員和管理員各下一次 `@Dobby 指令`：標題照片與各列圖示有正常顯示；每一列、每顆按鈕按下去送出的指令文字正確，而且 bot 有照該指令回覆；一般成員看不到「管理員專用」區；管理員的「下一季公告草稿」送出的季度是下一季。**前置條件**：這批新增的圖示（`assets/flex/` 底下 `list-dark.png`、`*-light.png`、`search-gray.png` 等，commit `95ccacd`）要先推上 `main`、GitHub Pages 發布完成、網址回 200，才能部署程式，否則卡片會破圖。
 - [ ] 欠費名單、本季報名人改用 Flex 名單卡後（見 [ADR 0013](docs/adr/0013-name-list-flex-card.md)），部署後在真實 LINE 各下一次 `@Dobby 欠`、`@Dobby 報名人`：徽章圖示有正常顯示、名單完整沒有被截斷（長名字要換行）、欠費卡的「付款資訊」按鈕按下去有回付款資訊；沒有人欠費時顯示「全部繳清」卡（用到既有的 `check-dark.png`）。**前置條件**：這批新增的圖示（`circle-dollar-sign-dark.png`、`users-dark.png`、`user-x-white.png`，commit `ee11d95`）要先推上 `main`、GitHub Pages 發布完成、網址回 200，才能部署程式，否則卡片會破圖。
+- [ ] `@Dobby 付款` 改用 Flex 付款資訊卡後（見 [ADR 0014](docs/adr/0014-payment-flex-card.md)），部署後在真實 LINE（iOS、Android、電腦版）各下一次 `@Dobby 付款`，也從欠費名單卡的「付款資訊」按鈕點一次。要確認：信用卡徽章和「複製」按鈕的圖示有正常顯示；按「複製」後剪貼簿裡是 `20201800934932`，沒有多出空白或其他文字，LINE 有跳出已複製的提示；Line Pay Money、現金這兩格沒有按鈕；通知和 `/logs` 顯示的是 altText 純文字。如果手邊有 LINE 14.0.0 以下的舊版，也看一下按鈕按下去會怎樣。**前置條件**：新圖示 `credit-card-dark.png`、`copy-dark.png` 要先推上 `main`，GitHub Pages 發布完成、網址回 200 之後才能部署程式，否則卡片會破圖。
 - [ ] 週報推播與 `@Dobby next` 改用 Flex 卡片後（見 [ADR 0011](docs/adr/0011-weekly-status-flex-card.md)），部署後在真實 LINE 群組看一次：可以用 `@Dobby next`（管理員身分）先看，不用等到週日 09:00 才知道卡片長怎樣，兩者輸出應該完全一樣。正常週要看：徽章灰底＋`calendar-check-dark.png`、標題「本週打球」、副標題「不能到請喊聲」（若當週場地數跟季預設不同，額外確認副標題變成「不能到請喊聲・本週 N 面場」、altText 場地行有「（本週調整）」）、底部三顆按鈕功能跟報名卡片一致。暫停週（Notion 行事曆該週活動狀態設「打球暫停」）要另外找一週測：確認徽章換成灰底＋`ban-dark.png`、標題「本週活動暫停」、右上剩餘名額／進度條與零打名單／請假／本週出席三段內文都不見了，內文改成一行灰字「本週因故暫停，恢復後另行公告」，底部沒有按鈕。
 
 ---
@@ -35,12 +36,23 @@
 
 ## 已知問題（尚未處理）
 
+- [ ] **付款資訊現在有兩份：`PAYMENT`（舊）和 `PAYMENT_V2`（新），改其中一份不會同步到另一份。** 2026-10-01 起，`@Dobby 付款`（`src/commands/payment.ts`）改讀 Notion「所有公告」的 `PAYMENT_V2` 頁面，內容是一個表格（名稱／帳號／備註，見 [ADR 0014](docs/adr/0014-payment-flex-card.md)）。`@Dobby season` 的季公告草稿則刻意維持原樣：`src/commands/season-announcement.ts:78` 仍讀舊的 `PAYMENT` 頁面（純文字段落），第 113 行用 `blocksToText()` 填進 `{PAYMENT_INFO}`。
+
+  不是 bug。2026-10-01 用 Notion API 實測，兩頁內容一致：舊 `PAYMENT` 是三個純文字段落（不是條列），`blocksToText()` 輸出「永豐 (807) 20201800934932 (請備註名字)\nLine Pay Money\n現金」；`PAYMENT_V2` 表格是同樣三種方式。兩個指令目前的輸出都正確。使用者想先看付款卡上線的效果，再決定季公告要不要也改讀 V2，所以暫時保留兩份。風險在之後：管理員換帳號或新增付款方式時，如果只改了 `PAYMENT_V2`，`@Dobby 付款` 會顯示新帳號，但下一季的公告草稿還是舊帳號，而且不會有任何錯誤或警告，要等有人照著公告轉錯帳戶才會發現。反方向更可能發生：管理員照舊習慣只改 `PAYMENT`，結果 `@Dobby 付款` 卡片（以及欠費卡點「付款資訊」看到的）還是舊帳號。
+
+  如果要處理（改成季公告也讀 V2）：
+  - `season-announcement.ts:78` 改 `findByName('PAYMENT_V2')`，第 80 行的錯誤訊息「找不到 PAYMENT 公告內容」一起改，第 113 行改用 `parsePaymentTable()`＋`paymentMethodsToText()`（`src/services/notion/payment-methods.ts`）產生文字。**不能直接把 V2 的區塊丟給 `blocksToText()`**：它不輸出表格，`{PAYMENT_INFO}` 會變成空的。`parsePaymentTable()` 回 null 時（表格被改壞），要決定退回 `tablesToText()`＋`blocksToText()`（同 `src/commands/payment.ts:27` 的做法；只用 `blocksToText()` 會是空的），還是回錯誤訊息；也要決定表格以外的文字要不要接在後面（付款卡會接）。
+  - 輸出格式會從舊的「永豐 (807) 20201800934932 (請備註名字)」變成「永豐銀行 （807） 20201800934932 (請備註名字)」，名稱照表格內容。改之前要讓使用者看過新格式。
+  - 改完後要同步：`src/commands/__tests__/season-announcement.test.ts`（PAYMENT fixture 是條列區塊）、`docs/commands.md` 的 `{PAYMENT_INFO}` 說明、`docs/notion/databases.md` 的 `PAYMENT` 那一列、`docs/notion/schemas/all-announcements.json` 的 `known_pages.PAYMENT`、`docs/adr/0014-payment-flex-card.md` 談 `{PAYMENT_INFO}` 的那段。確認沒有地方再讀 `PAYMENT` 之後，才請使用者到 Notion 刪掉舊頁面。
+
+  如果決定不改，至少要在 Notion 的兩個頁面上註明「改這頁也要改另一頁」。
+
 - [ ] **報名／請假在取鎖前的 Notion 例外不會回覆使用者。** `handleRegistration`／`handleLeave` 呼叫 `withFreshCalendarEvent` 之前，會先用 `Promise.all` 並行查 `resolveTarget` 和 `seasonRepo.findByName`（`src/commands/registration/registration-handler.ts:49-52`、`leave-handler.ts:49-52`）。這段沒有 try/catch；`with-fresh-calendar-event.ts:21-45` 的 try 只包住取鎖之後。任一查詢 throw，例外會經 `command-router.ts`、`message-handler.ts:71` 一路丟到 `src/handlers/event-router.ts:50-52`，那裡只 `logger.error`（`/logs` 會顯示為失敗），使用者收不到任何回覆。
 
   這是 bug，但目前還沒觀察到：
   - `notion-fetch.ts` 只對 429 重試（最多 3 次，第 74、121 行）；5xx、網路錯誤、429 重試用完都會直接 throw（`assertOk`，第 45-72 行）。本機 `logs/`（2026-09-21～27）沒有任何 `Error handling event` 或 `Notion API error`。
   - 從 n8n 遷移的第一版（commit `23c32a1`）就是這樣，當時的 try 也只包鎖內。
-  - 其他指令都自己 try/catch 並回「系統錯誤，請稍後再試」：`owe.ts:9-42`、`news.ts:59-84`、`participants.ts:11-42`、`payment.ts:7-16`、`next-event.ts:13-27`、`season-announcement.ts:56-150`、`introduce.ts:12-42`。`message-handler.ts:48-54` 的 `findByUserId` 也在 commit `5ef200d` 補過同一種缺口。只有報名／請假漏掉。
+  - 其他指令都自己 try/catch 並回「系統錯誤，請稍後再試」：`owe.ts:9-42`、`news.ts:59-84`、`participants.ts:11-42`、`payment.ts:11-42`、`next-event.ts:13-27`、`season-announcement.ts:56-150`、`introduce.ts:12-42`。`message-handler.ts:48-54` 的 `findByUserId` 也在 commit `5ef200d` 補過同一種缺口。只有報名／請假漏掉。
   - 2026-09-28 把兩個查詢改成並行後，多了一種觸發情況：對象查無（`resolved` 為 null）而 Season 查詢 throw。舊版依序執行，會先回「找不到您的帳號」；現在 `Promise.all` 整個 reject，不回覆。其他組合的行為跟舊版相同。
   - 影響：使用者以為 bot 沒收到，通常會再打一次。這段在任何寫入之前，所以重打不會重複報名，只是體驗差。
 
