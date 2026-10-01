@@ -4,7 +4,7 @@
 
 **之前不改的原因：Flex 卡不能長按複製。** 付款訊息最常見的用途是複製帳號去轉帳。純文字可以長按複製，Flex 卡片的文字不行，所以卡片要有 clipboard action 的「複製」按鈕才划算。按鈕需要一個確定的帳號字串。如果從內文用 regex 抓，管理員改個格式就會抓錯或抓不到，而且不會有任何地方報錯。如果把帳號拆成資料庫欄位，又要改「所有公告」的資料庫結構，當時使用者擔心影響其他公告頁。
 
-**這次的做法：資料放在頁面內文的表格。** 使用者另外開了 `PAYMENT_V2` 頁面，內文是一個有開標題列的表格（名稱／帳號／備註）。表格是頁面內容，不是資料庫欄位，所以資料庫結構完全不用動，其他公告頁也不受影響；帳號又各自放在一個儲存格裡，程式拿得到確定的字串。`parsePaymentTable()`（`src/services/notion/payment-methods.ts`）依標題文字對應欄位，不看欄位順序，管理員調整欄位順序不會壞。這段解析是付款專用的，沒有放進共用的 `blocksToText()`。`blocksToText()` 本來就不輸出表格，`news`、`introduce` 等指令也不需要表格。
+**這次的做法：資料放在頁面內文的表格。** 使用者另外開了 `PAYMENT_V2` 頁面，內文是一個有開標題列的表格（名稱／帳號／備註）。表格是頁面內容，不是資料庫欄位，所以資料庫結構完全不用動，其他公告頁也不受影響；帳號又各自放在一個儲存格裡，程式拿得到確定的字串。`parsePaymentTable()`（`src/services/notion/payment-methods.ts`）依標題文字對應欄位，不看欄位順序，管理員調整欄位順序不會壞。這段解析是付款專用的，沒有放進共用的 `blocksToText()`。`blocksToText()` 本來就不輸出表格，`NEWS_TEMPLATE`、`INTRODUCE` 等頁面本身也不需要表格；news 只有 `{PAYMENT_V2}` 變數經 `paymentPageToText()` 讀付款表格（見下方）。
 
 **版面：每種方式一格，「複製」按鈕放在有帳號那格的右邊。** mockup 比較了三種：每種方式一格、帳號放大獨立成一塊，以及按鈕統一放在卡片底部。使用者選了第一種。複製按鈕跟它複製的帳號放在同一格，有多個帳號時不會搞混是哪一個。按鈕用 box＋text 畫，原因跟 `messageButton()` 一樣，Flex 的 button component 不能設粗體。clipboard action 要 LINE 14.0.0 以上才能用，validate API 確認過 JSON 是合法的。clipboardText 上限 1000 字，帳號格超過時不放按鈕，免得整則被退回。新增的圖示有 `credit-card-dark.png`（徽章）和 `copy-dark.png`（按鈕）兩張。
 
@@ -14,6 +14,8 @@
 
 **altText 是一種方式一行的純文字。** 格式是「名稱 帳號 (備註)」，例如「永豐銀行 （807） 20201800934932 (請備註名字)」，後面接表格以外的文字，超過 400 字用 `truncateAltText()` 截斷。這跟舊的 `PAYMENT` 段落寫法接近，通知和 `/logs` 看到的內容跟以前差不多。
 
-**季公告草稿的 `{PAYMENT_INFO}` 暫時還讀舊的 `PAYMENT`。** `season-announcement.ts` 產生的是要讓管理員複製貼上的純文字，直接改讀 `PAYMENT_V2` 會變成空的，因為 `blocksToText()` 不輸出表格。如果要改，可以用 `paymentMethodsToText()` 產生文字，再把舊的 `PAYMENT` 頁面淘汰。使用者想先看付款卡上線的效果再決定，所以這段期間付款資訊有兩份，見 `TODO.md`。
+**季公告草稿的 `{PAYMENT_INFO}` 暫時還讀舊的 `PAYMENT`。** `season-announcement.ts` 產生的是要讓管理員複製貼上的純文字，直接改讀 `PAYMENT_V2` 會變成空的，因為 `blocksToText()` 不輸出表格。如果要改，可以用 `paymentPageToText()` 產生文字（表格改壞時有退路，也會接表格外的文字），再把舊的 `PAYMENT` 頁面淘汰；`season-announcement.ts` 的變數 regex 是 `[A-Z_]+`，要沿用 `{PAYMENT_V2}` 這個名字也要一起改。使用者想先看付款卡上線的效果再決定，所以這段期間付款資訊有兩份，見 `TODO.md`。
+
+**`@Dobby 公告` 也改讀 `PAYMENT_V2`。** 同一天使用者把 `NEWS_TEMPLATE` 裡手打的付款條列（還寫著已經過時的「Line 轉帳」）換成 `{PAYMENT_V2}` 變數，`news.ts` 用 `paymentPageToText()` 代入，跟付款卡 altText 同一段文字（但不截斷）。讀不到時代入一句提示而不是空字串：公告之後也可能改成 Flex 卡，空字串會讓整張卡被退回。讀 `PAYMENT_V2` 的 Notion 呼叫失敗（例如 429 重試用完）時，只把付款那段換成「（付款資訊讀取失敗，請用 @Dobby 付款查詢）」，公告其他部分照常回，因為付款是公告的次要段落。頁面名稱用 `payment-methods.ts` 的 `PAYMENT_PAGE_NAME` 常數，付款卡和 news 共用。news 的變數 regex 原本是 `[A-Z_]+`，比對不到帶數字的 `PAYMENT_V2`，這次改成 `[A-Z0-9_]+`。
 
 **觸發文字不變。** 欠費名單卡的「付款資訊」按鈕和指令清單卡都會送出 `@Dobby 付款`，所以只換回覆內容，不改指令。

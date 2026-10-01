@@ -6,7 +6,7 @@
   "last_updated": "2026-01-18T14:54:26.024Z",
   "known_pages": {
     "NEWS_TEMPLATE": "@Dobby news 指令顯示的公告內容",
-    "PAYMENT_V2": "@Dobby payment 付款資訊卡的資料：有開標題列的表格（名稱／帳號／備註），見 docs/notion/databases.md「付款表格」",
+    "PAYMENT_V2": "@Dobby payment 付款資訊卡、@Dobby news 的 {PAYMENT_V2} 共用的資料：有開標題列的表格（名稱／帳號／備註），見 docs/notion/databases.md「付款表格」",
     "PAYMENT": "舊的付款說明（純文字段落），現在只剩 @Dobby season 的 {PAYMENT_INFO} 在讀，要跟 PAYMENT_V2 保持一致",
     "WELCOME_MESSAGE": "機器人加入群組時發送的歡迎訊息，支援 {NEW_FRIEND}、{MANAGER} placeholder",
     "INTRODUCE": "@Dobby 自我介紹內容，支援 {USER}、{MANAGER} placeholder",

@@ -108,13 +108,13 @@ USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員�
 | 頁面標題 | 用途 |
 |---------|------|
 | `NEWS_TEMPLATE` | `@Dobby news` 指令顯示的內容 |
-| `PAYMENT_V2` | `@Dobby payment` 付款資訊卡的資料：一個有開標題列的表格，欄位是 `名稱`、`帳號`、`備註`（見下方「付款表格」） |
+| `PAYMENT_V2` | `@Dobby payment` 付款資訊卡、`@Dobby news` 的 `{PAYMENT_V2}` 變數共用的資料：一個有開標題列的表格，欄位是 `名稱`、`帳號`、`備註`（見下方「付款表格」） |
 | `PAYMENT` | 舊的付款資訊（純文字段落），現在只剩 `@Dobby season` 草稿的 `{PAYMENT_INFO}` 在讀。要跟 `PAYMENT_V2` 保持一致（見 `TODO.md`） |
 | `WELCOME_MESSAGE` | 歡迎訊息：機器人加入群組（`join`）和新成員加入群組（`memberJoined`）共用這份內容 |
 | `INTRODUCE` | `@Dobby` 自我介紹的內容 |
 | `NEW_SEASON` | `@Dobby season <季度>` 指令產生下一季公告草稿的模板，見 [commands.md](../commands.md#產生新一季公告草稿) |
 
-`getBlocks()` 會遞迴抓取 `has_children === true` 的區塊（toggle、巢狀清單等），每一層都用 `notionGetAllResults` 分頁抓完，超過 100 個區塊也不會被截斷。`blocksToText()` 輸出時子區塊依巢狀深度縮排（每層 2 個空白），`news`、`introduce`、`WELCOME_MESSAGE`、`season` 都走這個共用實作；`payment` 的付款表格另外解析（見下方「付款表格」），只有表格以外的文字和退回純文字時才用 `blocksToText()`。各種區塊的輸出方式：
+`getBlocks()` 會遞迴抓取 `has_children === true` 的區塊（toggle、巢狀清單等），每一層都用 `notionGetAllResults` 分頁抓完，超過 100 個區塊也不會被截斷。`blocksToText()` 輸出時子區塊依巢狀深度縮排（每層 2 個空白），`news`、`introduce`、`WELCOME_MESSAGE`、`season` 都走這個共用實作；`payment` 和 news 的 `{PAYMENT_V2}` 讀 `PAYMENT_V2` 時，付款表格另外解析（`paymentPageToText()`，見下方「付款表格」），只有表格以外的文字和退回純文字時才用 `blocksToText()`。各種區塊的輸出方式：
 
 - `bulleted_list_item` 一律補 `• ` 前綴。
 - `numbered_list_item` 補編號：同一層連續的編號項目算同一串，中間夾了其他區塊就從 1 重新開始（跟 Notion 一樣）。編號項目底下再巢狀的編號清單照 Notion 的樣子輪替 `1.` → `a.` → `i.` → `1.`；格式只看上面有幾層編號項目，所以放在 toggle 或分欄裡的編號清單仍從 `1.` 開始。沒有文字的空項目會略過，不佔編號。Notion 較新的 API 版本會在第一項帶 `list_start_index`／`list_format`，有的話會照用（第一項是空的也會讀），但我們固定的 `2022-06-28` 版不會送。
@@ -131,7 +131,7 @@ USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員�
 - 標題列決定欄位：`名稱` 必須有；`帳號`、`備註` 可以整欄不存在。欄位依標題文字對應，調整欄位順序沒關係，但**改了標題文字（例如把「帳號」改成「帳戶」）那一欄就讀不到**。
 - 標題列以下每一列是一種付款方式。儲存格只取純文字、去掉前後空白；名稱和帳號都空白的列會略過。
 - 「帳號」格有填的列，卡片上會有「複製」按鈕，複製的是該格的原字串（不會去掉中間的空白或 `-`）。帳號超過 1000 字（LINE clipboard action 的上限）時不放按鈕，避免整則被退回。
-- 找不到可用的表格（沒有表格、沒開標題列、沒有「名稱」欄、沒有任何一列填了名稱或帳號）時，`@Dobby payment` 改回純文字：`tablesToText()` 把每個表格的每一列串成一行（有開標題列就略過標題列），後面接表格以外的文字。`blocksToText()` 不輸出表格，所以不能只靠它，否則整頁只有表格時會回「付款資訊為空」。
+- 找不到可用的表格（沒有表格、沒開標題列、沒有「名稱」欄、沒有任何一列填了名稱或帳號）時，`@Dobby payment` 和 news 的 `{PAYMENT_V2}` 都改回純文字：`tablesToText()` 把每個表格的每一列串成一行（有開標題列就略過標題列），後面接表格以外的文字。`blocksToText()` 不輸出表格，所以不能只靠它，否則整頁只有表格時會回「付款資訊為空」（news 代入「（付款資訊為空）」）。
 
 ### Placeholder 替換規則
 

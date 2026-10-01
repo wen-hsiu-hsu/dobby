@@ -43,6 +43,7 @@ src/services/notion/
 ├── property-helpers.ts     ← 讀寫各種 Notion property 型別的 helper
 ├── paginated-relation.ts   ← relation/people/rollup 屬性補抓超過 25 筆截斷的完整清單
 ├── blocks-to-text.ts       ← 把 Notion block children 攤平成純文字
+├── payment-methods.ts     ← PAYMENT_V2 付款表格解析與純文字化（付款卡、news 的 {PAYMENT_V2} 共用）
 ├── event-occupancy.ts      ← 彙整單一活動的名額／已報名人數等 occupancy 資訊
 ├── users-repository.ts     ← USERS 資料庫
 ├── people-repository.ts    ← 人員清單

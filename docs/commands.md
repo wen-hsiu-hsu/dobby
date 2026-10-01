@@ -35,7 +35,7 @@ Dobby 會介紹自己並 @mention 觸發者和管理員。
 @Dobby 公告
 @Dobby announcement
 ```
-讀取 Notion「所有公告」資料庫中名為 `NEWS_TEMPLATE` 的頁面，套用當季季租資料後回傳。內容裡的 `{PLACEHOLDER}` 會被即時抓取的資料取代：
+讀取 Notion「所有公告」資料庫中名為 `NEWS_TEMPLATE` 的頁面，套用當季季租資料後回傳。內容裡的 `{PLACEHOLDER}` 會被即時抓取的資料取代（變數名稱只能有大寫英文、數字、底線；不認得的變數原樣保留）：
 
 | 變數 | 內容 |
 |------|------|
@@ -50,8 +50,9 @@ Dobby 會介紹自己並 @mention 觸發者和管理員。
 | `{TOTAL_PRICE}` | 場租總金額 |
 | `{LIST_ALL_DATES}` | 本季所有打球日期，依月份分行、同月用 `, ` 相隔，格式 `M/DD`（如 `7/04, 7/11`） |
 | `{LOCATION}` | 打球地點 |
+| `{PAYMENT_V2}` | 付款方式，跟 `@Dobby 付款` 讀同一份 `PAYMENT_V2` 頁面，一種方式一行（「永豐銀行 （807） 20201800934932 (請備註名字)」），後面接表格以外的文字，格式同付款卡的 altText（但不截斷）。頁面不存在時代入「（找不到付款資訊）」、頁面沒內容時代入「（付款資訊為空）」、Notion 讀取失敗時代入「（付款資訊讀取失敗，請用 @Dobby 付款查詢）」（公告其他部分照常回），不會代入空字串。找到模板和當季季租資料後，每次都會多讀這一頁（跟模板內容、報名人、打球日期並行查），不論模板有沒有用到這個變數 |
 
-Notion 內容轉成 LINE 文字的方式（項目符號補 `• `、編號清單補編號、待辦補 `☐`／`☑`、分隔線區塊變成 `—`、保留空行等，以及哪些區塊不支援）見 [databases.md](notion/databases.md#所有公告all-announcements)。改公告文字內容（包含新增備註句子）要去 Notion 改 `NEWS_TEMPLATE` 頁面，不用改 code；但若要新增/修改變數本身或格式，需同步改 `src/commands/news.ts`。
+Notion 內容轉成 LINE 文字的方式（項目符號補 `• `、編號清單補編號、待辦補 `☐`／`☑`、分隔線區塊變成 `—`、保留空行等，以及哪些區塊不支援）見 [databases.md](notion/databases.md#所有公告all-announcements)。改公告文字內容（包含新增備註句子）要去 Notion 改 `NEWS_TEMPLATE` 頁面，不用改 code；但若要新增/修改變數本身或格式，需同步改 `src/commands/news.ts`。付款方式不在 `NEWS_TEMPLATE` 裡：要改帳號或付款方式請改 `PAYMENT_V2` 表格（`@Dobby 付款` 也讀這份）；`@Dobby season` 的 `{PAYMENT_INFO}` 仍讀舊的 `PAYMENT`，兩頁都要改（見 `TODO.md`）。
 
 ---
 
@@ -158,7 +159,7 @@ Notion 內容轉成 LINE 文字的方式（項目符號補 `• `、編號清單
 ```
 依指定季度（`YYYY` + `Q1`~`Q4`，接受無 hyphen／小寫 q，如 `2026Q2`、`2026-Q2`、`2026q2`）產生下一季公告草稿，套用 Notion「所有公告」資料庫中 `NEW_SEASON` 頁面的模板，回傳後由管理員自行潤飾再手動發布——不會自動發到群組。
 
-模板內容裡的 `{PLACEHOLDER}` 會被即時抓取的資料取代：
+模板內容裡的 `{PLACEHOLDER}` 會被即時抓取的資料取代（變數名稱只能有大寫英文和底線，不能有數字，跟 news 不同；不認得的變數原樣保留，所以在 `NEW_SEASON` 放 `{PAYMENT_V2}` 會原樣輸出）：
 
 | 變數 | 內容 |
 |------|------|
@@ -168,7 +169,7 @@ Notion 內容轉成 LINE 文字的方式（項目符號補 `• `、編號清單
 | `{ALL_MEMBERS_MENTIONS}` | 指定季報名人 mention 清單，空格分隔（`@Alice @Bob ...`） |
 | `{WEEK_COUNTS}` | 指定季租借次數（`租借次數 (2hrs)`） |
 | `{GUEST_FEE}` | 指定季零打費用 |
-| `{PAYMENT_INFO}` | 舊的 `PAYMENT` 公告內容。注意：`payment` 指令已經改讀 `PAYMENT_V2`，兩邊不是同一份資料，改付款方式時兩頁都要改（見 `TODO.md`） |
+| `{PAYMENT_INFO}` | 舊的 `PAYMENT` 公告內容。注意：`payment` 指令和 `@Dobby 公告` 的 `{PAYMENT_V2}` 已經改讀 `PAYMENT_V2`，兩邊不是同一份資料，改付款方式時兩頁都要改（見 `TODO.md`） |
 | `{COURT_PRICE}` | 每場/小時定價 |
 | `{COURT_COUNT}` | 指定季場地數 |
 | `{TOTAL_PRICE}` | 指定季場租總金額 |
