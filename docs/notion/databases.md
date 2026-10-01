@@ -107,7 +107,7 @@ USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員�
 
 | 頁面標題 | 用途 |
 |---------|------|
-| `NEWS_TEMPLATE` | `@Dobby news` 指令顯示的內容 |
+| `NEWS_TEMPLATE` | `@Dobby news` 指令顯示的內容。公告卡依這頁的標題區塊切段（`blocksToSections()`，見 [commands.md](../commands.md#查看公告)），想讓段落有小標，就用 Notion 的標題（heading）開頭；沒接標題的內容會變成沒有小標的段落 |
 | `PAYMENT_V2` | `@Dobby payment` 付款資訊卡、`@Dobby news` 的 `{PAYMENT_V2}` 變數共用的資料：一個有開標題列的表格，欄位是 `名稱`、`帳號`、`備註`（見下方「付款表格」） |
 | `PAYMENT` | 舊的付款資訊（純文字段落），現在只剩 `@Dobby season` 草稿的 `{PAYMENT_INFO}` 在讀。要跟 `PAYMENT_V2` 保持一致（見 `TODO.md`） |
 | `WELCOME_MESSAGE` | 歡迎訊息：機器人加入群組（`join`）和新成員加入群組（`memberJoined`）共用這份內容 |
@@ -123,6 +123,8 @@ USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員�
 - 空白段落（在 Notion 按 Enter 留下的空行）保留成空行；整段內容開頭和結尾的空行會被去掉。
 - 其他有 `rich_text` 的區塊（標題、引言、toggle、callout、程式碼等）只取純文字，不加前綴；callout 的圖示、程式碼區塊的說明文字不會輸出。所有區塊的粗體、顏色等格式都會丟掉，超連結只留文字、網址會丟掉。
 - 沒有 `rich_text` 的區塊（圖片、影片、檔案、書籤、嵌入、公式區塊等）那一行略過。但如果它有子區塊，子區塊仍會輸出：分欄（`column_list`／`column`）、同步區塊（`synced_block`）裡的內容照樣出現，只是會多一層沒必要的縮排。表格例外，儲存格放在 `cells` 而不是 `rich_text`，所以整個表格的內容都不會出現。
+
+公告卡另外用 `blocksToSections()` 把頁面切成段落。只有最上層的 heading 1／2／3 和分隔線會切段：標題文字變成段落小標，分隔線只當邊界、不輸出 `—`。每段內文的轉換方式跟上面的規則完全一樣；可展開標題底下的內容就是那段的內文，不縮排。放在 toggle 或分欄裡的標題不切段，照上面的規則當作一般文字。
 
 ### 付款表格（`PAYMENT_V2`）
 
