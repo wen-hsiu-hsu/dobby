@@ -5,6 +5,7 @@ import * as seasonRepo from '../../services/notion/season-repository.js';
 import * as peopleRepo from '../../services/notion/people-repository.js';
 import * as calendarRepo from '../../services/notion/calendar-repository.js';
 import { replyMessage } from '../../services/line/reply-service.js';
+import { replyText } from '../../test-utils/reply-text.js';
 
 vi.mock('../../services/notion/announcement-repository.js');
 vi.mock('../../services/notion/season-repository.js');
@@ -89,6 +90,26 @@ beforeEach(() => {
 });
 
 
+function headingBlock(text: string) {
+  return { type: 'heading_2', heading_2: { rich_text: [{ plain_text: text }] } };
+}
+
+const dividerBlock = { type: 'divider', divider: {} };
+
+// 卡片 body：段落 box 與 separator 交錯，最後一個是按鈕列
+function cardSections(message: any): string[][] {
+  return (message.contents.body.contents as any[])
+    .slice(0, -1)
+    .filter((c) => c.type === 'box')
+    .map((box) => box.contents.map((t: any) => t.text));
+}
+
+function heroTexts(message: any): string[] {
+  const walk = (n: any): string[] =>
+    !n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(walk) : [...(n.type === 'text' ? [n.text] : []), ...Object.values(n).flatMap(walk)];
+  return walk(message.contents.hero);
+}
+
 describe('handleNews', () => {
   it('looks up the NEWS_TEMPLATE announcement, not NEWS', async () => {
     await handleNews('token');
@@ -100,7 +121,7 @@ describe('handleNews', () => {
     await handleNews('token');
 
     const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
-    const text = (messages[0] as { text: string }).text;
+    const text = replyText(messages[0]!);
 
     expect(text).toContain('2026-Q3 7~9月');
     expect(text).toContain('共 2 人');
@@ -123,7 +144,7 @@ describe('handleNews', () => {
     expect(announcementRepo.findByName).toHaveBeenCalledWith('PAYMENT_V2');
     expect(announcementRepo.getBlocks).toHaveBeenCalledWith('ann-payment');
     const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
-    const text = (messages[0] as { text: string }).text;
+    const text = replyText(messages[0]!);
     expect(text).toContain('付款方式\n永豐銀行 （807） 20201800934932 (請備註名字)\nLine Pay Money\n現金');
     expect(text).not.toContain('{PAYMENT_V2}');
     expect(text).toContain('{807} {PAYMENT_V3}');
@@ -138,7 +159,7 @@ describe('handleNews', () => {
     await handleNews('token');
 
     const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
-    const text = (messages[0] as { text: string }).text;
+    const text = replyText(messages[0]!);
     expect(text).toContain('2026-Q3 7~9月');
     expect(text).toContain('付款方式\n（付款資訊讀取失敗，請用 @Dobby 付款查詢）');
   });
@@ -151,7 +172,7 @@ describe('handleNews', () => {
     await handleNews('token');
 
     const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
-    expect((messages[0] as { text: string }).text).toContain('付款方式\n（找不到付款資訊）');
+    expect(replyText(messages[0]!)).toContain('付款方式\n（找不到付款資訊）');
   });
 
   it('fills {PAYMENT_V2} with a notice when the PAYMENT_V2 page is empty', async () => {
@@ -162,7 +183,98 @@ describe('handleNews', () => {
     await handleNews('token');
 
     const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
-    expect((messages[0] as { text: string }).text).toContain('付款方式\n（付款資訊為空）');
+    expect(replyText(messages[0]!)).toContain('付款方式\n（付款資訊為空）');
+  });
+
+  it('replies a Flex card split into sections at Notion headings, with the plain text as altText', async () => {
+    vi.mocked(announcementRepo.getBlocks).mockImplementation(async (pageId: string) =>
+      (pageId === 'ann-payment'
+        ? paymentBlocks
+        : [
+            paragraphBlock('{SEASON} {FROM_TO_MONTH}'),
+            headingBlock('報名名單'),
+            paragraphBlock('(共 {TOTAL_PEOPLE} 人)'),
+            paragraphBlock('{LIST_ALL_PEOPLE}'),
+            dividerBlock,
+            headingBlock('時間'),
+            paragraphBlock('{LIST_ALL_DATES}'),
+            dividerBlock,
+            headingBlock('付款方式'),
+            paragraphBlock('{PAYMENT_V2}'),
+          ]) as any,
+    );
+
+    await handleNews('token');
+
+    const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
+    const message = messages[0] as any;
+    expect(message.type).toBe('flex');
+    expect(message.altText).toBe(
+      '2026-Q3 7~9月\n報名名單\n(共 2 人)\n許文修、陳玟育\n—\n時間\n9/26\n10/03\n—\n付款方式\n永豐銀行 （807） 20201800934932 (請備註名字)\nLine Pay Money\n現金',
+    );
+    expect(heroTexts(message)).toEqual(['2026 Q3（7~9月）', '本季公告', '共 2 人・13 次']);
+    // 段落在代入變數前就切好，{LIST_ALL_DATES} 裡的換行不會被當成段落邊界
+    expect(cardSections(message)).toEqual([
+      ['2026-Q3 7~9月'],
+      ['報名名單', '(共 2 人)\n許文修、陳玟育'],
+      ['時間', '9/26\n10/03'],
+      ['付款方式', '永豐銀行 （807） 20201800934932 (請備註名字)\nLine Pay Money\n現金'],
+    ]);
+  });
+
+  it('falls back to plain text split at line breaks into messages within LINE\'s 5000-character limit when the card exceeds 30KB', async () => {
+    // 每行 4000 字（卡片約 36KB）：兩行放不進同一則，所以一行一則，內容完整不截斷
+    const lines = ['甲', '乙', '丙'].map((c) => c.repeat(4000));
+    vi.mocked(announcementRepo.getBlocks).mockImplementation(async (pageId: string) =>
+      (pageId === 'ann-payment' ? paymentBlocks : [headingBlock('其他'), ...lines.map(paragraphBlock)]) as any,
+    );
+
+    await handleNews('token');
+
+    const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
+    expect(messages).toEqual([
+      { type: 'text', text: `其他\n${lines[0]}` },
+      { type: 'text', text: lines[1] },
+      { type: 'text', text: lines[2] },
+    ]);
+  });
+
+  it('hard-splits a single line over 5000 characters, and caps the fallback at LINE\'s 5 messages per reply', async () => {
+    const longLine = '長'.repeat(30000);
+    vi.mocked(announcementRepo.getBlocks).mockImplementation(async (pageId: string) =>
+      (pageId === 'ann-payment' ? paymentBlocks : [paragraphBlock(longLine)]) as any,
+    );
+
+    await handleNews('token');
+
+    const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
+    const texts = messages.map((m) => replyText(m));
+    expect(texts).toHaveLength(5);
+    expect(texts.every((t) => t.length <= 5000)).toBe(true);
+    expect(texts[4]!.endsWith('…（公告太長，後面省略）')).toBe(true);
+  });
+
+  it('replies "公告內容為空" when the template has text but no section with content, e.g. only blank lines and dividers', async () => {
+    vi.mocked(announcementRepo.getBlocks).mockImplementation(async (pageId: string) =>
+      (pageId === 'ann-payment'
+        ? paymentBlocks
+        : [paragraphBlock('  '), dividerBlock, paragraphBlock('{LOCATION}')]) as any,
+    );
+    vi.mocked(seasonRepo.findByName).mockResolvedValue({ ...(await seasonRepo.findByName('x'))!, location: '' });
+
+    await handleNews('token');
+
+    expect(replyMessage).toHaveBeenCalledWith('token', [{ type: 'text', text: '公告內容為空' }]);
+  });
+
+  it('replies "公告內容為空" when NEWS_TEMPLATE has no content', async () => {
+    vi.mocked(announcementRepo.getBlocks).mockImplementation(async (pageId: string) =>
+      (pageId === 'ann-payment' ? paymentBlocks : []) as any,
+    );
+
+    await handleNews('token');
+
+    expect(replyMessage).toHaveBeenCalledWith('token', [{ type: 'text', text: '公告內容為空' }]);
   });
 
   it('replies "找不到公告內容" when NEWS_TEMPLATE does not exist', async () => {
@@ -180,7 +292,7 @@ describe('handleNews', () => {
     await handleNews('token');
 
     const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
-    const text = (messages[0] as { text: string }).text;
+    const text = replyText(messages[0]!);
     expect(text).toContain('季租資料');
   });
 });

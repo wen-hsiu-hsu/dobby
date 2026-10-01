@@ -48,6 +48,8 @@ const ICONS = [
   // 付款資訊卡（src/commands/payment-card.ts）
   { file: 'credit-card-dark.png', icon: 'credit-card', color: '#111111', strokeWidth: 2.5 },
   { file: 'copy-dark.png', icon: 'copy', color: '#111111', strokeWidth: 2.5 },
+  // 公告卡（src/commands/news-card.ts）
+  { file: 'megaphone-dark.png', icon: 'megaphone', color: '#111111', strokeWidth: 2.5 },
 ];
 
 const outDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'flex');

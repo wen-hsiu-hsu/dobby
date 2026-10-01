@@ -10,7 +10,7 @@
  */
 export const FLEX_ASSET_ROOT = 'https://wen-hsiu-hsu.github.io/dobby/flex/';
 
-/** assets/flex/ 底下的檔名，所有 Flex 卡片（狀態卡、指令清單卡、名單卡、付款資訊卡）組裝時取用。 */
+/** assets/flex/ 底下的檔名，所有 Flex 卡片（狀態卡、指令清單卡、名單卡、付款資訊卡、公告卡）組裝時取用。 */
 export const FLEX_ICONS = {
   headerShuttle: 'header-shuttle.jpg',
   checkDark: 'check-dark.png',
@@ -42,6 +42,8 @@ export const FLEX_ICONS = {
   // 付款資訊卡
   creditCardDark: 'credit-card-dark.png',
   copyDark: 'copy-dark.png',
+  // 公告卡
+  megaphoneDark: 'megaphone-dark.png',
 } as const;
 
 export function flexAssetUrl(filename: string): string {
