@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { blocksToText, blocksToSections } from '../blocks-to-text.js';
+import { blocksToText, blocksToSections, readHeaderTable } from '../blocks-to-text.js';
 
 function paragraph(text: string) {
   return { type: 'paragraph', paragraph: { rich_text: [{ plain_text: text }] } };
@@ -272,5 +272,34 @@ describe('blocksToSections', () => {
 
   it('returns no sections for no blocks', () => {
     expect(blocksToSections([])).toEqual([]);
+  });
+});
+
+describe('readHeaderTable', () => {
+  function row(...cells: string[]) {
+    return { type: 'table_row', table_row: { cells: cells.map((c) => (c ? [{ plain_text: c }] : [])) } };
+  }
+  function table(hasHeader: boolean, ...rows: ReturnType<typeof row>[]) {
+    return { type: 'table', table: { table_width: 3, has_column_header: hasHeader }, children: rows } as any;
+  }
+
+  it('keys each data row by the header text, trimming cells and filling short rows with ""', () => {
+    const t = table(true, row('標題', '內容', 'column'), row(' 場地 ', '{COURT_COUNT}', 'narrow'), row('場租'));
+
+    expect(readHeaderTable(t)).toEqual([
+      { 標題: '場地', 內容: '{COURT_COUNT}', column: 'narrow' },
+      { 標題: '場租', 內容: '', column: '' },
+    ]);
+  });
+
+  it('gives [] for a header-only table, null for a table with no rows, and lets a later duplicate column win', () => {
+    expect(readHeaderTable(table(true, row('標題', '內容')))).toEqual([]);
+    expect(readHeaderTable(table(true))).toBeNull();
+    expect(readHeaderTable(table(true, row('備註', '備註'), row('a', 'b')))).toEqual([{ 備註: 'b' }]);
+  });
+
+  it('returns null without a header row or for a non-table block, since columns have no names then', () => {
+    expect(readHeaderTable(table(false, row('a', 'b')))).toBeNull();
+    expect(readHeaderTable({ type: 'paragraph', paragraph: { rich_text: [] } } as any)).toBeNull();
   });
 });

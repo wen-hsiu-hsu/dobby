@@ -129,8 +129,10 @@ describe('parseCommand', () => {
     expect(cmd?.seasonArg).toBe('2026-q2');
   });
 
-  it('returns UNKNOWN for "season" with no argument', () => {
-    expect(parseCommand('@Dobby season')?.type).toBe(CommandType.UNKNOWN);
+  it('parses "season" with no argument as SEASON_ANNOUNCEMENT without a season arg, so the handler can ask for one', () => {
+    const cmd = parseCommand('@Dobby season');
+    expect(cmd?.type).toBe(CommandType.SEASON_ANNOUNCEMENT);
+    expect(cmd?.seasonArg).toBeUndefined();
   });
 
   it('returns UNKNOWN for unrecognized command', () => {

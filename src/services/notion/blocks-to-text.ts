@@ -181,3 +181,27 @@ export function blocksToSections(blocks: NestedBlock[]): TextSection[] {
   flush();
   return sections;
 }
+
+/**
+ * Reads a table that has its header row turned on as one record per data row,
+ * keyed by the header cell's text (so callers look columns up by name, not by
+ * position — admins can reorder or add columns in Notion). Cell text is
+ * trimmed; a column missing from a row reads as ''. Returns null when the
+ * block isn't a table, the table's header row is off (the column names are what
+ * give the cells their meaning) or it has no rows at all; a table with only its
+ * header row gives []. If two header cells share a name, the later column wins.
+ */
+export function readHeaderTable(block: NestedBlock): Record<string, string>[] | null {
+  if (block.type !== 'table' || !(block as any).table?.has_column_header) return null;
+  const rows = (block.children ?? []).filter((b) => b.type === 'table_row');
+  if (rows.length === 0) return null;
+  const cellsOf = (row: NestedBlock): string[] =>
+    ((row as any).table_row?.cells ?? []).map((cell: any[]) =>
+      (cell ?? []).map((r: any) => r.plain_text ?? '').join('').trim(),
+    );
+  const header = cellsOf(rows[0]!);
+  return rows.slice(1).map((row) => {
+    const cells = cellsOf(row);
+    return Object.fromEntries(header.map((name, i) => [name, cells[i] ?? '']));
+  });
+}

@@ -24,7 +24,7 @@ export interface NewsCardParams {
   sections: TextSection[];
 }
 
-function sectionBox(heading: string, body: string): messagingApi.FlexBox {
+export function sectionBox(heading: string, body: string): messagingApi.FlexBox {
   const contents: messagingApi.FlexComponent[] = [];
   if (heading) contents.push({ type: 'text', text: heading, size: 'xs', weight: 'bold', color: CARD_SUB, wrap: true });
   if (body) contents.push({ type: 'text', text: body, size: 'sm', color: CARD_TEXT, wrap: true });

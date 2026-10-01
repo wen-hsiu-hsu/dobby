@@ -87,7 +87,8 @@ export function parseCommand(text: string): ParsedCommand | null {
   // Season announcement (admin): "@Dobby season 2026Q2" — "season" keyword is
   // case-insensitive, but the season arg itself keeps its original casing
   // (it's a data value, e.g. "2026Q2" vs "2026-q2", not a command keyword).
-  const seasonMatch = body.match(/^season (\S+)$/i);
+  // Bare "@Dobby season" also routes here so the handler can ask for the season.
+  const seasonMatch = body.match(/^season(?: (\S+))?$/i);
   if (seasonMatch) {
     return { type: CommandType.SEASON_ANNOUNCEMENT, rawText: text, seasonArg: seasonMatch[1] };
   }

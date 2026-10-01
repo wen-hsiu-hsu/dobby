@@ -1,6 +1,6 @@
 import { blocksToText, type NestedBlock } from './blocks-to-text.js';
 
-/** 「所有公告」裡付款資料那一頁的名稱。`@Dobby 付款` 和 `@Dobby 公告` 的 `{PAYMENT_V2}` 共用，改名要兩邊一起生效。 */
+/** 「所有公告」裡付款資料那一頁的名稱。`@Dobby 付款` 和 `@Dobby 公告` 的 `{PAYMENT_V2}` 共用（`@Dobby season` 的 `{NEW_SEASON_NEWS}` 也經由後者讀到），改名要兩邊一起生效。 */
 export const PAYMENT_PAGE_NAME = 'PAYMENT_V2';
 
 /**
@@ -95,7 +95,7 @@ export function paymentExtraText(blocks: NestedBlock[]): string {
  * 整頁 PAYMENT_V2 的純文字版：付款方式一行一種，後面接表格以外的文字。
  * 表格讀不到（`parsePaymentTable()` 回 null）時，改用 `tablesToText()` 把表格每一列串成一行，
  * 管理員把表格改壞時帳號還是回得出來。整頁都沒有內容時回空字串。
- * 付款卡的 altText／退回純文字、`@Dobby 公告` 的 `{PAYMENT_V2}` 都用這段。
+ * 付款卡的 altText／退回純文字、`@Dobby 公告` 的 `{PAYMENT_V2}`（也包含 `@Dobby season` 的 `{NEW_SEASON_NEWS}`）都用這段。
  */
 export function paymentPageToText(blocks: NestedBlock[]): string {
   const methods = parsePaymentTable(blocks);
