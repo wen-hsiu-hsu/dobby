@@ -152,6 +152,21 @@
   - **測試**：寫在 `src/handlers/__tests__/event-router.test.ts`（那裡的 `handleMessage` 本來就是 mock），同一個 `webhookEventId` 送兩次，斷言 `handleMessage` 只被呼叫一次；另外測沒有 `webhookEventId` 的事件不會被去重。去重的 Map 在模組層級，測試之間會殘留，要提供重置函式（在 `beforeEach` 呼叫），或每個測試用不同的 ID。**不要用 `createTestBot` 測**：它的 `run()` 直接呼叫 `handleMessage`（`src/test-utils/create-test-bot.ts:204`），完全不經過 `processEvents()`，測不到去重；如果為了測試改成經過 `processEvents()`，`buildLineEvent` 把 `webhookEventId` 寫死成 `'evt-1'`（第 136 行），同一個測試檔裡第二次以後的 `run()` 會全部被當成重複吞掉。
   - 同步文件：`docs/architecture.md`「Fire-and-Forget Webhook 處理」小節（目前寫「本專案沒有開啟重送」，改完要一起更新），以及 `docs/logging.md` 對「起點」和事件種類／狀態的說明（新 log 行要寫進去）。
 
+- [ ] **`truncateAltText()` 截斷 altText 時，可能把 emoji 切成半個字元。** `src/commands/flex-card-parts.ts:117-119` 用 `text.slice(0, ALT_TEXT_MAX - 1) + '…'`（`ALT_TEXT_MAX = 400`，第 114 行）截字。`slice` 和 `.length` 算的是 UTF-16 code unit，不是字。🏸、🎉 這類 emoji 佔 2 個 code unit（surrogate pair），如果第 399 個 code unit 剛好是某個 emoji 的前半，截完的結尾就會是「孤立的前半個 surrogate＋…」。2026-10-01 實測 `truncateAltText('a'.repeat(398) + '🏸' + 'b'.repeat(10))`，結尾是 `"a\ud83c…"`。
+
+  **算是潛在 bug，但不會讓訊息送不出去。** 同一天把這個 altText 送到 LINE validate API（`POST /v2/bot/message/validate/reply`），回 200：`JSON.stringify` 會把孤立的 surrogate 轉成 `\ud83c` 跳脫字元，LINE 也接受。影響只在顯示：LINE 通知、聊天列表預覽、`/logs` 看到的 altText 結尾，可能多一個亂碼字元（通常是 �），出現在「…」前面。實際在手機上長什麼樣子還沒驗證過。卡片本身不受影響，因為卡片內容不經過 `truncateAltText`。
+
+  **現在沒發生的原因，以及什麼情況會碰到：** 要同時符合兩個條件：altText 超過 400 個 code unit，而且第 399 個剛好落在 emoji 的前半。
+  - **公告（`src/commands/news.ts:166`）最容易碰到。** 正式的 `NEWS_TEMPLATE` 光模板（變數還沒代入）就有 582 字，所以每次都會截斷。2026-10-01 模板裡沒有任何 emoji，所以現在不會發生。但只要管理員在 Notion 的前 400 字附近加一個 emoji，或 `{LIST_ALL_PEOPLE}` 名單裡有人的名字帶 emoji，就可能剛好切到。
+  - **報名／請假狀態卡**（`src/commands/registration/flex-status-card.ts:362`、`:377`）：altText 列出零打名單和請假名單，名字常是 LINE 顯示名稱，比較可能帶 emoji，但要零打很多人才會超過 400 字。
+  - **其他呼叫端**：`payment.ts:32`、`owe.ts:38`、`participants.ts:38`、`command-list-card.ts:220`。名單要很長才會超過 400 字。程式裡寫死的 emoji（`owe.ts:14` 的 🎉、`command-list-card.ts:210` 的 🛠️）都在短字串開頭，碰不到截斷點。
+
+  如果要處理：
+  - 改 `truncateAltText()` 這一個地方就好，所有呼叫端會一起修好。最小的改法是截完之後，如果最後一個字元是前半個 surrogate（`/[\uD800-\uDBFF]$/`），就把它去掉再補「…」。也可以改用 `Array.from(text)` 依 code point 計數和截斷。
+  - **依 code point 截斷，還是可能把組合 emoji 拆開。** 例如 👨‍👩‍👧 這種用 ZWJ 串起來的家庭 emoji、膚色修飾、國旗。拆開不會變亂碼，只會顯示成幾個分開的 emoji 或不完整的組合。要完全不拆開，得用 `Intl.Segmenter` 依字素（grapheme）切，Node 有內建，但對 altText 來說可能不值得。
+  - **長度上限不要改。** 400 是改 Flex 前就沿用的上限，不是 LINE 的上限（LINE altText 上限是 1500）。改成依 code point 計算時，要確認截完的 `.length`（UTF-16）仍然不超過 400；結尾去掉半個 surrogate 的做法，會讓結果變成 399 個 code unit。
+  - **既有測試**：`src/commands/registration/__tests__/flex-status-card.test.ts:367` 斷言 `altText.length` 剛好是 400，用的是沒有 emoji 的文字，應該不受影響。另外補一個 emoji 剛好落在截斷點的測試，斷言結果不含孤立的 surrogate。
+
 ---
 
 ## 程式碼整理與小改善（非 bug，低優先）
