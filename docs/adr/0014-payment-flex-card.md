@@ -14,7 +14,7 @@
 
 **altText 是一種方式一行的純文字。** 格式是「名稱 帳號 (備註)」，例如「永豐銀行 （807） 20201800934932 (請備註名字)」，後面接表格以外的文字，超過 400 字用 `truncateAltText()` 截斷。這跟舊的 `PAYMENT` 段落寫法接近，通知和 `/logs` 看到的內容跟以前差不多。
 
-**季公告草稿的 `{PAYMENT_INFO}` 已經拿掉（2026-10-01）。** 這個 ADR 寫下時，`season-announcement.ts` 的 `{PAYMENT_INFO}` 還讀舊的 `PAYMENT` 頁面，付款資訊因此有兩份。季公告改成 Flex 卡後（[ADR 0016](0016-season-announcement-flex-card.md)），付款資訊改由 `{NEW_SEASON_NEWS}` 裡 `NEWS_TEMPLATE` 的 `{PAYMENT_V2}` 提供，程式不再讀 `PAYMENT`。
+**季公告草稿的 `{PAYMENT_INFO}` 已經拿掉（2026-10-01）。** 這個 ADR 寫下時，`season-announcement.ts` 的 `{PAYMENT_INFO}` 還讀舊的 `PAYMENT` 頁面，付款資訊因此有兩份。季公告改成 Flex 卡後（[ADR 0016](0016-season-announcement-flex-card.md)），付款資訊改由 `{NEW_SEASON_NEWS}` 裡 `NEWS_TEMPLATE` 的 `{PAYMENT_V2}` 提供，程式不再讀 `PAYMENT`。季公告的費用卡底下另有一個付款區塊，共用付款卡的 `paymentMethodRow()`。
 
 **`@Dobby 公告` 也改讀 `PAYMENT_V2`。** 同一天使用者把 `NEWS_TEMPLATE` 裡手打的付款條列（還寫著已經過時的「Line 轉帳」）換成 `{PAYMENT_V2}` 變數，`news.ts` 用 `paymentPageToText()` 代入，跟付款卡 altText 同一段文字（但不截斷）。讀不到時代入一句提示而不是空字串：公告卡（[ADR 0015](0015-news-flex-card.md)）會略過空的段落內文，空字串會讓「付款方式」段只剩小標或整段消失，讀的人看不出付款資訊沒讀到。讀 `PAYMENT_V2` 的 Notion 呼叫失敗（例如 429 重試用完）時，只把付款那段換成「（付款資訊讀取失敗，請用 @Dobby 付款查詢）」，公告其他部分照常回，因為付款是公告的次要段落。頁面名稱用 `payment-methods.ts` 的 `PAYMENT_PAGE_NAME` 常數，付款卡和 news 共用。news 的變數 regex 原本是 `[A-Z_]+`，比對不到帶數字的 `PAYMENT_V2`，這次改成 `[A-Z0-9_]+`。
 

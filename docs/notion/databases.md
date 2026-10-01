@@ -110,7 +110,7 @@ USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員�
 | 頁面標題 | 用途 |
 |---------|------|
 | `NEWS_TEMPLATE` | `@Dobby news` 指令顯示的內容；`@Dobby season` 的 `{NEW_SEASON_NEWS}` 也是這頁（代入指令指定的季，轉成純文字）。公告卡依這頁的標題區塊切段（`blocksToSections()`，見 [commands.md](../commands.md#查看公告)），想讓段落有小標，就用 Notion 的標題（heading）開頭；沒接標題的內容會變成沒有小標的段落 |
-| `PAYMENT_V2` | `@Dobby payment` 付款資訊卡、`@Dobby news` 的 `{PAYMENT_V2}` 變數（`@Dobby season` 的 `{NEW_SEASON_NEWS}` 也經由它讀到）共用的資料：一個有開標題列的表格，欄位是 `名稱`、`帳號`、`備註`（見下方「付款表格」） |
+| `PAYMENT_V2` | `@Dobby payment` 付款資訊卡、`@Dobby news` 的 `{PAYMENT_V2}` 變數、`@Dobby season` 的付款區塊與 `{PAYMENT_V2}`（`{NEW_SEASON_NEWS}` 也經由 news 的變數讀到）共用的資料：一個有開標題列的表格，欄位是 `名稱`、`帳號`、`備註`（見下方「付款表格」） |
 | `PAYMENT` | 舊的付款資訊（純文字段落）。程式已不讀（2026-10-01 `@Dobby season` 拿掉 `{PAYMENT_INFO}`），部署前的舊版仍在讀，部署後可以刪掉（見 `TODO.md`） |
 | `WELCOME_MESSAGE` | 歡迎訊息：機器人加入群組（`join`）和新成員加入群組（`memberJoined`）共用這份內容 |
 | `INTRODUCE` | `@Dobby` 自我介紹的內容 |
