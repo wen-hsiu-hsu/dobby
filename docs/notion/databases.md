@@ -108,7 +108,7 @@ USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員�
 | 頁面標題 | 用途 |
 |---------|------|
 | `NEWS_TEMPLATE` | `@Dobby news` 指令顯示的內容 |
-| `PAYMENT` | `@Dobby payment` 指令顯示的內容（支援 bulleted list） |
+| `PAYMENT` | `@Dobby payment` 指令顯示的內容 |
 | `WELCOME_MESSAGE` | 歡迎訊息：機器人加入群組（`join`）和新成員加入群組（`memberJoined`）共用這份內容 |
 | `INTRODUCE` | `@Dobby` 自我介紹的內容 |
 | `NEW_SEASON` | `@Dobby season <季度>` 指令產生下一季公告草稿的模板，見 [commands.md](../commands.md#產生新一季公告草稿) |

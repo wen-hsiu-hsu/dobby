@@ -51,7 +51,7 @@ Dobby 會介紹自己並 @mention 觸發者和管理員。
 | `{LIST_ALL_DATES}` | 本季所有打球日期，依月份分行、同月用 `, ` 相隔，格式 `M/DD`（如 `7/04, 7/11`） |
 | `{LOCATION}` | 打球地點 |
 
-Notion 內容裡的 `bulleted_list_item`（項目符號清單）在輸出時會自動補上 `• ` 前綴。改公告文字內容（包含新增備註句子）要去 Notion 改 `NEWS_TEMPLATE` 頁面，不用改 code；但若要新增/修改變數本身或格式，需同步改 `src/commands/news.ts`。
+Notion 內容轉成 LINE 文字的方式（項目符號補 `• `、編號清單補編號、待辦補 `☐`／`☑`、分隔線區塊變成 `—`、保留空行等，以及哪些區塊不支援）見 [databases.md](notion/databases.md#所有公告all-announcements)。改公告文字內容（包含新增備註句子）要去 Notion 改 `NEWS_TEMPLATE` 頁面，不用改 code；但若要新增/修改變數本身或格式，需同步改 `src/commands/news.ts`。
 
 ---
 
@@ -60,7 +60,7 @@ Notion 內容裡的 `bulleted_list_item`（項目符號清單）在輸出時會�
 @Dobby payment
 @Dobby 付款
 ```
-顯示付款說明（支援 bulleted list 格式）。
+顯示 Notion `PAYMENT` 頁面的付款說明，內容格式的轉換方式跟 news 一樣，見 [databases.md](notion/databases.md#所有公告all-announcements)。
 
 ---
 
