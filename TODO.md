@@ -46,7 +46,7 @@
 
 ## 已知問題（尚未處理）
 
-- [ ] **付款資訊現在有兩份：`PAYMENT`（舊）和 `PAYMENT_V2`（新），改其中一份不會同步到另一份。** 2026-10-01 起，`@Dobby 付款`（`src/commands/payment.ts:11`）和 `@Dobby 公告` 的 `{PAYMENT_V2}` 變數（`src/commands/news.ts:70-79` 的 `loadPaymentText()`）改讀 Notion「所有公告」的 `PAYMENT_V2` 頁面，內容是一個表格（名稱／帳號／備註，見 [ADR 0014](docs/adr/0014-payment-flex-card.md)）。`@Dobby season` 的季公告草稿則刻意維持原樣：`src/commands/season-announcement.ts:78` 仍讀舊的 `PAYMENT` 頁面（純文字段落），第 113 行用 `blocksToText()` 填進 `{PAYMENT_INFO}`。
+- [ ] **付款資訊現在有兩份：`PAYMENT`（舊）和 `PAYMENT_V2`（新），改其中一份不會同步到另一份。** 2026-10-01 起，`@Dobby 付款`（`src/commands/payment.ts:11`）和 `@Dobby 公告` 的 `{PAYMENT_V2}` 變數（`src/commands/news.ts:71-80` 的 `loadPaymentText()`）改讀 Notion「所有公告」的 `PAYMENT_V2` 頁面，內容是一個表格（名稱／帳號／備註，見 [ADR 0014](docs/adr/0014-payment-flex-card.md)）。`@Dobby season` 的季公告草稿則刻意維持原樣：`src/commands/season-announcement.ts:78` 仍讀舊的 `PAYMENT` 頁面（純文字段落），第 113 行用 `blocksToText()` 填進 `{PAYMENT_INFO}`。
 
   不是 bug。2026-10-01 用 Notion API 實測，兩頁內容一致：舊 `PAYMENT` 是三個純文字段落（不是條列），`blocksToText()` 輸出「永豐 (807) 20201800934932 (請備註名字)\nLine Pay Money\n現金」；`PAYMENT_V2` 表格是同樣三種方式。三處（`@Dobby 付款`、`@Dobby 公告` 的 `{PAYMENT_V2}`、`@Dobby season` 的 `{PAYMENT_INFO}`）目前的輸出都正確。使用者想先看付款卡上線的效果，再決定季公告要不要也改讀 V2，所以暫時保留兩份。風險在之後：管理員換帳號或新增付款方式時，如果只改了 `PAYMENT_V2`，`@Dobby 付款` 和 `@Dobby 公告` 會顯示新帳號，但下一季的公告草稿還是舊帳號，而且不會有任何錯誤或警告，要等有人照著公告轉錯帳戶才會發現。反方向更可能發生：管理員照舊習慣只改 `PAYMENT`，結果 `@Dobby 付款` 卡片（以及欠費卡點「付款資訊」看到的）和 `@Dobby 公告` 還是舊帳號。
 
@@ -62,7 +62,7 @@
   這是 bug，但目前還沒觀察到：
   - `notion-fetch.ts` 只對 429 重試（最多 3 次，第 74、121 行）；5xx、網路錯誤、429 重試用完都會直接 throw（`assertOk`，第 45-72 行）。本機 `logs/`（2026-09-21～27）沒有任何 `Error handling event` 或 `Notion API error`。
   - 從 n8n 遷移的第一版（commit `23c32a1`）就是這樣，當時的 try 也只包鎖內。
-  - 其他指令都自己 try/catch 並回「系統錯誤，請稍後再試」：`owe.ts:9-42`、`news.ts:121-170`、`participants.ts:11-42`、`payment.ts:10-36`、`next-event.ts:13-27`、`season-announcement.ts:56-150`、`introduce.ts:12-42`。`message-handler.ts:48-54` 的 `findByUserId` 也在 commit `5ef200d` 補過同一種缺口。只有報名／請假漏掉。
+  - 其他指令都自己 try/catch 並回「系統錯誤，請稍後再試」：`owe.ts:9-42`、`news.ts:122-171`、`participants.ts:11-42`、`payment.ts:10-36`、`next-event.ts:13-27`、`season-announcement.ts:56-150`、`introduce.ts:12-42`。`message-handler.ts:48-54` 的 `findByUserId` 也在 commit `5ef200d` 補過同一種缺口。只有報名／請假漏掉。
   - 2026-09-28 把兩個查詢改成並行後，多了一種觸發情況：對象查無（`resolved` 為 null）而 Season 查詢 throw。舊版依序執行，會先回「找不到您的帳號」；現在 `Promise.all` 整個 reject，不回覆。其他組合的行為跟舊版相同。
   - 影響：使用者以為 bot 沒收到，通常會再打一次。這段在任何寫入之前，所以重打不會重複報名，只是體驗差。
 
@@ -157,7 +157,7 @@
   **算是潛在 bug，但不會讓訊息送不出去。** 同一天把這個 altText 送到 LINE validate API（`POST /v2/bot/message/validate/reply`），回 200：`JSON.stringify` 會把孤立的 surrogate 轉成 `\ud83c` 跳脫字元，LINE 也接受。影響只在顯示：LINE 通知、聊天列表預覽、`/logs` 看到的 altText 結尾，可能多一個亂碼字元（通常是 �），出現在「…」前面。實際在手機上長什麼樣子還沒驗證過。卡片本身不受影響，因為卡片內容不經過 `truncateAltText`。
 
   **現在沒發生的原因，以及什麼情況會碰到：** 要同時符合兩個條件：altText 超過 400 個 code unit，而且第 399 個剛好落在 emoji 的前半。
-  - **公告（`src/commands/news.ts:166`）最容易碰到。** 正式的 `NEWS_TEMPLATE` 光模板（變數還沒代入）就有 582 字，所以每次都會截斷。2026-10-01 模板裡沒有任何 emoji，所以現在不會發生。但只要管理員在 Notion 的前 400 字附近加一個 emoji，或 `{LIST_ALL_PEOPLE}` 名單裡有人的名字帶 emoji，就可能剛好切到。
+  - **公告（`src/commands/news.ts:167`）最容易碰到。** 正式的 `NEWS_TEMPLATE` 光模板（變數還沒代入）就有 582 字，所以每次都會截斷。2026-10-01 模板裡沒有任何 emoji，所以現在不會發生。但只要管理員在 Notion 的前 400 字附近加一個 emoji，或 `{LIST_ALL_PEOPLE}` 名單裡有人的名字帶 emoji，就可能剛好切到。
   - **報名／請假狀態卡**（`src/commands/registration/flex-status-card.ts:362`、`:377`）：altText 列出零打名單和請假名單，名字常是 LINE 顯示名稱，比較可能帶 emoji，但要零打很多人才會超過 400 字。
   - **其他呼叫端**：`payment.ts:32`、`owe.ts:38`、`participants.ts:38`、`command-list-card.ts:220`。名單要很長才會超過 400 字。程式裡寫死的 emoji（`owe.ts:14` 的 🎉、`command-list-card.ts:210` 的 🛠️）都在短字串開頭，碰不到截斷點。
 
@@ -233,7 +233,7 @@
 
   呼叫端：
   - `participants.ts:18`：推估 1＋N 次呼叫（N≈11 位季租成員），約 7 秒。log 裡沒有這個指令，數字是用單次 GET 約 280ms＋sleep 400ms 推算的。
-  - `news.ts:137-138`：實測 2 次，都是 29 次呼叫（11 次姓名 GET＋13 次活動 GET＋5 次其他），耗時 11.3 和 11.7 秒。兩組 GET 各自拖了 7～9.5 秒，其中 sleep 約佔各組的 55～60%，約佔整個指令的 40%。兩組用 `Promise.all`（`news.ts:135-140`）同時跑，平均合計約 2.5～3 req/s，任 1 秒窗口瞬間最多 4 個 GET，靠 Notion 容許的短暫突發撐住，沒有出現 429。以上是 2026-10-01 前的實測；之後同一個 `Promise.all` 多跑 `loadPaymentText()`（讀 `PAYMENT_V2`：1 次 query＋2 次 blocks GET，集中在開頭約 0.5 秒），開頭的瞬間請求數會再多一點。它失敗時只降級付款那段，不會讓整則公告失敗。
+  - `news.ts:138-139`：實測 2 次，都是 29 次呼叫（11 次姓名 GET＋13 次活動 GET＋5 次其他），耗時 11.3 和 11.7 秒。兩組 GET 各自拖了 7～9.5 秒，其中 sleep 約佔各組的 55～60%，約佔整個指令的 40%。兩組用 `Promise.all`（`news.ts:136-141`）同時跑，平均合計約 2.5～3 req/s，任 1 秒窗口瞬間最多 4 個 GET，靠 Notion 容許的短暫突發撐住，沒有出現 429。以上是 2026-10-01 前的實測；之後同一個 `Promise.all` 多跑 `loadPaymentText()`（讀 `PAYMENT_V2`：1 次 query＋2 次 blocks GET，集中在開頭約 0.5 秒），開頭的瞬間請求數會再多一點。它失敗時只降級付款那段，不會讓整則公告失敗。
   - `season-announcement.ts:90-91`：管理員專用（產生新一季公告草稿），頻率很低，優先度比 news／participants 更低。
   - `weekly-status-message.ts:22`
   - `registration/event-status-message.ts:30`：報名／請假的回覆訊息查請假人姓名，在鎖內執行，見下面「回覆訊息在鎖內組」那一項。只有請假人數 ≥2 時才會觸發 sleep。
