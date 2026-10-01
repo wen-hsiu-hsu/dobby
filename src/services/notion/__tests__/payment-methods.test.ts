@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parsePaymentTable, paymentMethodsToText, tablesToText } from '../payment-methods.js';
+import { parsePaymentTable, paymentMethodsToText, tablesToText, paymentExtraText, paymentPageToText } from '../payment-methods.js';
 import type { NestedBlock } from '../blocks-to-text.js';
 
 function row(...cells: string[]) {
@@ -112,5 +112,29 @@ describe('tablesToText', () => {
 
   it('returns an empty string when there is no table', () => {
     expect(tablesToText([paragraph('說明')] as unknown as NestedBlock[])).toBe('');
+  });
+});
+
+describe('paymentExtraText', () => {
+  it('returns the text outside tables, and nothing for whitespace-only text', () => {
+    expect(paymentExtraText([paragraph('說明'), realTable] as unknown as NestedBlock[])).toBe('說明');
+    expect(paymentExtraText([paragraph('   '), realTable] as unknown as NestedBlock[])).toBe('');
+  });
+});
+
+describe('paymentPageToText', () => {
+  it('lists the parsed methods, then the text outside the table', () => {
+    expect(paymentPageToText([realTable, paragraph('轉帳後請私訊管理員')] as unknown as NestedBlock[])).toBe(
+      '永豐銀行 （807） 20201800934932 (請備註名字)\nLine Pay Money\n現金\n轉帳後請私訊管理員',
+    );
+  });
+
+  it('falls back to the raw table rows when the table cannot be parsed', () => {
+    const blocks = [table([row('銀行', '帳號'), row('永豐', '123')])];
+    expect(paymentPageToText(blocks as unknown as NestedBlock[])).toBe('永豐 123');
+  });
+
+  it('returns an empty string for an empty page', () => {
+    expect(paymentPageToText([])).toBe('');
   });
 });
