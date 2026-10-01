@@ -65,7 +65,8 @@ function buildSeasonPlaceholders(
 }
 
 // {PAYMENT_V2}：跟 `@Dobby 付款` 同一份資料（「所有公告」的 PAYMENT_V2 頁面），一種付款方式一行。
-// 讀不到或是空的時給一句提示，不代入空字串——公告改成 Flex 卡後空字串會讓整張卡被 LINE 退回。
+// 讀不到或是空的時給一句提示，不代入空字串——空的話公告卡的「付款方式」段只剩小標（或整段被略過），
+// 讀的人看不出付款資訊沒讀到；提示會指引改用 @Dobby 付款。
 // 付款是公告的次要段落：這幾次 Notion 呼叫失敗（例如 429 重試用完）時只降級這一段，不讓整則公告回「系統錯誤」。
 async function loadPaymentText(): Promise<string> {
   try {

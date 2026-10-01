@@ -16,6 +16,6 @@
 
 **季公告草稿的 `{PAYMENT_INFO}` 暫時還讀舊的 `PAYMENT`。** `season-announcement.ts` 產生的是要讓管理員複製貼上的純文字，直接改讀 `PAYMENT_V2` 會變成空的，因為 `blocksToText()` 不輸出表格。如果要改，可以用 `paymentPageToText()` 產生文字（表格改壞時有退路，也會接表格外的文字），再把舊的 `PAYMENT` 頁面淘汰；`season-announcement.ts` 的變數 regex 是 `[A-Z_]+`，要沿用 `{PAYMENT_V2}` 這個名字也要一起改。使用者想先看付款卡上線的效果再決定，所以這段期間付款資訊有兩份，見 `TODO.md`。
 
-**`@Dobby 公告` 也改讀 `PAYMENT_V2`。** 同一天使用者把 `NEWS_TEMPLATE` 裡手打的付款條列（還寫著已經過時的「Line 轉帳」）換成 `{PAYMENT_V2}` 變數，`news.ts` 用 `paymentPageToText()` 代入，跟付款卡 altText 同一段文字（但不截斷）。讀不到時代入一句提示而不是空字串：公告之後也可能改成 Flex 卡，空字串會讓整張卡被退回。讀 `PAYMENT_V2` 的 Notion 呼叫失敗（例如 429 重試用完）時，只把付款那段換成「（付款資訊讀取失敗，請用 @Dobby 付款查詢）」，公告其他部分照常回，因為付款是公告的次要段落。頁面名稱用 `payment-methods.ts` 的 `PAYMENT_PAGE_NAME` 常數，付款卡和 news 共用。news 的變數 regex 原本是 `[A-Z_]+`，比對不到帶數字的 `PAYMENT_V2`，這次改成 `[A-Z0-9_]+`。
+**`@Dobby 公告` 也改讀 `PAYMENT_V2`。** 同一天使用者把 `NEWS_TEMPLATE` 裡手打的付款條列（還寫著已經過時的「Line 轉帳」）換成 `{PAYMENT_V2}` 變數，`news.ts` 用 `paymentPageToText()` 代入，跟付款卡 altText 同一段文字（但不截斷）。讀不到時代入一句提示而不是空字串：公告卡（[ADR 0015](0015-news-flex-card.md)）會略過空的段落內文，空字串會讓「付款方式」段只剩小標或整段消失，讀的人看不出付款資訊沒讀到。讀 `PAYMENT_V2` 的 Notion 呼叫失敗（例如 429 重試用完）時，只把付款那段換成「（付款資訊讀取失敗，請用 @Dobby 付款查詢）」，公告其他部分照常回，因為付款是公告的次要段落。頁面名稱用 `payment-methods.ts` 的 `PAYMENT_PAGE_NAME` 常數，付款卡和 news 共用。news 的變數 regex 原本是 `[A-Z_]+`，比對不到帶數字的 `PAYMENT_V2`，這次改成 `[A-Z0-9_]+`。
 
 **觸發文字不變。** 欠費名單卡的「付款資訊」按鈕和指令清單卡都會送出 `@Dobby 付款`，所以只換回覆內容，不改指令。
