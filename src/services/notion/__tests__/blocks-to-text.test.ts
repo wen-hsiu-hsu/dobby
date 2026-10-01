@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { blocksToText } from '../blocks-to-text.js';
+import { blocksToText, blocksToSections } from '../blocks-to-text.js';
 
 function paragraph(text: string) {
   return { type: 'paragraph', paragraph: { rich_text: [{ plain_text: text }] } };
@@ -190,5 +190,87 @@ describe('blocksToText', () => {
   it('prefixes to_do blocks with an unchecked or checked box', () => {
     const text = blocksToText([toDo('帶球', false), toDo('繳費', true)] as any);
     expect(text).toBe('☐ 帶球\n☑ 繳費');
+  });
+});
+
+function heading(level: 1 | 2 | 3, text: string, children?: unknown[]) {
+  const type = `heading_${level}`;
+  return { type, [type]: { rich_text: text ? [{ plain_text: text }] : [] }, ...(children ? { children } : {}) };
+}
+
+const divider = { type: 'divider', divider: {} };
+
+describe('blocksToSections', () => {
+  it('starts a section at every heading level and uses the heading text as its title', () => {
+    const sections = blocksToSections([
+      heading(1, '一'), paragraph('a'),
+      heading(2, '二'), bulletedListItem('b'),
+      heading(3, '三'), paragraph('c'),
+    ] as any);
+    expect(sections).toEqual([
+      { heading: '一', body: 'a' },
+      { heading: '二', body: '• b' },
+      { heading: '三', body: 'c' },
+    ]);
+  });
+
+  it('keeps content before the first heading as an untitled section', () => {
+    const sections = blocksToSections([paragraph('{SEASON} {FROM_TO_MONTH}'), heading(2, '報名名單'), paragraph('x')] as any);
+    expect(sections).toEqual([
+      { heading: '', body: '{SEASON} {FROM_TO_MONTH}' },
+      { heading: '報名名單', body: 'x' },
+    ]);
+  });
+
+  it('treats a divider as a section break, drops the divider itself, and skips empty sections', () => {
+    // The live NEWS_TEMPLATE shape: divider, heading, body, divider, heading, …
+    const sections = blocksToSections([
+      heading(2, 'A'), paragraph('a'), divider,
+      heading(2, 'B'), paragraph('b'), divider, divider,
+      paragraph('after divider'),
+    ] as any);
+    expect(sections).toEqual([
+      { heading: 'A', body: 'a' },
+      { heading: 'B', body: 'b' },
+      { heading: '', body: 'after divider' },
+    ]);
+  });
+
+  it('keeps a heading with nothing under it, with an empty body', () => {
+    expect(blocksToSections([heading(2, '只有標題'), divider] as any)).toEqual([{ heading: '只有標題', body: '' }]);
+  });
+
+  it('converts each section body like blocksToText: list numbering, blank lines in between, trimmed ends', () => {
+    const sections = blocksToSections([
+      heading(2, '規則'), emptyParagraph, numberedListItem('第一'), numberedListItem('第二'), emptyParagraph, paragraph('備註'), emptyParagraph,
+    ] as any);
+    expect(sections).toEqual([{ heading: '規則', body: '1. 第一\n2. 第二\n\n備註' }]);
+  });
+
+  it('puts a toggleable heading\'s children in its body, unindented', () => {
+    const sections = blocksToSections([heading(2, '展開', [paragraph('內容'), bulletedListItem('項目')])] as any);
+    expect(sections).toEqual([{ heading: '展開', body: '內容\n• 項目' }]);
+  });
+
+  it('restarts numbering after a toggleable heading\'s numbered children, matching blocksToText', () => {
+    const blocks = [heading(2, '規則', [numberedListItem('a'), numberedListItem('b')]), numberedListItem('c')];
+    expect(blocksToText(blocks as any)).toBe('規則\n  1. a\n  2. b\n1. c');
+    expect(blocksToSections(blocks as any)).toEqual([{ heading: '規則', body: '1. a\n2. b\n1. c' }]);
+  });
+
+  it('does not split on headings nested inside a toggle', () => {
+    const toggle = { type: 'toggle', toggle: { rich_text: [{ plain_text: '說明' }] }, children: [heading(2, '內層標題')] };
+    expect(blocksToSections([heading(2, '外層'), toggle] as any)).toEqual([{ heading: '外層', body: '說明\n  內層標題' }]);
+  });
+
+  it('treats a heading with empty text as an untitled section start', () => {
+    expect(blocksToSections([paragraph('a'), heading(2, ''), paragraph('b')] as any)).toEqual([
+      { heading: '', body: 'a' },
+      { heading: '', body: 'b' },
+    ]);
+  });
+
+  it('returns no sections for no blocks', () => {
+    expect(blocksToSections([])).toEqual([]);
   });
 });

@@ -132,3 +132,52 @@ export function blocksToText(blocks: NestedBlock[]): string {
   while (end > start && lines[end - 1] === '') end--;
   return lines.slice(start, end).join('\n');
 }
+
+export interface TextSection {
+  /** The heading block's text; '' for content before the first heading or right after a divider. */
+  heading: string;
+  /** The section's blocks run through blocksToText — '' when the heading has nothing under it. */
+  body: string;
+}
+
+const HEADING_TYPES = new Set(['heading_1', 'heading_2', 'heading_3']);
+
+/**
+ * Splits top-level blocks into sections for the announcement Flex card: every
+ * heading_1/2/3 starts a new section (its text becomes the section heading),
+ * and a top-level divider ends the current one — the card draws its own line
+ * between sections, so the divider itself isn't output. Each section's body
+ * uses the same conversion as blocksToText. A toggleable heading's children
+ * start that section's body (not indented), converted on their own so a
+ * numbered list inside the heading and one right after it each start at 1,
+ * same as blocksToText's output. Sections with neither a heading
+ * nor a body (a divider right before a heading, two dividers in a row) are
+ * dropped. Headings nested inside toggles/columns don't split — they stay as
+ * plain lines in their section's body.
+ */
+export function blocksToSections(blocks: NestedBlock[]): TextSection[] {
+  const sections: TextSection[] = [];
+  let heading = '';
+  let headingChildren: NestedBlock[] = [];
+  let run: NestedBlock[] = [];
+  const flush = () => {
+    const body = [blocksToText(headingChildren), blocksToText(run)].filter(Boolean).join('\n');
+    if (heading || body) sections.push({ heading, body });
+    heading = '';
+    headingChildren = [];
+    run = [];
+  };
+  for (const block of blocks) {
+    if (block.type === 'divider') {
+      flush();
+    } else if (HEADING_TYPES.has(block.type)) {
+      flush();
+      heading = blockText(block);
+      headingChildren = block.children ?? [];
+    } else {
+      run.push(block);
+    }
+  }
+  flush();
+  return sections;
+}
