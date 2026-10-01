@@ -56,14 +56,14 @@
     },
     "每人平均場租": {
       "type": "formula",
-      "description": "每位季租成員應繳的場租（formula 計算，若有特殊狀況則使用手動覆寫欄位）",
+      "description": "每位季租成員應繳的場租（formula 計算，若有特殊狀況則使用手動覆寫欄位）。程式已不讀（2026-10-01 起改讀「每人實際收費」）",
       "config": {
         "expression": "{{notion:block_property:UI~W:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}}.empty().if({{notion:block_property:%5By%60%3B:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}}/{{notion:block_property:ndOW:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}},{{notion:block_property:UI~W:00000000-0000-0000-0000-000000000000:2ca07b89-11ab-49f2-a287-247d6c6d73b7}})"
       }
     },
     "每人平均場租（特殊狀況）": {
       "type": "number",
-      "description": "手動覆寫的每人場租金額，設定後會取代 formula 計算值",
+      "description": "手動覆寫的每人場租金額，設定後會取代 formula 計算值。程式已不讀",
       "config": {
         "format": "number"
       }
@@ -104,6 +104,27 @@
       "type": "files",
       "description": "承租合約文件",
       "config": null
+    },
+    "每人實際收費": {
+      "type": "number",
+      "description": "管理員手填的季打每人實際收費。news 的 {PRICE_PER_PERSON_FOR_SEASON}、season 的 {REAL_PRICE}",
+      "config": {
+        "format": "number"
+      }
+    },
+    "季打退費": {
+      "type": "number",
+      "description": "管理員季末手填的每人退費。season 產生下一季公告時的 {REFUND_PRICE}",
+      "config": {
+        "format": "number"
+      }
+    },
+    "結餘": {
+      "type": "number",
+      "description": "管理員季末手填的結餘。season 產生下一季公告時的 {BALANCE}",
+      "config": {
+        "format": "number"
+      }
     }
   }
 }

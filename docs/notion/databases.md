@@ -69,8 +69,10 @@ USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員�
 | `零打費用` | 當季零打（單次）價格 |
 | `地點` | 打球地點，`news` 指令 `{LOCATION}` |
 | `租借次數 (2hrs)` | 本季總租借次數，`news` 指令 `{WEEK_COUNTS}` |
-| `每人平均場租` | formula，本季每人應繳場租，`news` 指令 `{PRICE_PER_PERSON_FOR_SEASON}` 的預設來源 |
-| `每人平均場租（特殊狀況）` | 手動覆寫值，設定後 `news` 指令 `{PRICE_PER_PERSON_FOR_SEASON}` 改顯示這個值，不再用上面的 formula 值（`src/commands/news.ts` 的 `pricePerPersonOverride ?? pricePerPersonForSeason`） |
+| `每人實際收費` | 管理員手填，季打每人實際要繳的金額。`news` 指令 `{PRICE_PER_PERSON_FOR_SEASON}`、`season` 指令 `{REAL_PRICE}`（並用來算 `{BACKTOBACK_SIGN_UP_PRICE}`）。沒有預設值：`news` 缺值時顯示提示，`season` 缺值時報錯 |
+| `季打退費` | 管理員在**季末**手填，這一季每人退多少。`season` 指令產生**下一季**公告時讀它（`{REFUND_PRICE}`），缺值時報錯 |
+| `結餘` | 管理員在**季末**手填。`season` 指令產生**下一季**公告時讀它（`{BALANCE}`），缺值時報錯 |
+| `每人平均場租`、`每人平均場租（特殊狀況）` | 程式已不讀（2026-10-01 起 `{PRICE_PER_PERSON_FOR_SEASON}` 改讀 `每人實際收費`） |
 | `場租總金額` | formula，本季場租總額，`news` 指令 `{TOTAL_PRICE}` |
 | `每場/小時 定價` | 場地每小時定價，`season` 指令 `{COURT_PRICE}` |
 | `打球日` | Relation，關聯至「行事曆」，本季所有打球日，`news` 指令 `{LIST_ALL_DATES}`／`season` 指令 `{PLAY_DATES}` |
@@ -107,14 +109,14 @@ USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員�
 
 | 頁面標題 | 用途 |
 |---------|------|
-| `NEWS_TEMPLATE` | `@Dobby news` 指令顯示的內容。公告卡依這頁的標題區塊切段（`blocksToSections()`，見 [commands.md](../commands.md#查看公告)），想讓段落有小標，就用 Notion 的標題（heading）開頭；沒接標題的內容會變成沒有小標的段落 |
-| `PAYMENT_V2` | `@Dobby payment` 付款資訊卡、`@Dobby news` 的 `{PAYMENT_V2}` 變數共用的資料：一個有開標題列的表格，欄位是 `名稱`、`帳號`、`備註`（見下方「付款表格」） |
-| `PAYMENT` | 舊的付款資訊（純文字段落），現在只剩 `@Dobby season` 草稿的 `{PAYMENT_INFO}` 在讀。要跟 `PAYMENT_V2` 保持一致（見 `TODO.md`） |
+| `NEWS_TEMPLATE` | `@Dobby news` 指令顯示的內容；`@Dobby season` 的 `{NEW_SEASON_NEWS}` 也是這頁（代入指令指定的季，轉成純文字）。公告卡依這頁的標題區塊切段（`blocksToSections()`，見 [commands.md](../commands.md#查看公告)），想讓段落有小標，就用 Notion 的標題（heading）開頭；沒接標題的內容會變成沒有小標的段落 |
+| `PAYMENT_V2` | `@Dobby payment` 付款資訊卡、`@Dobby news` 的 `{PAYMENT_V2}` 變數（`@Dobby season` 的 `{NEW_SEASON_NEWS}` 也經由它讀到）共用的資料：一個有開標題列的表格，欄位是 `名稱`、`帳號`、`備註`（見下方「付款表格」） |
+| `PAYMENT` | 舊的付款資訊（純文字段落）。程式已不讀（2026-10-01 `@Dobby season` 拿掉 `{PAYMENT_INFO}`），部署前的舊版仍在讀，部署後可以刪掉（見 `TODO.md`） |
 | `WELCOME_MESSAGE` | 歡迎訊息：機器人加入群組（`join`）和新成員加入群組（`memberJoined`）共用這份內容 |
 | `INTRODUCE` | `@Dobby` 自我介紹的內容 |
-| `NEW_SEASON` | `@Dobby season <季度>` 指令產生下一季公告草稿的模板，見 [commands.md](../commands.md#產生新一季公告草稿) |
+| `NEW_SEASON` | `@Dobby season <季度>` 指令產生新一季公告（一段純文字＋數張 Flex 卡）的模板，見 [commands.md](../commands.md#產生新一季公告) |
 
-`getBlocks()` 會遞迴抓取 `has_children === true` 的區塊（toggle、巢狀清單等），每一層都用 `notionGetAllResults` 分頁抓完，超過 100 個區塊也不會被截斷。`blocksToText()` 輸出時子區塊依巢狀深度縮排（每層 2 個空白），`news`、`introduce`、`WELCOME_MESSAGE`、`season` 都走這個共用實作；`payment` 和 news 的 `{PAYMENT_V2}` 讀 `PAYMENT_V2` 時，付款表格另外解析（`paymentPageToText()`，見下方「付款表格」），只有表格以外的文字和退回純文字時才用 `blocksToText()`。各種區塊的輸出方式：
+`getBlocks()` 會遞迴抓取 `has_children === true` 的區塊（toggle、巢狀清單等），每一層都用 `notionGetAllResults` 分頁抓完，超過 100 個區塊也不會被截斷。`blocksToText()` 輸出時子區塊依巢狀深度縮排（每層 2 個空白），`news`、`introduce`、`WELCOME_MESSAGE`、`season` 都走這個共用實作（`season` 卡片裡的表格另外依欄名解析，見 [commands.md](../commands.md#產生新一季公告)）；`payment` 和 news 的 `{PAYMENT_V2}` 讀 `PAYMENT_V2` 時，付款表格另外解析（`paymentPageToText()`，見下方「付款表格」），只有表格以外的文字和退回純文字時才用 `blocksToText()`。各種區塊的輸出方式：
 
 - `bulleted_list_item` 一律補 `• ` 前綴。
 - `numbered_list_item` 補編號：同一層連續的編號項目算同一串，中間夾了其他區塊就從 1 重新開始（跟 Notion 一樣）。編號項目底下再巢狀的編號清單照 Notion 的樣子輪替 `1.` → `a.` → `i.` → `1.`；格式只看上面有幾層編號項目，所以放在 toggle 或分欄裡的編號清單仍從 `1.` 開始。沒有文字的空項目會略過，不佔編號。Notion 較新的 API 版本會在第一項帶 `list_start_index`／`list_format`，有的話會照用（第一項是空的也會讀），但我們固定的 `2022-06-28` 版不會送。
