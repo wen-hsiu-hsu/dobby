@@ -62,19 +62,32 @@ function buildSeasonPlaceholders(
   };
 }
 
+/** PAYMENT_V2 頁面的區塊；讀不到時是一句給讀者看的提示。 */
+export type PaymentPage = { blocks: NestedBlock[] } | { notice: string };
+
 // {PAYMENT_V2}：跟 `@Dobby 付款` 同一份資料（「所有公告」的 PAYMENT_V2 頁面），一種付款方式一行。
 // 讀不到或是空的時給一句提示，不代入空字串——空的話公告卡的「付款方式」段只剩小標（或整段被略過），
 // 讀的人看不出付款資訊沒讀到；提示會指引改用 @Dobby 付款。
 // 付款是公告的次要段落：這幾次 Notion 呼叫失敗（例如 429 重試用完）時只降級這一段，不讓整則公告回「系統錯誤」。
-export async function loadPaymentText(): Promise<string> {
+// `@Dobby season` 讀一次頁面，純文字（{NEW_SEASON_NEWS}）和卡片的付款區塊共用，所以讀取和轉文字分開。
+export async function loadPaymentPage(): Promise<PaymentPage> {
   try {
     const page = await announcementRepo.findByName(PAYMENT_PAGE_NAME);
-    if (!page) return '（找不到付款資訊）';
-    return paymentPageToText(await announcementRepo.getBlocks(page.pageId)) || '（付款資訊為空）';
+    if (!page) return { notice: '（找不到付款資訊）' };
+    return { blocks: await announcementRepo.getBlocks(page.pageId) };
   } catch (err) {
-    logger.warn({ err }, 'News: failed to load PAYMENT_V2, using a notice instead');
-    return '（付款資訊讀取失敗，請用 @Dobby 付款查詢）';
+    logger.warn({ err }, 'Failed to load PAYMENT_V2, using a notice instead');
+    return { notice: '（付款資訊讀取失敗，請用 @Dobby 付款查詢）' };
   }
+}
+
+export function paymentPageText(page: PaymentPage): string {
+  if ('notice' in page) return page.notice;
+  return paymentPageToText(page.blocks) || '（付款資訊為空）';
+}
+
+export async function loadPaymentText(): Promise<string> {
+  return paymentPageText(await loadPaymentPage());
 }
 
 function applySeasonPlaceholders(text: string, placeholders: Record<string, string>): string {

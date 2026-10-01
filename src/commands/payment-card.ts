@@ -41,7 +41,8 @@ function copyButton(clipboardText: string): messagingApi.FlexBox {
   };
 }
 
-function methodRow(method: PaymentMethod): messagingApi.FlexBox {
+/** 一種付款方式一格。季公告卡（`season-card.ts`）的付款區塊也用這個，兩邊長得一樣。 */
+export function paymentMethodRow(method: PaymentMethod): messagingApi.FlexBox {
   const info: messagingApi.FlexComponent[] = [
     { type: 'text', text: method.name || UNNAMED, size: 'md', weight: 'bold', color: CARD_TEXT, wrap: true },
   ];
@@ -85,7 +86,7 @@ export function buildPaymentBubble(methods: PaymentMethod[], extraText: string):
   };
 
   const bodyContents: messagingApi.FlexComponent[] = [
-    { type: 'box', layout: 'vertical', spacing: '6px', contents: methods.map(methodRow) },
+    { type: 'box', layout: 'vertical', spacing: '6px', contents: methods.map(paymentMethodRow) },
   ];
   if (extraText) {
     bodyContents.push({ type: 'text', text: extraText, size: 'sm', color: CARD_SUB, wrap: true, margin: 'lg' });

@@ -1,6 +1,6 @@
 import { blocksToText, type NestedBlock } from './blocks-to-text.js';
 
-/** 「所有公告」裡付款資料那一頁的名稱。`@Dobby 付款` 和 `@Dobby 公告` 的 `{PAYMENT_V2}` 共用（`@Dobby season` 的 `{NEW_SEASON_NEWS}` 也經由後者讀到），改名要兩邊一起生效。 */
+/** 「所有公告」裡付款資料那一頁的名稱。`@Dobby 付款`、`@Dobby 公告` 的 `{PAYMENT_V2}`、`@Dobby season` 的付款區塊共用，改名要各處一起生效。 */
 export const PAYMENT_PAGE_NAME = 'PAYMENT_V2';
 
 /**

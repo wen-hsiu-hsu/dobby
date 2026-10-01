@@ -6,15 +6,17 @@ import * as usersRepo from '../services/notion/users-repository.js';
 import type { messagingApi } from '@line/bot-sdk';
 import { blocksToText, blocksToSections, readHeaderTable } from '../services/notion/blocks-to-text.js';
 import type { NestedBlock } from '../services/notion/blocks-to-text.js';
-import { tablesToText } from '../services/notion/payment-methods.js';
+import { tablesToText, parsePaymentTable, paymentExtraText } from '../services/notion/payment-methods.js';
 import { replyMessage } from '../services/line/reply-service.js';
 import { parseSeasonInput, getPreviousSeasonName, formatSeasonTitle, getSeasonQuarter, groupDatesByMonth } from '../utils/date-utils.js';
 import { logger } from '../utils/logger.js';
 import { COURTS_DENSITY } from './registration/capacity-calculator.js';
-import { NEWS_TEMPLATE_PAGE_NAME, loadPaymentText, renderNews, splitIntoTextMessages } from './news.js';
+import { NEWS_TEMPLATE_PAGE_NAME, loadPaymentPage, paymentPageText, renderNews, splitIntoTextMessages } from './news.js';
+import type { PaymentPage } from './news.js';
 import { truncateAltText } from './flex-card-parts.js';
 import { fitsBubbleSizeLimit } from './name-list-card.js';
 import { buildSeasonBubble, seasonCardToText } from './season-card.js';
+import { PAYMENT_HEADING } from './season-card.js';
 import type { SeasonCardItem, SeasonCardParams } from './season-card.js';
 
 // COURTS_DENSITY 從 capacity-calculator.ts 共用（每面場地可容納的人數上限）。這裡算的是
@@ -53,7 +55,25 @@ function buildMentionResolver(users: Awaited<ReturnType<typeof usersRepo.findAll
 }
 
 function applyPlaceholders(text: string, values: Record<string, string>): string {
-  return text.replace(/\{([A-Z_]+)\}/g, (match, key: string) => values[key] ?? match);
+  return text.replace(/\{([A-Z0-9_]+)\}/g, (match, key: string) => values[key] ?? match);
+}
+
+// 卡片裡整個段落只有 {PAYMENT_V2} 時，畫成跟付款卡一樣的付款列（帳號有複製按鈕）；
+// 夾在其他文字裡的 {PAYMENT_V2} 照一般變數代入成純文字。
+const PAYMENT_PLACEHOLDER = '{PAYMENT_V2}';
+
+function isPaymentBlock(block: NestedBlock): boolean {
+  return block.type === 'paragraph' && blocksToText([block]).trim() === PAYMENT_PLACEHOLDER;
+}
+
+/**
+ * 付款區塊。PAYMENT_V2 的表格讀得懂就用付款卡的版面；讀不到頁面、或表格改壞時，
+ * 「付款方式」底下改放純文字（跟 @Dobby 公告的 {PAYMENT_V2} 同一段，包括讀取失敗的提示），不讓整張卡失敗。
+ */
+function paymentItem(page: PaymentPage): SeasonCardItem {
+  const methods = 'blocks' in page ? parsePaymentTable(page.blocks) : null;
+  if (methods && 'blocks' in page) return { kind: 'payment', methods, extraText: paymentExtraText(page.blocks) };
+  return { kind: 'section', heading: PAYMENT_HEADING, body: paymentPageText(page) };
 }
 
 function isDividerBlock(block: NestedBlock): boolean {
@@ -126,7 +146,7 @@ function tableItem(block: NestedBlock, fill: (t: string) => string): SeasonCardI
 }
 
 /** 一段模板（兩條 `————————` 之間）由上到下轉成卡片項目：表格各自一項，表格之間的文字依 Notion 標題切段。 */
-function buildCardItems(blocks: NestedBlock[], fill: (t: string) => string): SeasonCardItem[] {
+function buildCardItems(blocks: NestedBlock[], fill: (t: string) => string, payment: SeasonCardItem): SeasonCardItem[] {
   const items: SeasonCardItem[] = [];
   let run: NestedBlock[] = [];
   const flushText = () => {
@@ -143,6 +163,9 @@ function buildCardItems(blocks: NestedBlock[], fill: (t: string) => string): Sea
       flushText();
       const item = tableItem(block, fill);
       if (item) items.push(item);
+    } else if (isPaymentBlock(block)) {
+      flushText();
+      items.push(payment);
     } else {
       run.push(block);
     }
@@ -230,10 +253,10 @@ export async function handleSeasonAnnouncement(replyToken: string, isAdmin: bool
 
     const allMemberIds = [...new Set([...season.members, ...previousSeason.members])];
 
-    const [templateBlocks, newsBlocks, paymentText, users, playDates, people] = await Promise.all([
+    const [templateBlocks, newsBlocks, paymentPage, users, playDates, people] = await Promise.all([
       announcementRepo.getBlocks(template.pageId),
       announcementRepo.getBlocks(news.pageId),
-      loadPaymentText(),
+      loadPaymentPage(),
       usersRepo.findAll(),
       calendarRepo.findByPageIds(season.playDatePageIds),
       peopleRepo.findByPageIds(allMemberIds),
@@ -255,6 +278,7 @@ export async function handleSeasonAnnouncement(replyToken: string, isAdmin: bool
     // people 已經包含指定季所有成員，不用再查一次（findByPageIds 每筆間隔 400ms）。
     const personById = new Map(people.map((p) => [p.pageId, p]));
     const seasonPeople = season.members.flatMap((id) => personById.get(id) ?? []);
+    const paymentText = paymentPageText(paymentPage);
     const newsText = renderNews(newsBlocks, season, seasonPeople, playDates, paymentText).text;
     // 空的話含 {NEW_SEASON_NEWS} 的那段會整段消失，管理員不一定發現少了要貼記事本的那則
     if (!newsText.trim()) {
@@ -283,7 +307,10 @@ export async function handleSeasonAnnouncement(replyToken: string, isAdmin: bool
       REFUND_PRICE: String(refundPrice),
       BACKTOBACK_SIGN_UP_PRICE: String(realPrice - refundPrice),
       BALANCE: String(balance),
+      // 夾在其他文字裡時用純文字；整段只有它時畫成付款列（buildCardItems）
+      PAYMENT_V2: paymentText,
     };
+    const payment = paymentItem(paymentPage);
     const fill = (t: string) => applyPlaceholders(t, placeholders);
 
     const messages: messagingApi.Message[] = [];
@@ -295,7 +322,7 @@ export async function handleSeasonAnnouncement(replyToken: string, isAdmin: bool
         continue;
       }
 
-      const items = buildCardItems(partBlocks, fill);
+      const items = buildCardItems(partBlocks, fill, payment);
       if (items.length === 0) continue;
       const card = takeCardTitle(items, formatSeasonTitle(seasonName, true));
       const text = seasonCardToText(card);

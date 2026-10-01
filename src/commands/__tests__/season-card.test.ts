@@ -97,6 +97,35 @@ describe('buildSeasonBubble', () => {
     expect(texts(bubble.body!.contents[2])).toEqual(['只有標題']);
   });
 
+  it('draws a payment item as the 付款方式 heading, the payment card rows and the extra text', () => {
+    const bubble = buildSeasonBubble({
+      title: 'T',
+      items: [
+        {
+          kind: 'payment',
+          methods: [
+            { name: '永豐銀行', account: '123', note: '請備註名字' },
+            { name: '現金', account: '', note: '' },
+          ],
+          extraText: '補充說明',
+        },
+      ],
+    });
+
+    expect(emptyTexts(bubble)).toEqual([]);
+    const [heading, rows, extra] = (bubble.body!.contents[0] as any).contents;
+    expect(heading.text).toBe('付款方式');
+    expect(rows.contents).toHaveLength(2);
+    expect(rows.contents[0].contents[1].action.clipboardText).toBe('123');
+    expect(extra.text).toBe('補充說明');
+    expect(
+      seasonCardToText({ title: 'T', items: [{ kind: 'payment', methods: [{ name: '現金', account: '', note: '' }], extraText: '' }] }),
+    ).toBe('T\n\n付款方式\n現金');
+    expect(
+      seasonCardToText({ title: 'T', items: [{ kind: 'payment', methods: [{ name: '現金', account: '', note: '' }], extraText: '補充說明' }] }),
+    ).toBe('T\n\n付款方式\n現金\n補充說明');
+  });
+
   it('puts a separator between items and keeps text sections as heading + body', () => {
     const bubble = buildSeasonBubble({
       title: 'T',

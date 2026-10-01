@@ -99,6 +99,7 @@ const seasonTemplateBlocks = [
     ['退費', '${REFUND_PRICE}', '{REFUND_MEMBERS_MENTIONS}', '', 'true'],
     ['Q{PREV_QUARTER} 結餘', '${BALANCE}', '', '', ''],
   ),
+  paragraphBlock('{PAYMENT_V2}'),
 ];
 
 // NEWS_TEMPLATE：變數用 news 那套（{SEASON}、{LIST_ALL_PEOPLE}、{PAYMENT_V2}…），不是 season 這套
@@ -374,6 +375,10 @@ describe('handleSeasonAnnouncement', () => {
         // person-4 has no USERS record — falls back to the People List name.
         '@大衛',
         'Q1 結餘 $2173',
+        '',
+        '付款方式',
+        '永豐銀行 （807） 20201800934932 (請備註名字)',
+        '現金',
       ].join('\n'),
     );
     // 突顯的三列各一列，落單的一般列（結餘）佔半格
@@ -382,6 +387,75 @@ describe('handleSeasonAnnouncement', () => {
     expect(highlightLines[3].layout).toBe('horizontal');
     expect(highlightLines[3].contents).toHaveLength(2);
     expect(highlightLines[3].contents[1].contents).toEqual([]);
+  });
+
+  it('draws a paragraph that is only {PAYMENT_V2} as the payment card rows, reading PAYMENT_V2 once for both the text and the card', async () => {
+    await handleSeasonAnnouncement('token', true, '2026Q2');
+
+    const [notebook, , fees] = await replyMessages();
+    const body = fees.contents.body.contents;
+    const payment = body[body.length - 1];
+    expect(body[body.length - 2].type).toBe('separator');
+    expect(payment.contents[0].text).toBe('付款方式');
+    const [bank, cash] = payment.contents[1].contents;
+    // 跟付款卡同一個元件：有帳號的格子右邊是複製按鈕
+    expect(bank.contents[1].action).toEqual({ type: 'clipboard', label: '複製帳號', clipboardText: '20201800934932' });
+    expect(cash.contents).toHaveLength(1);
+    expect(emptyTexts(fees.contents)).toEqual([]);
+
+    // {NEW_SEASON_NEWS} 的付款段落用同一份資料
+    expect(notebook.text).toContain('付款方式\n永豐銀行 （807） 20201800934932 (請備註名字)\n現金');
+    expect(vi.mocked(announcementRepo.getBlocks).mock.calls.filter(([id]) => id === 'ann-payment')).toHaveLength(1);
+    expect(vi.mocked(announcementRepo.findByName).mock.calls.filter(([name]) => name === 'PAYMENT_V2')).toHaveLength(1);
+  });
+
+  it('falls back to a notice under 付款方式 when PAYMENT_V2 cannot be read, without failing the card', async () => {
+    vi.mocked(announcementRepo.getBlocks).mockImplementation(async (pageId: string) => {
+      if (pageId === 'ann-payment') throw new Error('Notion 429');
+      if (pageId === 'ann-news') return newsTemplateBlocks as any;
+      return seasonTemplateBlocks as any;
+    });
+
+    await handleSeasonAnnouncement('token', true, '2026Q2');
+
+    const [notebook, , fees] = await replyMessages();
+    expect(cardSections(fees).at(-1)).toEqual(['付款方式', '（付款資訊讀取失敗，請用 @Dobby 付款查詢）']);
+    // 記事本那則也是同一句提示（兩邊共用同一次讀取的結果）
+    expect(notebook.text).toContain('付款方式\n（付款資訊讀取失敗，請用 @Dobby 付款查詢）');
+  });
+
+  it('shows PAYMENT_V2 as plain rows under 付款方式 when its table cannot be parsed', async () => {
+    vi.mocked(announcementRepo.getBlocks).mockImplementation(async (pageId: string) => {
+      // 表格沒開標題列：parsePaymentTable 讀不到，退回 tablesToText
+      if (pageId === 'ann-payment') return [{ ...paymentBlocks[0], table: { table_width: 3, has_column_header: false } }] as any;
+      if (pageId === 'ann-news') return newsTemplateBlocks as any;
+      return seasonTemplateBlocks as any;
+    });
+
+    await handleSeasonAnnouncement('token', true, '2026Q2');
+
+    const [, , fees] = await replyMessages();
+    expect(cardSections(fees).at(-1)).toEqual(['付款方式', '名稱 帳號 備註\n永豐銀行 （807） 20201800934932 請備註名字\n現金']);
+  });
+
+  it('uses the season title when a block starts with {PAYMENT_V2}, and draws every {PAYMENT_V2} paragraph', async () => {
+    mockTemplateBlocks([paragraphBlock('{PAYMENT_V2}'), headingBlock('再一次'), paragraphBlock('{PAYMENT_V2}')]);
+
+    await handleSeasonAnnouncement('token', true, '2026Q2');
+
+    const [card] = await replyMessages();
+    expect(cardTitle(card)).toBe('2026 Q2 (4~6月)');
+    const boxes = card.contents.body.contents.filter((c: any) => c.type === 'box');
+    expect(boxes.map((b: any) => b.contents[0].text)).toEqual(['付款方式', '再一次', '付款方式']);
+  });
+
+  it('substitutes {PAYMENT_V2} as text when it sits inside other text', async () => {
+    mockTemplateBlocks([paragraphBlock('標題'), headingBlock('匯款'), paragraphBlock('請匯到：{PAYMENT_V2}')]);
+
+    await handleSeasonAnnouncement('token', true, '2026Q2');
+
+    const [card] = await replyMessages();
+    expect(cardSections(card)).toEqual([['匯款', '請匯到：永豐銀行 （807） 20201800934932 (請備註名字)\n現金']]);
   });
 
   it('never sends an empty Flex text when a mention list comes out empty (e.g. nobody got a refund)', async () => {

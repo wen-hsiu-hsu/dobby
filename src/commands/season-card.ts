@@ -2,19 +2,23 @@ import type { messagingApi } from '@line/bot-sdk';
 import { FLEX_ICONS } from '../config/flex-assets.js';
 import { CARD_BG, CARD_TEXT, CARD_SUB, CARD_DIVIDER, CARD_LIME, badgeBox, photoHero } from './flex-card-parts.js';
 import { sectionBox } from './news-card.js';
+import { paymentMethodRow } from './payment-card.js';
+import { paymentMethodsToText, type PaymentMethod } from '../services/notion/payment-methods.js';
 
 /**
  * 季公告卡（`@Dobby season`）：NEW_SEASON 模板用 `————————` 切出來的每一段（`{NEW_SEASON_NEWS}` 那段除外）
  * 各畫成一張。照片標題區只有徽章＋標題，標題是該段第一行（例如「中華科大 - 2026 Q4 (10~12月)」）。
- * 內文依模板內容由上到下排，三種項目：
+ * 內文依模板內容由上到下排，四種項目：
  * - `section`：一般文字，跟公告卡一樣（灰色小標＋內文）。
  * - `stats`：數據格。每格是小標＋大數字（前後綴小字）＋備註；`wide` 的格子佔滿一列，
  *   其他的依順序兩兩一列，落單的佔半格。
  * - `highlights`：螢光大數字。`highlight` 的列是螢光綠實心標籤＋螢光綠金額＋備註＋名單；
  *   其他列是小字，依順序兩兩一列。
+ * - `payment`：「付款方式」小標＋跟付款卡（`@Dobby 付款`）一模一樣的付款列，有帳號的格子有「複製」按鈕。
  * 項目之間畫細線。設計取捨見 ADR 0016，mockup 見 https://claude.ai/artifact/88WHEHW8c8V8htGL3wjSSe 。
  *
- * 沒有按鈕：卡片是管理員轉傳到群組用的。Flex 的 text 不能是空字串，所以空的欄位整個不畫；
+ * 底部沒有操作按鈕（卡片是管理員轉傳到群組用的），唯一的按鈕是付款列的「複製」，跟付款卡一樣要 LINE 14.0.0 以上。
+ * Flex 的 text 不能是空字串，所以空的欄位整個不畫；
  * 呼叫端要保證 items 至少有一項（全空的 body 會讓 LINE 退回整則），也要用 `fitsBubbleSizeLimit()` 檢查大小。
  */
 
@@ -43,7 +47,11 @@ export type SeasonCardItem =
   // fromTable：認不得的表格轉成的文字（見 season-announcement.ts 的 tableItem），不拿來當卡片標題
   | { kind: 'section'; heading: string; body: string; fromTable?: boolean }
   | { kind: 'stats'; tiles: StatTile[] }
-  | { kind: 'highlights'; rows: HighlightRow[] };
+  | { kind: 'highlights'; rows: HighlightRow[] }
+  // methods 至少一種；extraText 是付款頁表格以外的文字（跟付款卡一樣放在列表下方）
+  | { kind: 'payment'; methods: PaymentMethod[]; extraText: string };
+
+export const PAYMENT_HEADING = '付款方式';
 
 export interface SeasonCardParams {
   title: string;
@@ -159,7 +167,18 @@ function highlightsBox(rows: HighlightRow[]): messagingApi.FlexBox {
   return { type: 'box', layout: 'vertical', spacing: '14px', paddingStart: '4px', paddingEnd: '4px', contents };
 }
 
+function paymentBox(methods: PaymentMethod[], extraText: string): messagingApi.FlexBox {
+  const contents: messagingApi.FlexComponent[] = [
+    { type: 'text', text: PAYMENT_HEADING, size: 'xs', weight: 'bold', color: CARD_SUB, offsetStart: '4px' },
+    { type: 'box', layout: 'vertical', spacing: '6px', contents: methods.map(paymentMethodRow) },
+  ];
+  // margin 跟付款卡的 extraText 一樣
+  if (extraText) contents.push({ type: 'text', text: extraText, size: 'sm', color: CARD_SUB, wrap: true, margin: 'lg' });
+  return { type: 'box', layout: 'vertical', spacing: '8px', contents };
+}
+
 function itemBox(item: SeasonCardItem): messagingApi.FlexBox {
+  if (item.kind === 'payment') return paymentBox(item.methods, item.extraText);
   if (item.kind === 'stats') return statsBox(item.tiles);
   if (item.kind === 'highlights') return highlightsBox(item.rows);
   return sectionBox(item.heading, item.body);
@@ -204,6 +223,7 @@ function textLine(...partsThenNote: string[]): string {
 export function seasonCardToText(params: SeasonCardParams): string {
   const blocks = params.items.map((item) => {
     if (item.kind === 'section') return [item.heading.trim(), item.body.trim()];
+    if (item.kind === 'payment') return [PAYMENT_HEADING, paymentMethodsToText(item.methods), item.extraText];
     if (item.kind === 'stats') {
       return item.tiles.map((t) => textLine(t.title, `${t.prefix}${t.value}${t.suffix ? ` ${t.suffix}` : ''}`, t.note));
     }
