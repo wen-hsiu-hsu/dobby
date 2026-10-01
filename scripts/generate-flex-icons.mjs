@@ -1,4 +1,4 @@
-// 產生 Flex 卡片（報名／請假／週報狀態卡、指令清單卡、名單卡）用的圖示 PNG（輸出到 assets/flex/，由 GitHub Pages 發布）。
+// 產生 Flex 卡片（報名／請假／週報狀態卡、指令清單卡、名單卡、付款資訊卡）用的圖示 PNG（輸出到 assets/flex/，由 GitHub Pages 發布）。
 //
 // LINE Flex 的圖片只收 PNG／JPEG，所以把 Lucide 的 SVG 換色、換線寬後轉成 PNG。
 // 一次性工具：圖示有變動時才需要重跑，產出的 PNG 直接 commit。
@@ -45,6 +45,9 @@ const ICONS = [
   { file: 'circle-dollar-sign-dark.png', icon: 'circle-dollar-sign', color: '#111111', strokeWidth: 2.5 },
   { file: 'users-dark.png', icon: 'users', color: '#111111', strokeWidth: 2.5 },
   { file: 'user-x-white.png', icon: 'user-x', color: '#FFFFFF', strokeWidth: 2.5 },
+  // 付款資訊卡（src/commands/payment-card.ts）
+  { file: 'credit-card-dark.png', icon: 'credit-card', color: '#111111', strokeWidth: 2.5 },
+  { file: 'copy-dark.png', icon: 'copy', color: '#111111', strokeWidth: 2.5 },
 ];
 
 const outDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'flex');
