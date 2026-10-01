@@ -28,8 +28,9 @@ const season = {
   location: '',
   weekCounts: 0,
   courtPricePerHour: 450,
-  pricePerPersonForSeason: null,
-  pricePerPersonOverride: null,
+  actualFeePerPerson: null,
+  refundPerPerson: null,
+  balance: null,
   totalPrice: null,
   playDatePageIds: [],
 };

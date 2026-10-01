@@ -26,8 +26,9 @@ function baseProps(overrides: Record<string, unknown> = {}) {
     零打費用: { type: 'number', number: 170 },
     地點: { type: 'rich_text', rich_text: [] },
     '租借次數 (2hrs)': { type: 'number', number: 10 },
-    每人平均場租: { type: 'formula', formula: { type: 'number', number: 500 } },
-    '每人平均場租（特殊狀況）': { type: 'number', number: null },
+    每人實際收費: { type: 'number', number: 2340 },
+    季打退費: { type: 'number', number: 140 },
+    結餘: { type: 'number', number: null },
     場租總金額: { type: 'formula', formula: { type: 'number', number: 5000 } },
     '每場/小時 定價': { type: 'number', number: 450 },
     打球日: { type: 'relation', relation: [] },
@@ -106,6 +107,16 @@ describe('season-repository', () => {
       expect(season?.guestFee).toBe(170);
       expect(season?.weekCounts).toBe(0);
       expect(season?.courtPricePerHour).toBe(450);
+    });
+
+    it('reads 每人實際收費/季打退費/結餘 as-is and keeps null for empty ones instead of guessing a default', async () => {
+      notionPostMock.mockResolvedValue({ results: [makePage(baseProps(), 'season-page-1')] });
+
+      const season = await findByName('2025-Q1');
+
+      expect(season?.actualFeePerPerson).toBe(2340);
+      expect(season?.refundPerPerson).toBe(140);
+      expect(season?.balance).toBeNull();
     });
   });
 });

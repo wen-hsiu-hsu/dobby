@@ -27,8 +27,9 @@ export interface SeasonRecord {
   location: string; // 地點
   weekCounts: number; // 租借次數 (2hrs) — 本季總租借次數
   courtPricePerHour: number; // 每場/小時 定價 — 場租說明用（season 公告）
-  pricePerPersonForSeason: number | null; // 每人平均場租（formula）
-  pricePerPersonOverride: number | null; // 每人平均場租（特殊狀況）— 設定時取代 formula 值
+  actualFeePerPerson: number | null; // 每人實際收費 — 季打每人實際要繳的金額，null 表示未填
+  refundPerPerson: number | null; // 季打退費 — 這一季結束後每人退多少，季末才填，null 表示未填
+  balance: number | null; // 結餘 — 季末才填，null 表示未填
   totalPrice: number | null; // 場租總金額（formula）
   playDatePageIds: string[]; // 打球日（relation → Calendar），用於公告列出本季所有打球日期
 }

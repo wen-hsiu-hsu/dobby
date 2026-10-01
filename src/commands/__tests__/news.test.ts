@@ -70,8 +70,9 @@ beforeEach(() => {
     location: '中華科大',
     weekCounts: 13,
     courtPricePerHour: 450,
-    pricePerPersonForSeason: 2127.2727272727273,
-    pricePerPersonOverride: null,
+    actualFeePerPerson: 2150,
+    refundPerPerson: null,
+    balance: null,
     totalPrice: 23400,
     playDatePageIds: ['cal-2', 'cal-1'],
   });
@@ -126,8 +127,8 @@ describe('handleNews', () => {
     expect(text).toContain('2026-Q3 7~9月');
     expect(text).toContain('共 2 人');
     expect(text).toContain('許文修、陳玟育');
-    // Math.ceil(2127.27...) = 2128
-    expect(text).toContain('每人 $2128');
+    // 每人實際收費，不是 formula 算的每人平均場租
+    expect(text).toContain('每人 $2150');
     expect(text).toContain('共 13 次');
     expect(text).toContain('每人每次 $170');
     expect(text).toContain('2 面，共 $23400');
@@ -275,6 +276,15 @@ describe('handleNews', () => {
     await handleNews('token');
 
     expect(replyMessage).toHaveBeenCalledWith('token', [{ type: 'text', text: '公告內容為空' }]);
+  });
+
+  it('shows a notice instead of $0 when 每人實際收費 is empty', async () => {
+    vi.mocked(seasonRepo.findByName).mockResolvedValue({ ...(await seasonRepo.findByName('2026-Q3'))!, actualFeePerPerson: null });
+
+    await handleNews('token');
+
+    const [, messages] = vi.mocked(replyMessage).mock.calls[0]!;
+    expect(replyText(messages[0]!)).toContain('每人 $（每人實際收費未填）');
   });
 
   it('replies "找不到公告內容" when NEWS_TEMPLATE does not exist', async () => {

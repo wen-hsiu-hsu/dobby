@@ -34,8 +34,10 @@ async function pageToRecord(page: PageObjectResponse): Promise<SeasonRecord> {
     location: getRichText(p, '地點'),
     weekCounts: getNumberWithDefault(p, page.id, '租借次數 (2hrs)'),
     courtPricePerHour: getNumberWithDefault(p, page.id, '每場/小時 定價'),
-    pricePerPersonForSeason: getFormulaNumber(p, '每人平均場租'),
-    pricePerPersonOverride: getNumber(p, '每人平均場租（特殊狀況）'),
+    // 這三個金額由管理員手動填、不給預設值：缺值時由用到的指令自己決定要報錯還是顯示提示
+    actualFeePerPerson: getNumber(p, '每人實際收費'),
+    refundPerPerson: getNumber(p, '季打退費'),
+    balance: getNumber(p, '結餘'),
     totalPrice: getFormulaNumber(p, '場租總金額'),
     playDatePageIds: getRelation(p, '打球日'), // 唯讀顯示用途，一季正常遠低於 25，不做分頁化
   };
