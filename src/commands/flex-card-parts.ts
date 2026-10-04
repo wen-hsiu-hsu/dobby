@@ -113,7 +113,12 @@ export function photoHero(topText: string | undefined, bottom: messagingApi.Flex
 
 const ALT_TEXT_MAX = 400;
 
-/** altText 統一截在 400 字（沿用改 Flex 前就有的上限），超過就截斷並補「…」。 */
+/**
+ * altText 統一截在 400 字（沿用改 Flex 前就有的上限），超過就截斷並補「…」。
+ * 長度以 UTF-16 code unit 計算；截斷點落在 emoji（surrogate pair）中間時，去掉孤立的前半個 surrogate，
+ * 否則通知預覽會在「…」前多一個亂碼字元。ZWJ 組合 emoji 仍可能被拆成幾個獨立 emoji，不會變亂碼，不另處理。
+ */
 export function truncateAltText(text: string): string {
-  return text.length > ALT_TEXT_MAX ? text.slice(0, ALT_TEXT_MAX - 1) + '…' : text;
+  if (text.length <= ALT_TEXT_MAX) return text;
+  return text.slice(0, ALT_TEXT_MAX - 1).replace(/[\uD800-\uDBFF]$/, '') + '…';
 }
