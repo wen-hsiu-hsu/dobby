@@ -115,6 +115,27 @@
 
 ## 程式碼整理與小改善（非 bug，低優先）
 
+- [ ] **mutex 用完清理 `queues`／`inFlight` 的程式沒有任何測試保護，其中一行改壞會讓報名／請假失去互斥。**（2026-10-04 刪除 `isLocked()` 時 code review 發現，是既有缺口）
+
+  不是 bug：`src/services/mutex.ts` 第 81 行起的 `void tail.then(...)` callback，前段（第 82-88 行）負責清理，目前寫法正確。缺口在測試：2026-10-04 實測把下面三種改法分別套上去，整個 `npx vitest run --dir src`（836 個，含用真 mutex 的 `registration-concurrency.test.ts`、`user-management.test.ts`）全部照樣通過。
+  1. **拿掉第 82 行的守衛**，`if (queues.get(key) === tail) queues.delete(key);` 變成無條件 `queues.delete(key)`。**這會造成真的 race**：A 執行中、B 排在後面時，A 結束會把 B 的 entry 刪掉；B 執行期間進來的新呼叫 C 讀到 `queues.get(key)` 是 undefined，不等 B 就直接跑。兩個「讀取 → 計算 → 寫回」同時進行：報名／請假（key 是活動日期）可能互相覆蓋寫入；`trackUser`（`src/services/user-management.ts:93`，key 是 `user-track-${userId}`）的 `message_counts` 是整個值覆寫，同樣會被蓋掉。已用暫時測試驗證，突變後順序是 `a-start, a-end, b-start, c-start`，C 在 B 結束前就開始了。
+  2. **整行刪掉**（`queues` 永不清理）：功能不受影響，只是記憶體洩漏，每個用過的 key 留一個已完成的 promise。key 是活動日期（每週一個）和 `user-track-${userId}`（每個發過言的人一個），量很小。
+  3. **`inFlight` 不減一**（第 83-88 行）：功能不受影響，但 `Mutex task finished` 摘要和逾時 warn 裡的 `queuedAhead` 會一直累加，變成假的「前面還有 N 個任務」，用 `/logs` 判讀排隊情形時會被誤導。
+
+  為什麼現有測試抓不到（都在 `src/services/__tests__/mutex.test.ts`）：
+  - 排隊的測試（key3、key5、key6、key7）都在任何任務結束前就把所有呼叫排好，碰不到「前面的任務結束、清理跑完之後才進來新呼叫」的時序。
+  - key8 的註解寫著 queues-cleanup-must-follow-tail，但它前面只有一個任務、沒有第三個呼叫，第 82 行的守衛有沒有都會過。
+  - 任務結束後重用同一個 key 的測試（key2、key4）當下沒有其他任務在排隊，守衛有沒有都一樣，而且只斷言回傳值，沒看 `queuedAhead`。
+  - 以前的 `isLocked()` 斷言驗的是已刪除的 `pending`，本來就沒涵蓋。
+
+  風險情境：之後有人「簡化」這段（例如覺得 `=== tail` 多餘），測試全綠，正式環境卻偶發報名重複寫入或漏寫，非常難追。
+
+  如果要處理（**只補測試，不用改 `mutex.ts`**）：
+  - 加在 `src/services/__tests__/mutex.test.ts`，用真的 mutex，不要 mock。模組層級的 `queues`／`inFlight` 會跨測試保留（沒有 `resetModules`），每個新測試都要用同檔沒用過的 key。
+  - **情況 1 最值得補**，放在最外層的 `describe('mutex')`，**不能**放進 `describe('task summary log')`：那裡的 `beforeEach` 開了 fake timers，`setImmediate` 會永遠不觸發。寫法：A、B、C 各用一個 gate promise 控制結束時機，用 `order` 陣列記錄開始／結束；A、B 排隊 → 放行 A 並 `await` 它 → B 還卡著時呼叫 C → **呼叫 C 之後先 `await new Promise((r) => setImmediate(r))` 再斷言** `order` 裡沒有 `c-start`（同檔 key3 測試第 38-39 行的做法）→ 最後放行 B、C。陷阱：呼叫 C 之後若沒等就同步檢查 `order`，突變版的 C 也還沒開始執行，測試會永遠綠燈。
+  - **情況 3**：不用匯出內部狀態，從 `Mutex task finished` 摘要看就行。同一個 key 先跑完一個任務，再呼叫一次，斷言第二次摘要的 `queuedAhead` 是 0。放進 `describe('task summary log')`，用它的 `summaryCalls()`；推進時照同區塊其他測試用 `await vi.advanceTimersByTimeAsync(0)`，不要用 `setImmediate`（fake timers 預設連它也換掉）。key 要用日期格式才會記在 info，非日期 key 記在 debug（`INFO_SUMMARY_KEY`，`mutex.ts:16`）；同區塊已用掉 `2026-10-03`～`2026-10-10`。
+  - **情況 2 可以不測**：只能看內部 Map 的大小，得為測試匯出狀態（例如 `__mutexKeyCountForTests()`）。正式模組為了測試加 export 有代價，洩漏量又很小。
+
 - [ ] **`message-handler.ts` 的「指令解析失敗」分支永遠走不到。** `src/handlers/message-handler.ts:66-69` 的 `if (!command)`（記 debug `Message looks like command but failed to parse` 後 return）不會執行：`isCommand()`（`src/commands/command-parser.ts:98-100`）就是 `text.startsWith('@Dobby')`，而 `parseCommand()` 只在「不是 `@Dobby` 開頭」時回 `null`（第 12 行），其餘至少回 `{ type: CommandType.UNKNOWN }`（第 95 行）。所以 `Message classified` 的 `parsed` 永遠是 `true`，打錯的指令會以 `commandType: 'unknown'` 進 `routeCommand`、被靜默忽略，`/logs` 顯示成「指令／警告」、「來自」`unknown`（2026-09-28 本機 reqId `d8dad6` 的 `@Dobby hello` 實測）。
 
   不是 bug，行為正確，只是死碼加上幾處為它寫的顯示邏輯。不處理也沒有風險；風險只在之後有人改 `parseCommand()` 讓它對某些 `@Dobby` 開頭的文字回 `null` 時，這些分支才會突然「活過來」，所以處理時要決定是刪掉還是保留當防禦。
