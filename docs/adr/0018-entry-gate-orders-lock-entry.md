@@ -27,6 +27,8 @@
 
 排序用的是 Pi 收到訊息的順序，沒有加等待窗口。LINE 不保證送達順序，不同人之間會有幾十到幾百毫秒的抖動；加等待窗口的代價是每個人都變慢。進場時記一行 info `Entry gate passed`，欄位是 `{ key, ticket, gateWaitMs, lineTimestamp }`，不帶 userId（ADR 0005）。`lineTimestamp` 是 LINE 收到訊息的時間，群組畫面也是依它排序。同一個 key 的 `Entry gate passed` 依出現先後排，如果 `lineTimestamp` 沒有跟著遞增，就是進鎖順序和 LINE 的順序對調了；這種情況多了，再考慮加等待窗口。不要用 `ticket` 判斷先後：一個日期的號碼全部進場或結束後，計數會清掉、從 1 重新開始，兩則間隔稍長的訊息可能都是 1。
 
+2026-10-04 本機接真實 LINE 手動驗證：同一帳號快速連送兩波共 9 則 `+1`／`-1`／`假`，`lineTimestamp` 都照 `Entry gate passed` 的先後遞增，每次寫入都接在上一則結果後面，沒有 `Entry gate wait capped`；第一波可看出 ticket 2、3 查詢比 ticket 1 早完成，仍在閘門等 ticket 1。完整紀錄見 commit `f3bdd8a` 的 `TODO.md`。沒測到的：前一則卡超過 5 秒的放行路徑（只有單元測試）、全新使用者排在前面、Pi 正式環境。
+
 ## 限制
 
 閘門狀態只存在記憶體，跟 mutex 一樣，只在單一 instance 下成立。同一個 webhook 裡的多個事件本來就依序處理（`event-router.ts`），不受影響。日期 key 在 `message-handler` 算一次，handler 鎖 mutex 時又算一次。週六午夜換日的瞬間，兩邊可能不一樣，但 `enterInOrder` 用的是 context 裡的號碼本身，不會因此卡住。
