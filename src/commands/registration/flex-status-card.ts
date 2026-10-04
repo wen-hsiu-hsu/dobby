@@ -217,6 +217,9 @@ export function buildStatusCardBubble(params: StatusCardParams): messagingApi.Fl
     );
   }
 
+  const presentCount = String(presentSeasonMembers + filled);
+  const presentDetail = ` 人（季租 ${presentSeasonMembers}・零打 ${filled}）`;
+
   // 只有一位請假人且 Notion 名字空白時，join 出來是空字串，Flex text 不能是空字串（LINE 會整則退回）
   const absenteeText = absenteeNames.length > 0 ? absenteeNames.map((n) => n || '（未命名）').join('、') : '無';
 
@@ -285,16 +288,19 @@ export function buildStatusCardBubble(params: StatusCardParams): messagingApi.Fl
                   aspectRatio: '1:1',
                   flex: 0,
                 },
-                { type: 'text', text: '本週出席', size: 'xs', weight: 'bold', color: SUB },
+                // 外層 box 是 flex: 0（依內容收縮），文字也要 flex: 0；預設 flex: 1 在手機版寬度會被算成 0，整段字不見。
+                { type: 'text', text: '本週出席', size: 'xs', weight: 'bold', color: SUB, flex: 0 },
               ],
             },
             {
+              // text 跟 span 內容相同：不支援 span 的 LINE 版本只看 text，沒帶就是空白（季公告卡同做法）。
               type: 'text',
+              text: presentCount + presentDetail,
               align: 'end',
               flex: 1,
               contents: [
-                { type: 'span', text: String(presentSeasonMembers + filled), size: 'lg', weight: 'bold', color: TXT },
-                { type: 'span', text: ` 人（季租 ${presentSeasonMembers}・零打 ${filled}）`, size: 'xs', color: SUB },
+                { type: 'span', text: presentCount, size: 'lg', weight: 'bold', color: TXT },
+                { type: 'span', text: presentDetail, size: 'xs', color: SUB },
               ],
             },
           ],

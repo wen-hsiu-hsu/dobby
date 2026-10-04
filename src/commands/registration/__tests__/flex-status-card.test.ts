@@ -228,6 +228,19 @@ describe('buildStatusCardBubble', () => {
       expect(spans[0]).toMatchObject({ type: 'span', text: '10' });
       expect(spans[1]).toMatchObject({ type: 'span', text: ' 人（季租 8・零打 2）' });
     });
+
+    it('text 屬性帶完整文字，不支援 span 的 LINE 版本才不會顯示空白', () => {
+      const bubble = buildStatusCardBubble(baseParams({ guests: ['A', 'B'], presentSeasonMembers: 8, newGuestCount: 0 }));
+      const presentRow = (bubble.body as any).contents[4];
+      expect(presentRow.contents[1].text).toBe('10 人（季租 8・零打 2）');
+    });
+
+    it('「本週出席」標籤在 flex: 0 的外層裡也要 flex: 0，否則手機版寬度變 0', () => {
+      const bubble = buildStatusCardBubble(baseParams());
+      const labelBox = (bubble.body as any).contents[4].contents[0];
+      expect(labelBox.flex).toBe(0);
+      expect(labelBox.contents[1]).toMatchObject({ type: 'text', text: '本週出席', flex: 0 });
+    });
   });
 
   describe('按鈕：message action 的精確文字', () => {
