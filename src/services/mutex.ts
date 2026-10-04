@@ -1,10 +1,9 @@
 import { logger } from '../utils/logger.js';
 
 const queues = new Map<string, Promise<unknown>>();
-const pending = new Map<string, number>();
 // Tasks whose fn() has not truly settled yet (queued or running), counted per key.
-// Unlike `pending`, this only drops when `tail` completes, so it still counts a task
-// whose caller already timed out — which is exactly when `queuedAhead` matters most.
+// Only drops when `tail` completes, not when the caller stops waiting, so it still counts
+// a task whose caller already timed out — which is exactly when `queuedAhead` matters most.
 // Observability only: nothing but the log lines reads it.
 const inFlight = new Map<string, number>();
 const TIMEOUT_MS = 10_000;
@@ -45,8 +44,6 @@ export class MutexTimeoutError extends Error {
  * `logSummary`), not when the caller stops waiting.
  */
 export async function withMutex<T>(key: string, fn: () => Promise<T>): Promise<T> {
-  pending.set(key, (pending.get(key) ?? 0) + 1);
-
   const calledAt = Date.now();
   const queuedAhead = inFlight.get(key) ?? 0;
   inFlight.set(key, queuedAhead + 1);
@@ -74,11 +71,11 @@ export async function withMutex<T>(key: string, fn: () => Promise<T>): Promise<T
   );
   queues.set(key, tail);
 
-  // Cleanup of this queues entry must be tied to tail (true completion) only, never
-  // to the pending count — pending can hit zero early because a caller timed out. If
-  // we cleared the entry then, a brand-new call would find queues.get(key) undefined
-  // and skip past the still-running old settle, reintroducing the race we're fixing,
-  // just deferred to a later trigger.
+  // Cleanup of this queues entry must be tied to tail (true completion) only, never to
+  // the caller giving up — a caller can time out while fn() is still running. If we
+  // cleared the entry then, a brand-new call would find queues.get(key) undefined and
+  // skip past the still-running old settle, reintroducing the race we're fixing, just
+  // deferred to a later trigger.
   // The summary hangs off tail for the same reason: after a caller timeout, fn() is
   // still running, so logging from the caller's `finally` would under-report heldMs.
   void tail.then(() => {
@@ -100,16 +97,7 @@ export async function withMutex<T>(key: string, fn: () => Promise<T>): Promise<T
     });
   });
 
-  try {
-    return await raceAgainstTimeout(key, settle, queuedAhead, timeoutState);
-  } finally {
-    const remaining = (pending.get(key) ?? 1) - 1;
-    if (remaining <= 0) {
-      pending.delete(key);
-    } else {
-      pending.set(key, remaining);
-    }
-  }
+  return raceAgainstTimeout(key, settle, queuedAhead, timeoutState);
 }
 
 interface MutexSummary {
@@ -155,11 +143,3 @@ function raceAgainstTimeout<T>(
   return Promise.race([settle, timeout]).finally(() => clearTimeout(timer));
 }
 
-/**
- * Whether a caller is still waiting on `key` — not whether a task is still running: a task
- * whose caller timed out keeps writing in the background but no longer counts. So this
- * can't tell you a snapshot read earlier is still fresh (see ADR 0017).
- */
-export function isLocked(key: string): boolean {
-  return (pending.get(key) ?? 0) > 0;
-}

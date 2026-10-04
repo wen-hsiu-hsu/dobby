@@ -7,9 +7,9 @@
 
 **為什麼不能沿用快照**：快照是進鎖之前讀的。同一人的另一次 `trackUser`／`trackJoinedMember` 可能在這之間寫入 groups／multiChats／message_counts。拿快照算更新，會把那次寫入蓋掉：`message_counts` 寫的是「快照的數字＋1」這種絕對值（Notion API 沒有原子加一），groups／multiChats 是把「快照的陣列＋這次的 ID」整包寫回。後果是發言數少算 1，或在兩個新群組幾乎同時發言時弄丟一個群組 ID。
 
-**不要做的「最佳化」：用 `isLocked(key)` 判斷「沒有別人在跑就信任快照」。** 2026-10-04 以前就是這樣寫的（`trustKnownUser`），但它擋不住兩種情況，`services/__tests__/user-management.test.ts` 的 `trackUser concurrency` 各有一個測試重現：
+**不要做的「最佳化」：判斷「沒有別人在跑就信任快照」。** 2026-10-04 以前就是這樣寫的（`trustKnownUser`，用 mutex 的 `isLocked(key)` 判斷；`isLocked` 之後已刪除，見 [ADR 0002](0002-mutex-timeout-does-not-cancel-task.md)），但它擋不住兩種情況，`services/__tests__/user-management.test.ts` 的 `trackUser concurrency` 各有一個測試重現：
 
-1. **前一次呼叫逾時、但背景還在寫。** `isLocked()` 讀的是 `pending`，也就是「還有沒有呼叫端在等」。呼叫端 10 秒逾時放棄後 `pending` 就歸零，但 `fn()` 還在背景持鎖寫入（[ADR 0002](0002-mutex-timeout-does-not-cancel-task.md)）。
+1. **前一次呼叫逾時、但背景還在寫。** 當時的 `isLocked()` 讀的是 `pending`，也就是「還有沒有呼叫端在等」。呼叫端 10 秒逾時放棄後 `pending` 就會歸零，但 `fn()` 還在背景持鎖寫入（[ADR 0002](0002-mutex-timeout-does-not-cancel-task.md)）。
 2. **快照在前一次寫入完成前讀取，但檢查 `isLocked` 時前一次已經結束。** 檢查點是呼叫 `trackUser` 那一刻，不是讀快照那一刻。同一人快速連發兩則訊息時，第二則的 `findByUserId` 會和第一則的寫入重疊，不需要逾時。
 
 改讀 `inFlight`（只在 `fn()` 真正結束時才減一）只修得到第 1 種。要修第 2 種，得在讀快照之前記下「這個 key 已完成幾次」再傳給 `trackUser` 比對：要改函式簽名，`message-handler` 要知道鎖的 key 格式，計數的清理方式也有陷阱。比起來，每則群組訊息多一次 Notion 讀取（fire-and-forget，使用者感覺不到；本機 log 2026-09-27～10-04 平均每天約 15 則群組訊息）便宜得多。

@@ -8,7 +8,9 @@
 
 實作上把兩件事拆開：`settle`（真正執行 `fn()` 的 promise，只依賴「上一個 `settle` 真的完成」，永遠不被逾時打斷，佇列鏈永遠掛在它上面）跟呼叫端拿到的 promise（`Promise.race([settle, timeout])` 的結果）。**`queues` 這個 Map 的清理邏輯必須綁在 `settle` 真正完成上，不能綁在「還有幾個呼叫者在等」的計數上**——後者會因為呼叫者逾時而提前歸零，若這時把 `queues` 的 entry 清掉，下一個全新呼叫會讀到「沒有人在排隊」，跳過還在背景跑的舊任務直接搶跑，重新引入本來要防的 race，只是延後觸發、更難重現。
 
-**`Mutex task finished` 摘要 log 掛在 `tail` 完成處，不掛在呼叫端的 `finally`**：理由跟 `queues` 清理一樣。逾時後呼叫端的 `finally` 早就跑完，但 `fn()` 還在背景持有鎖，在 `finally` 記會把 `heldMs` 量短、`callerTimedOut` 的案例正好是最需要準確數字的時候。同理，`queuedAhead` 不能讀 `pending`（呼叫端逾時就減一，會漏算還在背景跑的任務），另外用一個只在 `tail` 完成時才減一的計數（`inFlight`）；`pending` 減一的時機沒有跟著改，`isLocked()` 回報的仍是「還有沒有呼叫端在等」。也因為這個語意，`isLocked()` 不能拿來判斷「背景還有沒有任務在寫」：`trackUser` 以前用它決定要不要信任呼叫端的 USERS 快照，在逾時情境下會信任過時的快照，2026-10-04 改成鎖內一律重讀（[ADR 0017](0017-track-user-always-rereads-inside-lock.md)），目前正式程式沒有地方呼叫 `isLocked()`。摘要在 `void tail.then(...)` 裡寫出時，AsyncLocalStorage 保留的是**註冊 `.then` 時**（也就是呼叫 `withMutex` 的那個請求）的 context，所以 reqId 仍是原本事件的，即使 `fn()` 是被別的請求的程式碼觸發完成（`mutex.test.ts` 有測）。
+**`Mutex task finished` 摘要 log 掛在 `tail` 完成處，不掛在呼叫端的 `finally`**：理由跟 `queues` 清理一樣。逾時後呼叫端的 `finally` 早就跑完，但 `fn()` 還在背景持有鎖，在 `finally` 記會把 `heldMs` 量短、`callerTimedOut` 的案例正好是最需要準確數字的時候。同理，`queuedAhead` 用的計數（`inFlight`）只在 `tail` 完成時才減一，不在呼叫端的 `finally`，否則會漏算呼叫端已逾時、但還在背景跑的任務。摘要在 `void tail.then(...)` 裡寫出時，AsyncLocalStorage 保留的是**註冊 `.then` 時**（也就是呼叫 `withMutex` 的那個請求）的 context，所以 reqId 仍是原本事件的，即使 `fn()` 是被別的請求的程式碼觸發完成（`mutex.test.ts` 有測）。
+
+**沒有「這把鎖現在有沒有人在用」的查詢函式，也不要加回來。** 以前有一個 `isLocked()`，讀的是另一個在呼叫端 `finally` 減一的計數（`pending`），也就是「還有沒有呼叫端在等」，不是「背景還有沒有任務在寫」。`trackUser` 曾用它決定要不要信任呼叫端的 USERS 快照，在逾時情境下就信任了過時的快照。2026-10-04 `trackUser` 改成鎖內一律重讀（[ADR 0017](0017-track-user-always-rereads-inside-lock.md)）之後，`isLocked()` 和 `pending` 已經沒有正式程式在用，就一起刪掉了，避免下一個人再拿它判斷資料是否新鮮。需要「拿到最新資料」時，在鎖內重讀。
 
 **為什麼不讓逾時真的取消 `fn()`**：Notion 沒有提供半途中止一個已送出的 PATCH 請求的機制，「取消」頂多是「呼叫端不再等待這個 Promise 的結果」，底層的 HTTP 請求跟 Notion 端的資料寫入已經送出去了，無法真的撤回。與其假裝取消、卻讓底層仍在寫入的資料跟後面排隊的操作互相覆蓋，不如老實承認「逾時只是呼叫端放棄等待」，並確保佇列的正確性建立在「真正完成」而非「呼叫端還在不在乎」之上。
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { withMutex, isLocked, MutexTimeoutError } from '../mutex.js';
+import { withMutex, MutexTimeoutError } from '../mutex.js';
 import { logger } from '../../utils/logger.js';
 import { runWithContext, getReqId } from '../../utils/request-context.js';
 
@@ -15,7 +15,7 @@ describe('mutex', () => {
 
   it('releases lock after fn completes', async () => {
     await withMutex('key2', async () => 'x');
-    expect(isLocked('key2')).toBe(false);
+    await expect(withMutex('key2', async () => 'y')).resolves.toBe('y');
   });
 
   it('queues a second call for the same key instead of rejecting, running it after the first finishes', async () => {
@@ -34,13 +34,14 @@ describe('mutex', () => {
       order.push('second');
     });
 
-    expect(isLocked('key3')).toBe(true);
+    // Let any (wrongly) unqueued second task run before checking it hasn't.
+    await new Promise((r) => setImmediate(r));
+    expect(order).toEqual([]);
     resolveFirst();
     await first;
     await second;
 
     expect(order).toEqual(['first', 'second']);
-    expect(isLocked('key3')).toBe(false);
   });
 
   it('releases lock on error in fn, without blocking later queued calls', async () => {
@@ -51,7 +52,6 @@ describe('mutex', () => {
     // A later call for the same key should still run normally.
     const result = await withMutex('key4', async () => 'ok');
     expect(result).toBe('ok');
-    expect(isLocked('key4')).toBe(false);
   });
 
   it('does not start the next queued task until the timed-out task truly finishes running', async () => {
@@ -78,14 +78,10 @@ describe('mutex', () => {
       return 'after-timeout';
     });
 
-    expect(isLocked('key5')).toBe(true);
     await vi.advanceTimersByTimeAsync(10_000 - 100);
     await stuckAssertion;
     await stuckTypeAssertion;
 
-    // The first caller has given up, but `next` is still queued/pending, so the key
-    // is still considered locked from a caller's perspective.
-    expect(isLocked('key5')).toBe(true);
     // Crucially: the second task must NOT have started yet — it has to wait for the
     // first task's real fn() to actually finish, not just for its caller to time out.
     expect(order).toEqual(['first-start']);
@@ -95,7 +91,6 @@ describe('mutex', () => {
 
     await expect(next).resolves.toBe('after-timeout');
     expect(order).toEqual(['first-start', 'second-start']);
-    expect(isLocked('key5')).toBe(false);
 
     vi.useRealTimers();
   });
@@ -189,16 +184,13 @@ describe('mutex', () => {
 
     await b;
     expect(order).toEqual(['b']);
-    expect(isLocked('keyB')).toBe(false);
-    expect(isLocked('keyA')).toBe(true);
 
     resolveA();
     await a;
     expect(order).toEqual(['b', 'a']);
-    expect(isLocked('keyA')).toBe(false);
   });
 
-  it('does not let a fresh call jump ahead of a still-running timed-out task, even after pending drops to zero', async () => {
+  it('does not let a fresh call jump ahead of a still-running timed-out task, even when no caller is waiting any more', async () => {
     vi.useFakeTimers();
     const order: string[] = [];
     let resolveStuck!: () => void;
@@ -209,13 +201,11 @@ describe('mutex', () => {
     await vi.advanceTimersByTimeAsync(10_000);
     await aAssertion;
 
-    // Nothing else is queued at this point, so pending truly drops to zero.
-    expect(isLocked('key8')).toBe(false);
-
-    // A brand-new call arrives after a's caller already gave up, but before a's real
-    // fn() has resolved. This is the exact scenario the queues-cleanup-must-follow-tail
-    // fix guards against: cleaning up the queue entry when pending hits zero (instead
-    // of when the background task truly settles) would let this call skip the line.
+    // A brand-new call arrives after a's caller already gave up (nothing else is queued,
+    // so no caller is waiting), but before a's real fn() has resolved. This is the exact
+    // scenario the queues-cleanup-must-follow-tail fix guards against: cleaning up the
+    // queue entry when the caller gives up (instead of when the background task truly
+    // settles) would let this call skip the line.
     const c = withMutex('key8', async () => {
       order.push('c-start');
       return 'c-result';
@@ -229,26 +219,6 @@ describe('mutex', () => {
     await expect(c).resolves.toBe('c-result');
     expect(order).toEqual(['c-start']);
 
-    vi.useRealTimers();
-  });
-
-  it('isLocked reflects whether a caller is still waiting for a response, not whether a background task is still running', async () => {
-    vi.useFakeTimers();
-    let resolveStuck!: () => void;
-
-    const a = withMutex('key9', () => new Promise<void>((r) => { resolveStuck = r; }));
-    expect(isLocked('key9')).toBe(true);
-
-    const aAssertion = expect(a).rejects.toThrow('Mutex timeout: key9');
-    await vi.advanceTimersByTimeAsync(10_000);
-    await aAssertion;
-
-    // The caller gave up, so isLocked is false even though the background task
-    // (a's real fn) is still running.
-    expect(isLocked('key9')).toBe(false);
-
-    resolveStuck();
-    await vi.advanceTimersByTimeAsync(0);
     vi.useRealTimers();
   });
 
@@ -345,22 +315,19 @@ describe('mutex', () => {
       ]);
     });
 
-    it('counts a timed-out task that is still running in queuedAhead, without changing isLocked', async () => {
+    it('counts a timed-out task that is still running in queuedAhead', async () => {
       let resolveStuck!: () => void;
       const a = withMutex('2026-10-08', () => new Promise<void>((r) => { resolveStuck = r; }));
       const aAssertion = expect(a).rejects.toBeInstanceOf(MutexTimeoutError);
       await vi.advanceTimersByTimeAsync(10_000);
       await aAssertion;
 
-      // pending is back to zero, so isLocked keeps its caller-waiting semantics...
-      expect(isLocked('2026-10-08')).toBe(false);
-
       const c = withMutex('2026-10-08', async () => 'c');
       await vi.advanceTimersByTimeAsync(1_000);
       resolveStuck();
       await expect(c).resolves.toBe('c');
 
-      // ...but the new call still sees the background task ahead of it.
+      // a's caller gave up, but the new call still sees the background task ahead of it.
       const [, cSummary] = summaryCalls('info');
       expect(cSummary).toEqual({
         key: '2026-10-08', queuedAhead: 1, waitMs: 1_000, heldMs: 0, callerTimedOut: false, fnFailed: false,
