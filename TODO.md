@@ -75,7 +75,7 @@
 
 ## 效能觀察（從真實 `logs/` 分析發現，尚未處理）
 
-已移到 [`docs/performance-observations.md`](docs/performance-observations.md)（`findByPageIds` 逐筆查詢、回覆訊息在鎖內組、Notion 長尾造成連鎖逾時等）。要處理效能或改到 Notion 呼叫模式時再讀。
+已移到 [`docs/performance-observations.md`](docs/performance-observations.md)（回覆訊息在鎖內組、Notion 長尾造成連鎖逾時等）。要處理效能或改到 Notion 呼叫模式時再讀。
 
 ---
 

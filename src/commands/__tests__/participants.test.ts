@@ -54,8 +54,8 @@ describe('handleParticipants (@Dobby participants / people / 報名人)', () => 
     expect(heroTitleOf(bubble)).toEqual({ badgeColor: BADGE_COLORS.gray, title: '本季報名人', countLabel: '0 位' });
     expect(JSON.stringify(bubble.hero)).toContain(FLEX_ICONS.userXWhite);
     expect(bubble.body).toBeUndefined();
-    // 沒有成員時不查 People（findByPageIds 每頁一次 GET）
-    expect(vi.mocked(notionFetch.notionGet).mock.calls.some(([path]) => path.startsWith('/pages/'))).toBe(false);
+    // 沒有成員時不查 People
+    expect(vi.mocked(notionFetch.notionPost).mock.calls.some(([path]) => path.includes('test-db-people'))).toBe(false);
   });
 
   it('replies with member count and a numbered, newline-separated name list in the normal case', async () => {
@@ -71,6 +71,10 @@ describe('handleParticipants (@Dobby participants / people / 報名人)', () => 
     // 左上角是季度＋月份範圍；報名人卡沒有副標題、沒有按鈕（使用者定案）
     expect(JSON.stringify(bubble.hero)).toContain('2026 Q2（4~6月）');
     expect(JSON.stringify(bubble.body)).not.toContain('"action"');
+    // 一次反向 relation query 拿整份名單，不逐筆 GET 成員頁面
+    const peopleQueries = vi.mocked(notionFetch.notionPost).mock.calls.filter(([path]) => path.includes('test-db-people'));
+    expect(peopleQueries).toHaveLength(1);
+    expect(vi.mocked(notionFetch.notionGet).mock.calls.some(([path]) => /\/pages\/person-/.test(path))).toBe(false);
   });
 
   it('falls back to plain text when the member list is too long for one Flex bubble', async () => {
@@ -101,21 +105,13 @@ describe('handleParticipants (@Dobby participants / people / 報名人)', () => 
         })),
       },
     });
-    // findByPageIds 每頁之間 sleep 400ms，70 人要 28 秒；用假計時器快轉
-    vi.useFakeTimers({ toFake: ['setTimeout'] });
-    try {
-      const pending = bot.run('@Dobby 報名人', { userId: 'user-alice' });
-      await vi.runAllTimersAsync();
-      const messages = await pending;
+    const messages = await bot.run('@Dobby 報名人', { userId: 'user-alice' });
 
-      expect(messages).toHaveLength(1);
-      expect(messages[0]?.type).toBe('text');
-      const text = (messages[0] as { text: string }).text;
-      expect(text.startsWith('2026-Q2 報名人（70 位）：\n1. 成員1\n')).toBe(true);
-      expect(text.endsWith('70. 成員70')).toBe(true);
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.type).toBe('text');
+    const text = (messages[0] as { text: string }).text;
+    expect(text.startsWith('2026-Q2 報名人（70 位）：\n1. 成員1\n')).toBe(true);
+    expect(text.endsWith('70. 成員70')).toBe(true);
   });
 
   it('replies with a system error message instead of throwing when the repository call fails', async () => {

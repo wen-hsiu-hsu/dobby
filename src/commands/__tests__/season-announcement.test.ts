@@ -150,7 +150,7 @@ beforeEach(() => {
     return null;
   });
 
-  vi.mocked(calendarRepo.findByPageIds).mockResolvedValue([
+  vi.mocked(calendarRepo.findPlayDatesOfSeason).mockResolvedValue([
     { pageId: 'cal-1', date: '2026-04-04T20:00:00.000+08:00', absentees: [], guests: [], isPaused: false, courts: null },
   ]);
 
@@ -161,8 +161,12 @@ beforeEach(() => {
     // person-4 (refunded, previous-season-only) has no USERS record — must fall back to People List name.
   ]);
 
-  vi.mocked(peopleRepo.findByPageIds).mockImplementation(async (ids: string[]) =>
-    ids.map((id) => ({ pageId: id, name: id === 'person-4' ? '大衛' : `姓名-${id}`, hasPaid: true })),
+  vi.mocked(peopleRepo.findMembersOfSeasons).mockImplementation(async (seasons) =>
+    [...new Set(seasons.flatMap((s) => s.members))].map((id) => ({
+      pageId: id,
+      name: id === 'person-4' ? '大衛' : `姓名-${id}`,
+      hasPaid: true,
+    })),
   );
 });
 
@@ -199,6 +203,14 @@ function cardTitle(message: any): string {
 }
 
 describe('handleSeasonAnnouncement', () => {
+  it('loads members of the given and previous season in one call, and play dates of the given season only', async () => {
+    await handleSeasonAnnouncement('token', true, '2026Q2');
+
+    expect(peopleRepo.findMembersOfSeasons).toHaveBeenCalledTimes(1);
+    expect(peopleRepo.findMembersOfSeasons).toHaveBeenCalledWith([CURRENT_SEASON, PREVIOUS_SEASON]);
+    expect(calendarRepo.findPlayDatesOfSeason).toHaveBeenCalledWith(CURRENT_SEASON);
+  });
+
   it('rejects non-admins without touching Notion', async () => {
     await handleSeasonAnnouncement('token', false, '2026Q2');
 

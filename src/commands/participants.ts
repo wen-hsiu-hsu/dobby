@@ -15,7 +15,7 @@ export async function handleParticipants(replyToken: string): Promise<void> {
       await replyMessage(replyToken, [{ type: 'text', text: `找不到 ${seasonName} 季租資料` }]);
       return;
     }
-    const names = current.members.length === 0 ? [] : (await peopleRepo.findByPageIds(current.members)).map((p) => p.name);
+    const names = (await peopleRepo.findMembersOfSeasons([current])).map((p) => p.name);
     // 改 Flex 前的純文字內容：當 altText（通知、/logs 看到的），卡片太大時也直接改送這段
     const text =
       names.length === 0

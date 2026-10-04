@@ -9,9 +9,10 @@ import {
   setMultiSelect,
 } from './property-helpers.js';
 import { getFullRelation } from './paginated-relation.js';
+import { queryAlignedToIds } from './reverse-relation-query.js';
 import { withPurpose } from '../../utils/request-context.js';
 import { logger } from '../../utils/logger.js';
-import type { CalendarEvent } from '../../types/notion-models.js';
+import type { CalendarEvent, SeasonRecord } from '../../types/notion-models.js';
 import type { PageObjectResponse } from '@notionhq/client/build/src/api-endpoints.js';
 
 // 場地數只接受正整數；0／負數／小數視為未填（null），讓容量計算 fallback 到當季預設。
@@ -52,16 +53,22 @@ export async function findByDate(date: string): Promise<CalendarEvent | null> {
   });
 }
 
-export async function findByPageIds(pageIds: string[]): Promise<CalendarEvent[]> {
-  return withPurpose('依 page ID 查詢活動資料', async () => {
-    const events: CalendarEvent[] = [];
-    for (const [i, id] of pageIds.entries()) {
-      if (i > 0) await new Promise((r) => setTimeout(r, 400));
-      const page = await notionGet(`/pages/${id}`);
-      events.push(await pageToEvent(page as PageObjectResponse));
-    }
-    return events;
-  });
+/**
+ * 查一季的所有打球日（季租紀錄 `打球日`），用反向欄位 `季度` 一次 query 取回，輸出照 `playDatePageIds` 的順序。
+ * 只給公告列日期用：這裡是鎖外讀的，不能拿去算名額，名額一律在鎖內重讀（ADR 0001）。
+ */
+export async function findPlayDatesOfSeason(
+  season: Pick<SeasonRecord, 'pageId' | 'playDatePageIds'>,
+): Promise<CalendarEvent[]> {
+  return withPurpose('查詢本季所有打球日', async () =>
+    queryAlignedToIds({
+      databaseId: env.NOTION_DB_CALENDAR,
+      filter: { property: '季度', relation: { contains: season.pageId } },
+      ids: season.playDatePageIds,
+      toRecord: pageToEvent,
+      fetchOne: async (pageId) => pageToEvent(await notionGet(`/pages/${pageId}`) as PageObjectResponse),
+    }),
+  );
 }
 
 // updateAbsentees 是整包覆寫（非增量 patch），呼叫端必須確保傳入完整的 absentees 清單

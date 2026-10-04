@@ -38,7 +38,7 @@ const LINE_REPLY_MESSAGE_LIMIT = 5;
  * 依成員的人員清單 pageId 找出可 @ 的名字：優先用 USERS 的 Custom Name（LINE 顯示名稱），
  * 找不到（理論上不會發生，USERS 不會主動移除使用者）才退回人員清單的 Name 當作保底。
  */
-function buildMentionResolver(users: Awaited<ReturnType<typeof usersRepo.findAll>>, people: Awaited<ReturnType<typeof peopleRepo.findByPageIds>>) {
+function buildMentionResolver(users: Awaited<ReturnType<typeof usersRepo.findAll>>, people: Awaited<ReturnType<typeof peopleRepo.findMembersOfSeasons>>) {
   const customNameByPersonId = new Map<string, string>();
   for (const user of users) {
     if (user.registeredPersonPageId) customNameByPersonId.set(user.registeredPersonPageId, user.customName);
@@ -251,15 +251,13 @@ export async function handleSeasonAnnouncement(replyToken: string, isAdmin: bool
       return;
     }
 
-    const allMemberIds = [...new Set([...season.members, ...previousSeason.members])];
-
     const [templateBlocks, newsBlocks, paymentPage, users, playDates, people] = await Promise.all([
       announcementRepo.getBlocks(template.pageId),
       announcementRepo.getBlocks(news.pageId),
       loadPaymentPage(),
       usersRepo.findAll(),
-      calendarRepo.findByPageIds(season.playDatePageIds),
-      peopleRepo.findByPageIds(allMemberIds),
+      calendarRepo.findPlayDatesOfSeason(season),
+      peopleRepo.findMembersOfSeasons([season, previousSeason]),
     ]);
 
     const mentionFor = buildMentionResolver(users, people);
@@ -275,7 +273,7 @@ export async function handleSeasonAnnouncement(replyToken: string, isAdmin: bool
     const prevQuarter = getSeasonQuarter(previousSeasonName);
 
     // {NEW_SEASON_NEWS} 跟 @Dobby 公告同一份 NEWS_TEMPLATE，但代入的是指令指定的那一季。
-    // people 已經包含指定季所有成員，不用再查一次（findByPageIds 每筆間隔 400ms）。
+    // people 已經包含指定季所有成員，不用再查一次。
     const personById = new Map(people.map((p) => [p.pageId, p]));
     const seasonPeople = season.members.flatMap((id) => personById.get(id) ?? []);
     const paymentText = paymentPageText(paymentPage);

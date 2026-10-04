@@ -76,12 +76,12 @@ beforeEach(() => {
     totalPrice: 23400,
     playDatePageIds: ['cal-2', 'cal-1'],
   });
-  vi.mocked(peopleRepo.findByPageIds).mockResolvedValue([
+  vi.mocked(peopleRepo.findMembersOfSeasons).mockResolvedValue([
     { pageId: 'person-1', name: '許文修', hasPaid: true },
     { pageId: 'person-2', name: '陳玟育', hasPaid: true },
   ]);
   // Returned out of order on purpose — handler must sort by date before rendering.
-  vi.mocked(calendarRepo.findByPageIds).mockResolvedValue([
+  vi.mocked(calendarRepo.findPlayDatesOfSeason).mockResolvedValue([
     { pageId: 'cal-2', date: '2026-10-03T20:00:00.000+08:00', absentees: [], guests: [], isPaused: false, courts: null },
     { pageId: 'cal-1', date: '2026-09-26T20:00:00.000+08:00', absentees: [], guests: [], isPaused: false, courts: null },
   ]);
@@ -116,6 +116,14 @@ describe('handleNews', () => {
     await handleNews('token');
 
     expect(announcementRepo.findByName).toHaveBeenCalledWith('NEWS_TEMPLATE');
+  });
+
+  it('loads members and play dates of the current season with one query each, not per-page GETs', async () => {
+    await handleNews('token');
+
+    const season = await vi.mocked(seasonRepo.findByName).mock.results[0]!.value;
+    expect(peopleRepo.findMembersOfSeasons).toHaveBeenCalledWith([season]);
+    expect(calendarRepo.findPlayDatesOfSeason).toHaveBeenCalledWith(season);
   });
 
   it('substitutes all season/date placeholders with live data', async () => {

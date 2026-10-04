@@ -14,7 +14,7 @@
 
 **底部沒有操作按鈕，只有付款列的「複製」。** 卡片是要轉傳到群組的季度資訊，不是要大家操作的東西，所以不放公告卡那種「付款資訊／指令清單」按鈕。付款區塊（見下方）的「複製」是例外：Flex 卡片不能長按複製文字，帳號只能靠按鈕複製，理由跟付款卡相同（[ADR 0014](0014-payment-flex-card.md)）。clipboard action 要 LINE 14.0.0 以上，季公告卡會轉傳給全群組，碰到舊版 LINE 的機會比 `@Dobby 付款` 多，真機測試項目有列。
 
-**`{NEW_SEASON_NEWS}` 用指令指定的季，不用今天所在的季。** `@Dobby 公告` 一律用 `getCurrentSeasonName()`，但季公告通常在季末產生下一季的，例如 12 月下 `season 2027Q1`，用當季就會拿到 Q4 的人數和日期。所以 `news.ts` 抽出 `renderNews()`，季度由呼叫端傳入。季公告已經為了 mention 名單查過指定季和上一季所有成員的人員資料，`{LIST_ALL_PEOPLE}` 直接從裡面挑指定季的成員，不再查一次（`peopleRepo.findByPageIds()` 每筆間隔 400ms，十幾個人要多等好幾秒）。`NEWS_TEMPLATE` 的變數在 `renderNews()` 裡先代入完，結果再當成 `{NEW_SEASON_NEWS}` 的值；`applyPlaceholders()` 是單次 `replace`，代入的值不會再被掃一次，所以兩套變數不會互相干擾。
+**`{NEW_SEASON_NEWS}` 用指令指定的季，不用今天所在的季。** `@Dobby 公告` 一律用 `getCurrentSeasonName()`，但季公告通常在季末產生下一季的，例如 12 月下 `season 2027Q1`，用當季就會拿到 Q4 的人數和日期。所以 `news.ts` 抽出 `renderNews()`，季度由呼叫端傳入。季公告已經為了 mention 名單查過指定季和上一季所有成員的人員資料，`{LIST_ALL_PEOPLE}` 直接從裡面挑指定季的成員，不再查一次（兩季成員本來就由 `peopleRepo.findMembersOfSeasons()` 用一次 query 一起查回）。`NEWS_TEMPLATE` 的變數在 `renderNews()` 裡先代入完，結果再當成 `{NEW_SEASON_NEWS}` 的值；`applyPlaceholders()` 是單次 `replace`，代入的值不會再被掃一次，所以兩套變數不會互相干擾。
 
 **金額欄位缺值時報錯，不代入 0。** `{REAL_PRICE}`（指定季的 `每人實際收費`）、`{REFUND_PRICE}`、`{BALANCE}`（上一季的 `季打退費`、`結餘`）都是管理員手填的，上一季的兩欄要等那一季結束才會填。退費當 0 算，續打費會變成全額，仍是一個看起來合理的數字，管理員轉傳出去才會被發現，所以任一欄沒填就回一則訊息列出缺哪幾欄，不產生公告。Notion 欄位被改名或改成非 number 型別時，`getNumber()` 一樣回 null，bot 也會說「還沒填」；看到這句但 Notion 上明明有填，先檢查欄位名稱和型別。`@Dobby 公告` 的 `{PRICE_PER_PERSON_FOR_SEASON}`（也改讀 `每人實際收費`）缺值時則代入提示文字：那是給全體成員看的常用指令，一個欄位沒填不該讓整則公告失敗，做法跟 `{PAYMENT_V2}` 讀不到時一樣。
 

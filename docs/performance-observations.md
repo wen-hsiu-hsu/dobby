@@ -10,42 +10,9 @@
 >
 > 慢的原因是呼叫模式（逐筆查、人為延遲），不是 Notion 本身或 rate limit。以下都**不是 bug**：結果正確，只是慢，不是急件，依效益排序。做完任何一項後，都要在 `/logs` 時間軸比對同類指令前後的 Notion 呼叫數與總耗時。
 
-- [ ] **`findByPageIds` 逐筆 GET，每筆之間 sleep 400ms，是 `participants`／`news` 慢的主因。** 兩個 repository 都有這個函式：
-  - `src/services/notion/people-repository.ts:17-27`（sleep 在第 21 行）
-  - `src/services/notion/calendar-repository.ts:55-65`（sleep 在第 59 行）
-
-  sleep 是 commit `8a4ed71`（2026-09-18）加的。當時原本用 `Promise.all` 完全平行，怕瞬間超過約 3 req/s，就比照 `display-name-update.ts` 改成依序＋400ms。commit 沒提到真的遇過 429，是預防性的節流。
-
-  呼叫端：
-  - `participants.ts:18`：推估 1＋N 次呼叫（N≈11 位季租成員），約 7 秒。log 裡沒有這個指令，數字是用單次 GET 約 280ms＋sleep 400ms 推算的。
-  - `news.ts:179-180`：實測 2 次，都是 29 次呼叫（11 次姓名 GET＋13 次活動 GET＋5 次其他），耗時 11.3 和 11.7 秒。兩組 GET 各自拖了 7～9.5 秒，其中 sleep 約佔各組的 55～60%，約佔整個指令的 40%。兩組用 `Promise.all`（`news.ts:177-182`）同時跑，平均合計約 2.5～3 req/s，任 1 秒窗口瞬間最多 4 個 GET，靠 Notion 容許的短暫突發撐住，沒有出現 429。以上是 2026-10-01 前的實測；之後同一個 `Promise.all` 多跑 `loadPaymentText()`（讀 `PAYMENT_V2`：1 次 query＋2 次 blocks GET，集中在開頭約 0.5 秒），開頭的瞬間請求數會再多一點。它失敗時只降級付款那段，不會讓整則公告失敗。
-  - `season-announcement.ts:261-262`：管理員專用（產生新一季公告），頻率很低，優先度比 news／participants 更低。2026-10-01 起同一個 `Promise.all` 多讀 `NEWS_TEMPLATE` 的區塊和 `loadPaymentPage()`（讀一次 `PAYMENT_V2`，純文字和卡片的付款區塊共用），開頭同時發出的請求又多了幾個；`{NEW_SEASON_NEWS}` 的報名名單沿用這裡查到的人員資料，沒有再查一次。
-  - `weekly-status-message.ts:22`
-  - `registration/event-status-message.ts:30`：報名／請假的回覆訊息查請假人姓名，在鎖內執行，見下面「回覆訊息在鎖內組」那一項。只有請假人數 ≥2 時才會觸發 sleep。
-  - `registration/target-resolver.ts:38,47`：每次只傳 1 筆 ID，sleep 永遠不會觸發，**不受這一項影響**。
-
-  **只拿掉 sleep 或改有限並行不能解決問題。** 現在平均已經頂在 3 req/s 上限，拿掉 sleep 就會超出，變成靠 Notion 容忍短時間超量加上 429 重試兜底，違反 `CLAUDE.md` 的節流慣例。news、season-announcement 還會有 2～3 組同時跑。真正能加速的只有減少呼叫次數。Notion query 也沒辦法依 page ID 篩選（SDK 的 `PropertyFilter` 只有 relation 的 `contains`），所以不能把 N 次 GET 合成一次「ID in [...]」查詢。
-
-  如果要處理（範圍只限「整季名單」的呼叫端：news、participants、season-announcement）：
-  - **首選：用反向 relation 直接查詢，不用快取。**
-    - 季租成員：query People DB，篩選 `報名季度` contains `season.pageId`。
-    - 打球日：query Calendar DB，篩選 `季度` contains `season.pageId`。
-    - news 的 24 次 GET 會變成 2 次 query，預估從約 11.5 秒降到 2～3.5 秒。participants 從 1＋11 次降到 2 次。
-    - schema 顯示 `報名人`（季租紀錄）↔`報名季度`（People）、`打球日`（季租紀錄）↔`季度`（行事曆）各自是兩個 DB 之間唯一的 `dual_property`，很可能就是配對的兩端。但 `docs/notion/schemas/` 沒記錄配對的屬性名，實作前要先用 Notion API 讀 database schema 的 `synced_property_name` 確認。
-    - season-announcement：打球日只查本季（第 90 行），People 要查本季＋上一季的成員（第 91 行，`allMemberIds`），要用 `or` 篩兩個季度，或查兩次。另外有更便宜的做法：這裡的 `people` 只拿來當 `buildMentionResolver` 的保底姓名，第 22 行註解寫 USERS 找不到的情況「理論上不會發生」，所以也可以改成用到時才查，或直接拿掉保底。
-    - 成員超過 100 位要處理分頁，寫法參考 `users-repository.ts:67-84` 的 `findAll`。
-  - **備案：People DB 全表建 `pageId → name` 的 in-memory Map（TTL 約 10 分鐘）。** 對整季名單的效益跟首選差不多，但多了下面的快取陷阱。它的範圍比首選大：`請假人` 是單向 relation，沒有反向欄位可篩，只有快取能加速鎖內的請假人姓名查詢（`event-status-message.ts:30`），等於順便處理下面「回覆訊息在鎖內組」那一項。只有在想一起處理那一項時才值得考慮。新 LINE 使用者自動建立的 People 頁面（見 `docs/notion/databases.md` 第 49 行）不在快取裡，要走 miss 路徑逐筆 GET。
-
-  已知陷阱：
-  - **query 回來的順序跟 relation 順序不同。** participants 的編號、news 的名單順序都依賴 `season.members` 的順序，要照它重排。日期那邊 `groupDatesByMonth` 本來就會排序，不受影響。
-  - **打球日的查詢結果不能拿去算名額。** Calendar query 回來的是完整 `CalendarEvent`，內含 `guests`／`absentees`。在鎖外查到的這份只能用在公告列日期，算名額一律照 [ADR 0001](adr/0001-explicit-fresh-calendar-event-wrapper.md) 在鎖內重讀。
-  - **若走快取備案，不要快取整個 `PersonRecord`。** 它帶有 `hasPaid`（`結清` formula，`people-repository.ts:13`）。目前全 repo 沒有其他地方讀 `hasPaid`（`owe` 走 `findAllUnpaid`），所以現在不會出錯。風險在之後：有人從快取讀 `hasPaid`，會拿到最多 TTL 前的繳費狀態，而且不會有任何錯誤訊息。快取只存 name，或在型別上分開。
-  - **若走快取備案，快取是 module 層級狀態，測試之間會殘留。** 要提供 reset 函式，在測試檔的 `beforeEach` 呼叫。**不要**在 `src/test-utils/setup.ts` 用靜態 import 引入：那支檔案只負責在任何 module 載入前設定 env var，靜態 import 會被 hoist 到 env 設定之前，讓 `env.ts` 驗證失敗，也可能讓測試檔對 `notion-fetch.js` 的 `vi.mock` 失效。
-  - **測試 fixture：** `create-test-bot.ts:74-86` 的 `routePost` 只依 DB ID 回 fixture、不看 filter，改用 DB query 後現有 fixture 大多可以直接用。另外 `routeGet` 的 `/pages/:id`（第 101-113 行）先在 users fixture、再在 people fixture 找同 id 的頁面，都找不到就回 people 第一筆，所以現在測試裡 calendar 的 `findByPageIds` 拿到的其實是 people 頁面。改成 calendar query 後反而更正確，但既有斷言可能要跟著調整。
-
-- [ ] **報名／請假的回覆訊息在鎖內組，拉長鎖持有時間。** `buildEventStatusMessage` 在請假人數 >0 時會呼叫 `peopleRepo.findByPageIds` 查請假人姓名（`event-status-message.ts:29-31`）。它在 `withFreshCalendarEvent` 的 mutation 裡被呼叫，後面的 `replyMessage` 也在 mutation 裡，所以鎖要等 LINE API 回應後才釋放。共有 5 處：
-  - `registration-handler.ts:102-110`（名額不足）、`142-150`（成功）
-  - `leave-handler.ts:104-112`（已請假，no-op）、`119-127`（未請假，no-op）、`153-161`（成功）
+- [ ] **報名／請假的回覆訊息在鎖內組，拉長鎖持有時間。** `buildEventStatusReply` 在請假人數 >0 時會呼叫 `peopleRepo.findByPageIds` 查請假人姓名（`event-status-message.ts:30-32`）。它在 `withFreshCalendarEvent` 的 mutation 裡被呼叫，後面的 `replyMessage` 也在 mutation 裡，所以鎖要等 LINE API 回應後才釋放。共有 5 處：
+  - `registration-handler.ts:115-128`（名額不足）、`176-190`（成功）
+  - `leave-handler.ts:117-130`（已請假，no-op）、`137-150`（未請假，no-op）、`175-188`（成功）
 
   實測鎖持有時間：中位數約 1.43 秒（0.85～4.44 秒，n=34）。n=34 是所有進到鎖內的報名／請假請求，包含名額不足和 no-op 分支，所以比成功寫入的次數（`+N`／`-N` 26 次＋請假／銷假 4 次）多。這是 mutex 摘要上線前量的：當時 log 沒有 acquire／release 事件，是用鎖內第一個 calendar query 的開始時間，算到 `LINE reply sent` 推出來的。2026-09-28 起可以直接看 `Mutex task finished` 的 `heldMs`／`waitMs`／`queuedAhead`（見 `docs/registration.md`「從 log 看鎖競爭」），做完這一項後用它比對效果。4.4 秒那筆是 calendar PATCH 長尾，跟組訊息無關。鎖內姓名查詢中位數約 0.28 秒，LINE reply 約 0.2 秒。
 
@@ -55,8 +22,8 @@
 
   如果要處理：可以讓 mutation 回傳組訊息需要的資料，改到鎖外組訊息並 `replyMessage`。要改 `with-fresh-calendar-event.ts:19` 的 mutation 簽名，它現在是 `(fresh: T) => Promise<void>`。
   - 移到鎖外不會造成資料不一致：訊息內容仍然用 mutation 在鎖內算出的快照（`updatedGuests`、`newAbsentees`、`totalSlots`），跟現在一樣。差別只有姓名查詢晚一點（姓名不會變），以及 B 的回覆可能比 A 先到，都無害。
-  - 如果做了上面 `findByPageIds` 那一項的快取備案，請假人姓名會走快取，鎖內只剩 LINE reply 約 0.2 秒，這一項就不值得做了。那一項的首選做法（反向 relation 查詢）不碰鎖內的查詢，做完後這一項的效益不變。
-  - 另有一個可以單獨做的小改善：操作對象本人在請假名單裡時（請假成功、「已請假，無需重複操作」，以及已請假的季租成員自己 `+N`），他的 People 頁會 GET 兩次，一次在鎖外的 `resolveTarget`（`target-resolver.ts:38`），一次在鎖內的 `buildEventStatusMessage`（`event-status-message.ts:30`）。不是 bug，姓名相同，只是鎖內多一次約 0.3 秒的 GET；請假成功時本人排在 `newAbsentees` 最後（`leave-handler.ts:133`），前面有人時還要多等一次 400ms sleep。如果要處理：可以讓 `buildEventStatusMessage` 多收一個「已知 pageId → 姓名」參數（傳 `resolved.personPageId` → `resolved.displayName`），已知的就跳過 GET，但輸出順序要維持 `absenteePageIds` 的順序。pageId 出現在請假名單就一定有 People 頁，所以這時 `displayName` 一定是 People 的 `Name`，不會拿到 LINE 名稱。若做了上面的鎖外組訊息，或 `findByPageIds` 那一項的快取備案，這個重複的影響會變小或消失。
+  - 另一個不用改 mutation 簽名的做法：`請假人` 是雙向 relation，對應 People 的 `📅 行事曆`（2026-10-04 確認）。鎖內查姓名可以改成 query People DB，篩選 `📅 行事曆` contains 活動 pageId，N 次 GET（含 N−1 次 400ms sleep）變成 1 次 query（實測約 0.5 秒）。整季名單已經用同一招改好了，`src/services/notion/reverse-relation-query.ts` 的 `queryAlignedToIds` 已經處理照 ID 重排、丟掉多餘的、逐筆補查漏掉的，可以直接沿用。`weekly-status-message.ts:67` 的週報請假人姓名也還是逐筆 GET，它不在鎖內，只是推播慢幾秒，可以順便換。同一天實測 4 場有請假的活動（1～3 人），反向查詢的集合都跟 `請假人` 相同，順序有 3 場不同，所以要照 `absenteePageIds` 重排。只有 1 位請假人時是 1 次 GET 換 1 次 query，沒有好處，只在 ≥2 人時才省時間。陷阱：請假／銷假成功的路徑是先 PATCH `請假人`（`leave-handler.ts:158`），再用 `newAbsentees` 組訊息（`leave-handler.ts:175-188`）。剛寫完就 query，Notion 的 query 結果可能還沒反映這次寫入（這點沒有實測），所以不能只信 query 結果：`absenteePageIds` 裡有、query 沒回傳的 ID，要逐筆 GET 補上；query 多回傳的 ID（剛銷假的人）要丟掉。報名路徑和兩種 no-op 用的是鎖內讀到的 `freshEvent.absentees`，沒有剛寫入的問題。
+  - 另有一個可以單獨做的小改善：操作對象本人在請假名單裡時（請假成功、「已請假，無需重複操作」，以及已請假的季租成員自己 `+N`），他的 People 頁會 GET 兩次，一次在鎖外的 `resolveTarget`（`target-resolver.ts:38`），一次在鎖內的 `buildEventStatusReply`（`event-status-message.ts:32`）。不是 bug，姓名相同，只是鎖內多一次約 0.3 秒的 GET；請假成功時本人排在 `newAbsentees` 最後（`leave-handler.ts:155`），前面有人時還要多等一次 400ms sleep。如果要處理：可以讓 `buildEventStatusReply` 多收一個「已知 pageId → 姓名」參數（傳 `resolved.personPageId` → `resolved.displayName`），已知的就跳過 GET，但輸出順序要維持 `absenteePageIds` 的順序。pageId 出現在請假名單就一定有 People 頁，所以這時 `displayName` 一定是 People 的 `Name`，不會拿到 LINE 名稱。若做了上面的鎖外組訊息，或改用反向查詢，這個重複的影響會變小或消失。
 
 - [ ] **一次 Notion 寫入卡 43 秒，同一天的報名／請假全部連鎖逾時；另外發現進鎖順序不等於送出順序。**（2026-10-04 測試環境實測，本機 `logs/app.2026-10-04.1.log`）
 

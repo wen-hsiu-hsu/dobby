@@ -46,9 +46,13 @@ Dobby 使用 5 個 Notion 資料庫。欄位的詳細型別定義請參考 `sche
 | 欄位 | 用途 |
 |------|------|
 | `Name` | 球員姓名（主鍵，用於報名顯示） |
+| `報名季度` | Relation，季租承租紀錄 `報名人` 的反向欄位。`findMembersOfSeasons()` 用它一次查回整季成員（見下方） |
+| `📅 行事曆` | Relation，行事曆 `請假人` 的反向欄位。程式目前沒讀，可以拿來一次查回請假人姓名，待辦見 [performance-observations.md](../performance-observations.md) |
 | 繳費相關 | 追蹤費用繳納狀態 |
 
 USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員名單的對應。新的 LINE 使用者會自動在這裡建立一頁，只填 `Name`（規則見上方 USERS 小節）；這些頁面沒有報名任何季度，所以不影響季租名額，`結清` 也是 true，不會出現在 `owe` 欠費名單。`Name` 建立後不會跟著 LINE 改名同步，由管理員維護（報名顯示優先用這個名字，見 `docs/registration.md`）。
+
+**整季名單用反向 relation 一次查回，不逐筆 GET。** Notion query 沒辦法依 page ID 篩選，所以 `participants`／`news`／`season` 要拿整季成員或打球日時，是從另一端反查：People 篩 `報名季度` contains 季度（`people-repository.ts` 的 `findMembersOfSeasons()`），行事曆篩 `季度` contains 季度（`calendar-repository.ts` 的 `findPlayDatesOfSeason()`）。名單以季租紀錄的 `報名人`／`打球日` 為準，query 結果只是批次取回的手段：照 relation 順序重排、多的丟掉、漏的逐筆 GET 補上並記 warn（`reverse-relation-query.ts`）。⚠️ 這依賴兩組 relation 維持雙向配對。若在 Notion 把 `報名人`／`打球日` 改成單向，或改名、刪掉反向欄位 `報名季度`／`季度`，query 會因為欄位不存在而失敗，這三個指令會直接回「系統錯誤」。改名的話要同步改這兩個函式的 filter。
 
 **管理員要注意：** 自動建立只擋「同名」。如果這個人其實早就在名冊裡、只是用不同名字（例如名冊是真名、LINE 是暱稱），系統會另建一頁並連過去，名冊就多了一個重複的人。要把他加進季租 `報名人` 前，先把他 USERS 的 `Registered name` 改指向既有頁面，再刪掉自動建立的那頁；否則季租身分會掛在錯的頁面上。
 
@@ -64,7 +68,7 @@ USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員�
 | 欄位 | 用途 |
 |------|------|
 | `季租時段` | 季度名稱，如 `2025-Q1`（`findByName()` 用此欄位查詢當季） |
-| `報名人` | Relation，關聯至「人員清單」，定義該季的固定成員。⚠️ Notion 對 relation 屬性一律只回傳前 25 筆，超過的部分由 `src/services/notion/paginated-relation.ts` 的 `getFullRelation` 自動補齊（讀到剛好 25 筆才多打一次分頁查詢），不要繞過它直接用 `property-helpers.ts` 的 `getRelation` 讀這個欄位 |
+| `報名人` | Relation，關聯至「人員清單」（雙向，對應人員清單的 `報名季度`），定義該季的固定成員。⚠️ Notion 對 relation 屬性一律只回傳前 25 筆，超過的部分由 `src/services/notion/paginated-relation.ts` 的 `getFullRelation` 自動補齊（讀到剛好 25 筆才多打一次分頁查詢），不要繞過它直接用 `property-helpers.ts` 的 `getRelation` 讀這個欄位 |
 | `場地數` | 本季**預設**場地數，用於容量計算；行事曆當週有填 `場地數` 時以行事曆為準（見下方「行事曆」）。`news` 指令 `{COURT_COUNT}` 固定顯示這個季預設值 |
 | `零打費用` | 當季零打（單次）價格 |
 | `地點` | 打球地點，`news` 指令 `{LOCATION}` |
@@ -75,7 +79,7 @@ USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員�
 | `每人平均場租`、`每人平均場租（特殊狀況）` | 程式已不讀（2026-10-01 起 `{PRICE_PER_PERSON_FOR_SEASON}` 改讀 `每人實際收費`） |
 | `場租總金額` | formula，本季場租總額，`news` 指令 `{TOTAL_PRICE}` |
 | `每場/小時 定價` | 場地每小時定價，`season` 指令 `{COURT_PRICE}` |
-| `打球日` | Relation，關聯至「行事曆」，本季所有打球日，`news` 指令 `{LIST_ALL_DATES}`／`season` 指令 `{PLAY_DATES}` |
+| `打球日` | Relation，關聯至「行事曆」（雙向，對應行事曆的 `季度`），本季所有打球日，`news` 指令 `{LIST_ALL_DATES}`／`season` 指令 `{PLAY_DATES}` |
 
 `findByName(季度名稱)` 依季度名稱查詢。跟某場活動有關的查詢（報名、請假、名額計算、週報、`next`）用 `getSeasonNameForDate(活動日)`；`participants`／`news` 講「這一季」，用 `getCurrentSeasonName()`。不能混用，見 [ADR 0008](../adr/0008-season-derived-from-event-date.md)。`season-repository.ts` 只有 `findByName`，沒有 `findAll()`——不要為了拿當季資料另外查全部再取第一筆。
 
@@ -91,7 +95,7 @@ USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員�
 | 欄位 | 用途 |
 |------|------|
 | `時間` | 活動日期（通常是週六），報名系統以此欄位查詢當週活動。⚠️ 不要跟 `名稱`（title 欄位，內容通常也是日期字串）搞混，查詢用的是 `時間` |
-| `請假人` | Relation，關聯至「人員清單」，記錄本週請假的季租球員。⚠️ 同樣受 25 筆截斷限制，且 `updateAbsentees` 是整包覆寫（非增量 patch）——若讀取時沒有透過 `getFullRelation` 補齊完整清單就整包寫回，會把第 26 筆以後的請假紀錄永久刪除。唯一安全的來源是 `calendar-repository.ts` 的 `pageToEvent()`，不要用其他管道拼湊這個陣列 |
+| `請假人` | Relation，關聯至「人員清單」（雙向，對應人員清單的 `📅 行事曆`），記錄本週請假的季租球員。⚠️ 同樣受 25 筆截斷限制，且 `updateAbsentees` 是整包覆寫（非增量 patch）——若讀取時沒有透過 `getFullRelation` 補齊完整清單就整包寫回，會把第 26 筆以後的請假紀錄永久刪除。唯一安全的來源是 `calendar-repository.ts` 的 `pageToEvent()`，不要用其他管道拼湊這個陣列 |
 | `零打` | Multi-select，記錄本週補位名單（guest 名稱字串）。⚠️ multi_select 的選項用名稱去重，陣列裡出現重複字串會被 Notion 靜默合併成一筆、無聲遺失資料，寫入前必須確保完整清單裡沒有重複字串，見 `docs/adr/0004-guest-name-must-be-globally-unique.md` |
 | `類型` | 若為「打球暫停」，報名和推播都會顯示暫停 |
 | `場地數` | 本週場地數，**優先於**季租承租紀錄的預設場地數，留空則用季預設（`capacity-calculator.ts` 的 `resolveCourts()`）。報名擋名額、請假／銷假回覆、週報與 `next` 全部走同一個 `resolveCourts()`，不要在別處直接讀 `season.courts` 算名額（理由見 [ADR 0007](../adr/0007-calendar-courts-fallback-in-one-place.md)）。只接受正整數，0／負數／小數視為未填並記 warn log——本週不打請用 `類型`=「打球暫停」。⚠️ 若換季時是批次複製舊頁面，舊值會一起帶過來，若新一季季預設改了，記得一併改這欄或清空，否則會靜默沿用舊值（週報的「場地：N 面（本週調整）」可幫忙發現） |

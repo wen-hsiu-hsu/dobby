@@ -188,7 +188,7 @@ describe('updateDisplayNames', () => {
       await vi.advanceTimersByTimeAsync(2000);
       await promise;
 
-      // Unlike calendar-repository's findByPageIds (which skips the delay before the
+      // Unlike people-repository's findByPageIds (which skips the delay before the
       // first item), this loop's delay sits after the try/catch and runs once per
       // user that isn't skipped by an earlier `continue` — including the very first
       // one — so 3 processed users means 3 delays, not 2.

@@ -176,8 +176,8 @@ export async function handleNews(replyToken: string): Promise<void> {
 
     const [blocks, people, playDates, paymentText] = await Promise.all([
       announcementRepo.getBlocks(announcement.pageId),
-      peopleRepo.findByPageIds(season.members),
-      calendarRepo.findByPageIds(season.playDatePageIds),
+      peopleRepo.findMembersOfSeasons([season]),
+      calendarRepo.findPlayDatesOfSeason(season),
       loadPaymentText(),
     ]);
 

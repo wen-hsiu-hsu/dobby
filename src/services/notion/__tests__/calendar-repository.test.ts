@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { notionPost, notionPatch, notionGet, notionGetAllResults } from '../notion-fetch.js';
-import { findByDate, findByPageIds, updateAbsentees } from '../calendar-repository.js';
+import { findByDate, findPlayDatesOfSeason, updateAbsentees } from '../calendar-repository.js';
 import { logger } from '../../../utils/logger.js';
 
 vi.mock('../notion-fetch.js');
@@ -133,68 +133,62 @@ describe('calendar-repository', () => {
     });
   });
 
-  describe('findByPageIds', () => {
-    it('resolves each page independently, truncation only triggered for the page that needs it', async () => {
-      notionGetMock.mockImplementation(async (path: string) => {
-        if (path === '/pages/page-1') {
-          return makePage(baseProps({ 請假人: absenteesRelation('prop-a', 25) }), 'page-1');
-        }
-        if (path === '/pages/page-2') {
-          return makePage(baseProps({ 請假人: absenteesRelation('prop-b', 3) }), 'page-2');
-        }
-        throw new Error(`unexpected path ${path}`);
+  describe('findPlayDatesOfSeason', () => {
+    const season = { pageId: 'season-1', playDatePageIds: ['page-2', 'page-1'] };
+
+    it('queries the calendar DB by the reverse 季度 relation once, instead of a GET per page', async () => {
+      notionPostMock.mockResolvedValue({
+        results: [makePage(baseProps(), 'page-1'), makePage(baseProps(), 'page-2')],
+        has_more: false,
+        next_cursor: null,
       });
-      const fullAbsentees = Array.from({ length: 26 }, (_, i) => ({ relation: { id: `absentee-${i}` } }));
-      notionGetAllResultsMock.mockResolvedValue(fullAbsentees);
 
-      const events = await findByPageIds(['page-1', 'page-2']);
+      const events = await findPlayDatesOfSeason(season);
 
-      expect(events).toHaveLength(2);
-      expect(events[0]?.absentees).toHaveLength(26);
-      expect(events[1]?.absentees).toHaveLength(3);
+      expect(notionPostMock).toHaveBeenCalledTimes(1);
+      expect(notionPostMock).toHaveBeenCalledWith(`/databases/${process.env['NOTION_DB_CALENDAR']}/query`, {
+        filter: { property: '季度', relation: { contains: 'season-1' } },
+        page_size: 100,
+      });
+      expect(notionGetMock).not.toHaveBeenCalled();
+      // 照 playDatePageIds 的順序，不是 query 回來的順序
+      expect(events.map((e) => e.pageId)).toEqual(['page-2', 'page-1']);
+    });
+
+    it('still completes a truncated 請假人 relation for the page that needs it', async () => {
+      notionPostMock.mockResolvedValue({
+        results: [
+          makePage(baseProps({ 請假人: absenteesRelation('prop-a', 25) }), 'page-1'),
+          makePage(baseProps({ 請假人: absenteesRelation('prop-b', 3) }), 'page-2'),
+        ],
+        has_more: false,
+        next_cursor: null,
+      });
+      notionGetAllResultsMock.mockResolvedValue(
+        Array.from({ length: 26 }, (_, i) => ({ relation: { id: `absentee-${i}` } })),
+      );
+
+      const [page2, page1] = await findPlayDatesOfSeason(season);
+
+      expect(page1?.absentees).toHaveLength(26);
+      expect(page2?.absentees).toHaveLength(3);
       expect(notionGetAllResultsMock).toHaveBeenCalledTimes(1);
       expect(notionGetAllResultsMock).toHaveBeenCalledWith('/pages/page-1/properties/prop-a');
     });
 
-    it('waits 400ms between each page fetch (Notion rate limit throttle), but not before the first', async () => {
-      vi.useFakeTimers();
-      try {
-        const setTimeoutSpy = vi.spyOn(global, 'setTimeout');
-        notionGetMock.mockImplementation(async (path: string) =>
-          makePage(baseProps(), path.replace('/pages/', '')),
-        );
+    it('falls back to a GET for a play date the query did not return', async () => {
+      notionPostMock.mockResolvedValue({ results: [makePage(baseProps(), 'page-1')], has_more: false, next_cursor: null });
+      notionGetMock.mockResolvedValue(makePage(baseProps(), 'page-2'));
 
-        const promise = findByPageIds(['page-1', 'page-2', 'page-3']);
-        // Generously covers the 2 * 400ms of throttling this call should perform.
-        await vi.advanceTimersByTimeAsync(2000);
-        const events = await promise;
+      const events = await findPlayDatesOfSeason(season);
 
-        expect(events).toHaveLength(3);
-        // 3 pages -> 2 delays (no wait before the first page).
-        expect(setTimeoutSpy).toHaveBeenCalledTimes(2);
-        for (const call of setTimeoutSpy.mock.calls) {
-          expect(call[1]).toBe(400);
-        }
-      } finally {
-        vi.useRealTimers();
-      }
+      expect(notionGetMock).toHaveBeenCalledWith('/pages/page-2');
+      expect(events.map((e) => e.pageId)).toEqual(['page-2', 'page-1']);
     });
 
-    it('does not delay at all when there is only a single page to fetch', async () => {
-      vi.useFakeTimers();
-      try {
-        const setTimeoutSpy = vi.spyOn(global, 'setTimeout');
-        notionGetMock.mockResolvedValue(makePage(baseProps(), 'page-1'));
-
-        const promise = findByPageIds(['page-1']);
-        await vi.advanceTimersByTimeAsync(0);
-        const events = await promise;
-
-        expect(events).toHaveLength(1);
-        expect(setTimeoutSpy).not.toHaveBeenCalled();
-      } finally {
-        vi.useRealTimers();
-      }
+    it('makes no Notion call when the season has no play dates', async () => {
+      expect(await findPlayDatesOfSeason({ pageId: 'season-1', playDatePageIds: [] })).toEqual([]);
+      expect(notionPostMock).not.toHaveBeenCalled();
     });
   });
 
