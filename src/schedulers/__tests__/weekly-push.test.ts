@@ -29,7 +29,7 @@ vi.mock('../../utils/logger.js', () => ({ logger: { info: vi.fn(), warn: vi.fn()
 
 const findByDateMock = vi.mocked(calendarRepo.findByDate);
 const findByNameMock = vi.mocked(seasonRepo.findByName);
-const findByPageIdsMock = vi.mocked(peopleRepo.findByPageIds);
+const findAbsenteesMock = vi.mocked(peopleRepo.findAbsenteesOfEvent);
 const pushMessageMock = vi.mocked(pushMessage);
 const loggerErrorMock = vi.mocked(logger.error);
 const loggerInfoMock = vi.mocked(logger.info);
@@ -99,7 +99,7 @@ describe('sendWeeklyPush', () => {
     env.DOBBY_GROUP_IDS = ['group-test-1'];
     findByDateMock.mockResolvedValue(makeCalendarEvent());
     findByNameMock.mockResolvedValue(makeSeasonRecord());
-    findByPageIdsMock.mockResolvedValue([]);
+    findAbsenteesMock.mockResolvedValue([]);
     pushMessageMock.mockResolvedValue(undefined);
   });
 
@@ -192,12 +192,13 @@ describe('sendWeeklyPush', () => {
   });
 
   it('resolves absentee names and joins them with 、 when there are absentees', async () => {
-    findByDateMock.mockResolvedValue(makeCalendarEvent({ absentees: ['p-a', 'p-b'] }));
-    findByPageIdsMock.mockResolvedValue([makePerson({ name: '小美' }), makePerson({ name: '小強' })]);
+    const event = makeCalendarEvent({ absentees: ['p-a', 'p-b'] });
+    findByDateMock.mockResolvedValue(event);
+    findAbsenteesMock.mockResolvedValue([makePerson({ name: '小美' }), makePerson({ name: '小強' })]);
 
     await sendWeeklyPush();
 
-    expect(findByPageIdsMock).toHaveBeenCalledWith(['p-a', 'p-b']);
+    expect(findAbsenteesMock).toHaveBeenCalledWith(event);
     const bubble = pushedBubble();
     const leaveSection = bubble.body.contents[2];
     expect(leaveSection.contents[1].text).toBe('小美、小強');
@@ -209,7 +210,6 @@ describe('sendWeeklyPush', () => {
 
     await sendWeeklyPush();
 
-    expect(findByPageIdsMock).not.toHaveBeenCalled();
     const bubble = pushedBubble();
     const leaveSection = bubble.body.contents[2];
     expect(leaveSection.contents[1].text).toBe('無');

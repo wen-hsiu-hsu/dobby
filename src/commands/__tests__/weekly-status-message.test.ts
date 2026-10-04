@@ -8,7 +8,7 @@ import type { CalendarEvent, SeasonRecord, PersonRecord } from '../../types/noti
 
 vi.mock('../../services/notion/people-repository.js');
 
-const findByPageIdsMock = vi.mocked(peopleRepo.findByPageIds);
+const findAbsenteesMock = vi.mocked(peopleRepo.findAbsenteesOfEvent);
 
 function makeCalendarEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
   return {
@@ -68,6 +68,7 @@ function makeOccupancy(overrides: Partial<EventOccupancy> = {}): EventOccupancy 
 describe('buildWeeklyStatusReply', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    findAbsenteesMock.mockResolvedValue([]);
   });
 
   it('回傳 flex 訊息，用跟報名卡片同一個 buildStatusCardBubble 組裝（正常週）', async () => {
@@ -86,7 +87,6 @@ describe('buildWeeklyStatusReply', () => {
     expect(summary.badgeIconUrl).toBe(`${FLEX_ASSET_ROOT}${FLEX_ICONS.calendarCheckDark}`);
     expect(summary.title).toBe('本週打球');
     expect(summary.subtitle).toBe('不能到請喊聲');
-    expect(findByPageIdsMock).not.toHaveBeenCalled();
   });
 
   it('本週場地數跟季預設不同時，副標題與 altText 都加註「本週調整」', async () => {
@@ -152,15 +152,15 @@ describe('buildWeeklyStatusReply', () => {
     expect(spans[1]).toMatchObject({ text: ' 人（季租 8・零打 2）' });
   });
 
-  it('請假名單完整列出（不截斷），透過 peopleRepo.findByPageIds 查姓名', async () => {
-    findByPageIdsMock.mockResolvedValue([makePerson({ name: '小美' }), makePerson({ name: '小強' })]);
+  it('請假名單完整列出（不截斷），透過 peopleRepo.findAbsenteesOfEvent 查姓名', async () => {
+    findAbsenteesMock.mockResolvedValue([makePerson({ name: '小美' }), makePerson({ name: '小強' })]);
     const occupancy = makeOccupancy({
       event: makeCalendarEvent({ absentees: ['p-a', 'p-b'] }),
     });
 
     const reply = await buildWeeklyStatusReply(occupancy, '2026-09-26');
 
-    expect(findByPageIdsMock).toHaveBeenCalledWith(['p-a', 'p-b']);
+    expect(findAbsenteesMock).toHaveBeenCalledWith(occupancy.event);
     const leaveSection = (reply.contents as any).body.contents[2];
     expect(leaveSection.contents[1].text).toBe('小美、小強');
     expect(leaveSection.contents[1].maxLines).toBeUndefined();
@@ -219,7 +219,7 @@ describe('buildWeeklyStatusReply', () => {
       expect(contents.hero.contents[1].contents[1].contents).toHaveLength(1); // 沒有副標題、沒有進度條
       expect(contents.body.contents).toHaveLength(1); // 沒有三段內文
       expect(contents.footer).toBeUndefined();
-      expect(findByPageIdsMock).not.toHaveBeenCalled();
+      expect(findAbsenteesMock).not.toHaveBeenCalled();
     });
 
     it('內文改放一行灰字「本週因故暫停，恢復後另行公告」', async () => {

@@ -62,11 +62,7 @@ export async function buildWeeklyStatusReply(
   // 「場地：N 面」每週都印，只有跟季預設不同時才加「（本週調整）」（見 docs/schedulers.md）。
   const headline = `本週打球・不能到請喊聲\n場地：${courts} 面${courtNote}`;
 
-  let absenteeNames: string[] = [];
-  if (event.absentees.length > 0) {
-    const absentees = await peopleRepo.findByPageIds(event.absentees);
-    absenteeNames = absentees.map((p) => p.name);
-  }
+  const absenteeNames = (await peopleRepo.findAbsenteesOfEvent(event)).map((p) => p.name);
 
   const cardParams: StatusCardParams = {
     date: dateStr,

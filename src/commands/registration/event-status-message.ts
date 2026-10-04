@@ -16,6 +16,8 @@ export interface EventStatusParams {
   totalSlots: number;
   presentSeasonMembers: number;
   guestFee: number;
+  /** 活動的行事曆頁面 ID，查請假人姓名時用（反向 relation 查詢的篩選條件）。 */
+  eventPageId: string;
   absenteePageIds: string[];
 }
 
@@ -28,8 +30,8 @@ export interface EventStatusParams {
  * 函式是 async。
  */
 export async function buildEventStatusReply(params: EventStatusParams): Promise<messagingApi.FlexMessage> {
-  const absenteeNames =
-    params.absenteePageIds.length > 0 ? (await peopleRepo.findByPageIds(params.absenteePageIds)).map((p) => p.name) : [];
+  const absentees = await peopleRepo.findAbsenteesOfEvent({ pageId: params.eventPageId, absentees: params.absenteePageIds });
+  const absenteeNames = absentees.map((p) => p.name);
 
   const cardParams: StatusCardParams = {
     date: params.date,

@@ -90,6 +90,13 @@ beforeEach(() => {
       hasPaid: true,
     })),
   );
+  vi.mocked(peopleRepo.findAbsenteesOfEvent).mockImplementation(async (event) =>
+    event.absentees.map((id) => ({
+      pageId: id,
+      name: id === 'person-1' ? 'Alice' : id,
+      hasPaid: true,
+    })),
+  );
   vi.mocked(mutex.withMutex).mockImplementation(async (_key, fn) => fn());
 });
 

@@ -47,12 +47,12 @@ Dobby 使用 5 個 Notion 資料庫。欄位的詳細型別定義請參考 `sche
 |------|------|
 | `Name` | 球員姓名（主鍵，用於報名顯示） |
 | `報名季度` | Relation，季租承租紀錄 `報名人` 的反向欄位。`findMembersOfSeasons()` 用它一次查回整季成員（見下方） |
-| `📅 行事曆` | Relation，行事曆 `請假人` 的反向欄位。程式目前沒讀，可以拿來一次查回請假人姓名，待辦見 [performance-observations.md](../performance-observations.md) |
+| `📅 行事曆` | Relation，行事曆 `請假人` 的反向欄位。`findAbsenteesOfEvent()` 用它一次查回請假人姓名（見下方） |
 | 繳費相關 | 追蹤費用繳納狀態 |
 
 USERS 的 `Registered name` 關聯至此資料庫，建立 LINE 帳號與球員名單的對應。新的 LINE 使用者會自動在這裡建立一頁，只填 `Name`（規則見上方 USERS 小節）；這些頁面沒有報名任何季度，所以不影響季租名額，`結清` 也是 true，不會出現在 `owe` 欠費名單。`Name` 建立後不會跟著 LINE 改名同步，由管理員維護（報名顯示優先用這個名字，見 `docs/registration.md`）。
 
-**整季名單用反向 relation 一次查回，不逐筆 GET。** Notion query 沒辦法依 page ID 篩選，所以 `participants`／`news`／`season` 要拿整季成員或打球日時，是從另一端反查：People 篩 `報名季度` contains 季度（`people-repository.ts` 的 `findMembersOfSeasons()`），行事曆篩 `季度` contains 季度（`calendar-repository.ts` 的 `findPlayDatesOfSeason()`）。名單以季租紀錄的 `報名人`／`打球日` 為準，query 結果只是批次取回的手段：照 relation 順序重排、多的丟掉、漏的逐筆 GET 補上並記 warn（`reverse-relation-query.ts`）。⚠️ 這依賴兩組 relation 維持雙向配對。若在 Notion 把 `報名人`／`打球日` 改成單向，或改名、刪掉反向欄位 `報名季度`／`季度`，query 會因為欄位不存在而失敗，這三個指令會直接回「系統錯誤」。改名的話要同步改這兩個函式的 filter。
+**整季名單、請假人姓名用反向 relation 一次查回，不逐筆 GET。** Notion query 沒辦法依 page ID 篩選，所以 `participants`／`news`／`season` 要拿整季成員或打球日時，是從另一端反查：People 篩 `報名季度` contains 季度（`people-repository.ts` 的 `findMembersOfSeasons()`），行事曆篩 `季度` contains 季度（`calendar-repository.ts` 的 `findPlayDatesOfSeason()`）。名單以季租紀錄的 `報名人`／`打球日` 為準，query 結果只是批次取回的手段：照 relation 順序重排、多的丟掉、漏的逐筆 GET 補上並記 warn（`reverse-relation-query.ts`）。報名／請假回覆卡和週報的請假人姓名也是同一招：2 人以上時 People 篩 `📅 行事曆` contains 活動（`findAbsenteesOfEvent()`），名單以行事曆的 `請假人` 為準。⚠️ 這依賴三組 relation 維持雙向配對。若在 Notion 把 `報名人`／`打球日`／`請假人` 改成單向，或改名、刪掉反向欄位 `報名季度`／`季度`／`📅 行事曆`，query 會因為欄位不存在而失敗：`participants`／`news`／`season` 會直接回「系統錯誤」；請假人姓名則會退回逐筆 GET 並記 warn（`Absentee reverse-relation lookup failed; falling back to per-page GETs`），使用者照常收到正確的回覆，只是變慢；但 `/logs` 會把那個事件標成「失敗」，因為 query 那一步記了 `Notion API error`（判定規則見 `docs/logging.md`「狀態判定」）。改名的話要同步改這三個函式的 filter。
 
 **管理員要注意：** 自動建立只擋「同名」。如果這個人其實早就在名冊裡、只是用不同名字（例如名冊是真名、LINE 是暱稱），系統會另建一頁並連過去，名冊就多了一個重複的人。要把他加進季租 `報名人` 前，先把他 USERS 的 `Registered name` 改指向既有頁面，再刪掉自動建立的那頁；否則季租身分會掛在錯的頁面上。
 

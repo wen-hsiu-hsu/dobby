@@ -220,7 +220,7 @@ LINE 電腦版和手機版的 `mentionees` 行為不一致：
 outcome 行不是「每個事件恰好一行」，例外有這些：
 
 - **mutex 逾時**：當下沒有 outcome，wrapper 已有 warn。背景的讀寫跑完後，它自己的 outcome 仍會用同一個 reqId 寫出，時間軸上排在 `Event processed` 之後。例外：背景 refetch 才發現沒有活動時，`EventNotFoundError` 會被 mutex 吞掉，不會有 `event-not-found` 行（很少見）。
-- **鎖內非預期錯誤**：wrapper 的 `… error` 那行就是結果。outcome 是在判斷完、組回覆訊息之前記的，所以如果是組訊息時（`buildEventStatusReply` 查請假人姓名）才 throw，會同時有 outcome 行和 error 行——outcome 代表判斷結果（寫入成功的分支代表已經寫入），error 代表回覆沒送出。
+- **鎖內非預期錯誤**：wrapper 的 `… error` 那行就是結果。outcome 是在判斷完、組回覆訊息之前記的，所以如果是組訊息時（`buildEventStatusReply` 查請假人姓名；2 人以上時反向查詢失敗會先退回逐筆 GET，見 [notion/databases.md](notion/databases.md)，GET 也失敗才會丟錯）才 throw，會同時有 outcome 行和 error 行——outcome 代表判斷結果（寫入成功的分支代表已經寫入），error 代表回覆沒送出。
 - **取鎖前的查詢 throw**（`resolveTarget`／`seasonRepo.findByName`）：沒有 outcome，也不經過 wrapper；handler 自己記一行跟 wrapper 同名的 `… error`（`Registration handler error`／`Leave handler error`），並回「系統錯誤，請稍後再試」。對象查無但 Season 查詢 throw 時，也是回「系統錯誤」，不是「找不到您的帳號」「找不到您的資料」這類查無對象的回覆，因為兩個查詢並行，`Promise.all` 整個 reject。
 
 報名被拒的四種（`paused`／`full`／`no-registration`／`zero-delta`）是 handler 依 `delta` 和 `isPaused` 推出來的（`registration-handler.ts` 的 `rejectionOutcome()`），因為 `CapacityResult` 只有給使用者看的錯誤文字。**`capacity-calculator.ts` 如果新增拒絕路徑，`rejectionOutcome()` 要一起改**，不然會被歸成 `full` 或 `no-registration`。

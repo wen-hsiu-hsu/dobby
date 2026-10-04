@@ -62,7 +62,7 @@
     },
     "📅 行事曆": {
       "type": "relation",
-      "description": "行事曆 `請假人` 的反向欄位（雙向 relation，2026-10-04 用 Notion API 確認），列出此球員請過假的活動。目前程式碼未讀取此欄位",
+      "description": "行事曆 `請假人` 的反向欄位（雙向 relation，2026-10-04 用 Notion API 確認），列出此球員請過假的活動。`people-repository.ts` 的 `findAbsenteesOfEvent()` 用它一次查回請假人姓名（篩 contains 活動 pageId）",
       "config": {
         "database_id": "0fd76b77-9f07-4aa3-a3c9-12ba18dbe32e",
         "type": "dual_property",

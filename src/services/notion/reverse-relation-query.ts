@@ -13,7 +13,8 @@ const THROTTLE_MS = 400;
  * forward relation（`ids`）才是名單的依據，query 結果只是批次取回的手段：
  * - 輸出照 `ids` 的順序。query 回傳的順序跟 relation 順序不同。
  * - `ids` 裡有、query 沒回傳的頁面逐筆 GET 補上（`fetchOne`），並記 warn。正常不會發生，
- *   保底是怕 Notion 的 query 結果比 relation 慢一步更新（管理員剛改完名單時）。
+ *   保底是怕 Notion 的 query 結果比 relation 慢一步更新（管理員剛改完名單，或 bot 剛寫入
+ *   forward relation 就立刻查詢時，例如請假／銷假後查請假人姓名）。
  * - query 多回傳、`ids` 裡沒有的頁面直接丟掉。
  *
  * `toRecord` 對每頁依序呼叫、中間不節流。如果它自己會打 API（例如 `pageToEvent` 遇到 25 筆截斷時），

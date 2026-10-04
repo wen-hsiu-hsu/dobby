@@ -123,6 +123,7 @@ export async function handleRegistration(
           totalSlots: occupancy.totalSlots,
           presentSeasonMembers: occupancy.presentSeasonMembers,
           guestFee: occupancy.season.guestFee,
+          eventPageId: freshEvent.pageId,
           absenteePageIds: freshEvent.absentees,
         });
         await replyMessage(event.replyToken, [reply]);
@@ -185,6 +186,7 @@ export async function handleRegistration(
         totalSlots: occupancy.totalSlots,
         presentSeasonMembers: occupancy.presentSeasonMembers,
         guestFee: occupancy.season.guestFee,
+        eventPageId: freshEvent.pageId,
         absenteePageIds: freshEvent.absentees,
       });
       await replyMessage(event.replyToken, [reply]);

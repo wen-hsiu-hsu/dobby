@@ -64,6 +64,13 @@ beforeEach(() => {
       hasPaid: true,
     })),
   );
+  vi.mocked(peopleRepo.findAbsenteesOfEvent).mockImplementation(async (event) =>
+    event.absentees.map((id) => ({
+      pageId: id,
+      name: id === 'person-1' ? 'Alice' : id,
+      hasPaid: true,
+    })),
+  );
   vi.mocked(mutex.withMutex).mockImplementation(async (_pageId, fn) => fn());
 });
 
@@ -211,6 +218,8 @@ describe('handleLeave', () => {
     expect(card.badgeIconUrl.endsWith(FLEX_ICONS.calendarXDark)).toBe(true);
     expect(card.title).toBe('請假成功');
     expect(card.subtitle).toBe('Alice 本週請假，零打名額 +1');
+    // 姓名用寫入後的請假名單查，不是鎖內讀到的舊名單
+    expect(peopleRepo.findAbsenteesOfEvent).toHaveBeenCalledWith({ pageId: 'evt-1', absentees: ['person-1'] });
   });
 
   it('replies with full status (not a bare one-liner) when cancelling leave', async () => {
