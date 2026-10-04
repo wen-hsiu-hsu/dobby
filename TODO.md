@@ -43,7 +43,45 @@
 
     **部署之後**：程式已經不讀 Notion「所有公告」的舊 `PAYMENT` 頁面（只剩部署前的舊版在讀），確認正式環境跑的是新版後，就可以到 Notion 刪掉 `PAYMENT`。另外 `NEWS_TEMPLATE`「季打費用」那段的「(此金額為直接除以人數，並非真正的繳費金額)」要記得刪：`{PRICE_PER_PERSON_FOR_SEASON}` 已改成每人實際收費。
 
-- [ ] 報名／請假的號碼牌閘門部署後（見 [ADR 0018](docs/adr/0018-entry-gate-orders-lock-entry.md)），到 `/logs` 看幾則 `@Dobby +N`／`@Dobby 假`：每則在 `Mutex task finished` 之前要有一行 info `Entry gate passed`（`ticket`、`gateWaitMs`、`lineTimestamp`），事件不應該因為閘門變成「警告」。再用兩個帳號（或一個帳號連續快速送）幾乎同時在群組送 `@Dobby +1` 和 `@Dobby -1`（或 `假` 再 `銷假`），確認回覆和寫入的順序跟送出順序一致：同一個日期 key 的 `Entry gate passed` 依出現先後，`lineTimestamp` 要跟著遞增，後面的 PATCH 也照同樣順序（不要用 `ticket` 或 `queuedAhead` 判斷：前一則做完後號碼會重置、`queuedAhead` 會變小）。有看到 warn `Entry gate wait capped; entering out of order` 的話，把那個事件的時間軸記在下方。
+- [x] 報名／請假的號碼牌閘門部署後（見 [ADR 0018](docs/adr/0018-entry-gate-orders-lock-entry.md)），到 `/logs` 看幾則 `@Dobby +N`／`@Dobby 假`：每則在 `Mutex task finished` 之前要有一行 info `Entry gate passed`（`ticket`、`gateWaitMs`、`lineTimestamp`），事件不應該因為閘門變成「警告」。再用兩個帳號（或一個帳號連續快速送）幾乎同時在群組送 `@Dobby +1` 和 `@Dobby -1`（或 `假` 再 `銷假`），確認回覆和寫入的順序跟送出順序一致：同一個日期 key 的 `Entry gate passed` 依出現先後，`lineTimestamp` 要跟著遞增，後面的 PATCH 也照同樣順序（不要用 `ticket` 或 `queuedAhead` 判斷：前一則做完後號碼會重置、`queuedAhead` 會變小）。有看到 warn `Entry gate wait capped; entering out of order` 的話，把那個事件的時間軸記在下方。
+
+    2026-10-04 本機（`localhost:3000`，ngrok 接真實 LINE），同一個管理員帳號在群組快速連送兩波，10 則都是「完成」，沒有 `Entry gate wait capped`。每則依 `Entry gate passed` 出現先後列出：
+
+    第一波（23:35:36～38）：
+    ```
+    +1  ticket 1  lineTimestamp 1791128137035  gateWaitMs 2939  零打 3→4
+    -1  ticket 2  lineTimestamp 1791128137781  gateWaitMs 2062  零打 4→3
+    +1  ticket 3  lineTimestamp 1791128138408  gateWaitMs 1673  零打 3→4
+    -1  ticket 4  lineTimestamp 1791128139040  gateWaitMs  836  零打 4→3
+    ```
+
+    第二波（23:35:57～36:00）：
+    ```
+    +1  ticket 1  lineTimestamp 1791128157629  gateWaitMs  852  零打 3→4
+    -1  ticket 2  lineTimestamp 1791128158439  gateWaitMs  985  零打 4→3
+    假  ticket 3  lineTimestamp 1791128159174  gateWaitMs 1043  名額 5→6
+    +1  ticket 4  lineTimestamp 1791128159910  gateWaitMs 1515  名額 6，零打 3→4
+    -1  ticket 5  lineTimestamp 1791128160688  gateWaitMs 1028  零打 4→3
+    ```
+
+    23:36:10 單獨送的 `銷假` 拿到 ticket 1（前一波都結束後號碼歸零），名額 6→5。
+
+    第二波 ticket 4（reqId `0b56be`）的回覆：
+    ```
+    [flex] 報名成功 ✅
+
+    2026-10-10
+    零打名額 6 人 | $190/人
+    1. 林耀昌Derek
+    2. 官穗妙
+    3. 林郁軒的朋友
+    4. 許文修的朋友
+    剩餘名額：2 人
+    請假：陳玟育、許文修
+    總人數：共 12 人
+    ```
+
+    備註：兩波的 `lineTimestamp` 都照出現先後遞增，每次寫入前的人數都接在上一則的結果後面，`假` 和 `+1`／`-1` 排在同一條序列。第一波看得出閘門確實擋過人：用「LINE 時間＋延遲」推算 Pi 收到的時間再加 `gateWaitMs`，ticket 2、3 自己的查詢比 ticket 1 早完成，卻和 ticket 1（進鎖前查詢 2.9 秒）在幾毫秒內接連進鎖，表示它們一直在閘門等 ticket 1；沒有閘門的話它們會先進鎖。這次沒測到的：前一則卡超過 5 秒時放行的路徑（單元測試有測）、全新使用者排在前面的情況、Pi 正式環境。
 
 ---
 
