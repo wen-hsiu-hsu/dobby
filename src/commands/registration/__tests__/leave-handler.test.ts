@@ -196,7 +196,7 @@ describe('handleLeave', () => {
   it('wraps the read-modify-write in withMutex using the event date as key', async () => {
     await handleLeave(event, false, false);
 
-    expect(mutex.withMutex).toHaveBeenCalledWith(expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), expect.any(Function), { cancelIfNotStarted: true });
+    expect(mutex.withMutex).toHaveBeenCalledWith(expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), expect.any(Function));
     expect(calendarRepo.updateAbsentees).toHaveBeenCalledWith('evt-1', ['person-1']);
   });
 

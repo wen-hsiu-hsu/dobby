@@ -1,5 +1,6 @@
 import type { messagingApi } from '@line/bot-sdk';
 import { withMutex, MutexTimeoutError } from '../../services/mutex.js';
+import { enterInOrder } from '../../services/entry-gate.js';
 import { replyMessage } from '../../services/line/reply-service.js';
 import { logger } from '../../utils/logger.js';
 import { logOutcome } from './outcome-log.js';
@@ -7,15 +8,12 @@ import { buildEventStatusReply, type EventStatusParams } from './event-status-me
 
 class EventNotFoundError extends Error {}
 
-// Timed out after the mutation started: it keeps running and may still write, but nobody
+// Timed out, whether the mutation had started or was still queued (queued tasks aren't
+// cancelled, see below): it keeps running or runs later and may still write, but nobody
 // can report its result: this message has already used the replyToken. `+N`/`-N`
 // are not idempotent, so the message must stop users from retrying. `next` is
 // admin-only, so it can't point regular members there.
 const TIMEOUT_REPLY = '處理時間較長，這次操作可能已經完成，請勿重複操作。如需確認，請洽管理員。';
-// Timed out while still queued: `cancelIfNotStarted` guarantees the mutation never runs,
-// so nothing was written and resending is safe. "稍後" because whatever is holding the
-// lock may still be stuck, and an immediate resend would just queue behind it again.
-const CANCELLED_REPLY = '目前處理較慢，這次操作沒有執行，請稍後再送一次。';
 
 export async function withFreshCalendarEvent<T>(
   replyToken: string,
@@ -28,17 +26,18 @@ export async function withFreshCalendarEvent<T>(
   try {
     // Lock by date (not the event's page ID) so we don't need an extra lookup
     // just to learn the lock key — refetch() below does the one query we need.
-    // cancelIfNotStarted: a request that waited out its whole timeout in the queue is
-    // dropped rather than run tens of seconds later behind the user's back, so its reply
-    // can say for certain that nothing happened.
-    status = await withMutex(
-      date,
-      async () => {
+    // enterInOrder: joins the lock queue in the order the messages arrived, not the order
+    // their lookups finished (ADR 0018).
+    // No cancelIfNotStarted: skipping a timed-out queued task would let the tasks behind
+    // it go first — a cancelled `-1` hands its slot to whoever registers after the resend
+    // instead of the `+1` already waiting. First-come-first-served wins over a definite
+    // reply (ADR 0002).
+    status = await enterInOrder(() =>
+      withMutex(date, async () => {
         const fresh = await refetch();
         if (!fresh) throw new EventNotFoundError();
         return mutation(fresh);
-      },
-      { cancelIfNotStarted: true }
+      })
     );
   } catch (err: unknown) {
     if (err instanceof EventNotFoundError) {
@@ -50,11 +49,6 @@ export async function withFreshCalendarEvent<T>(
       return;
     }
     if (err instanceof MutexTimeoutError) {
-      if (err.cancelled) {
-        logger.warn({ err }, `${context} timed out while queued; cancelled, nothing written`);
-        await replyMessage(replyToken, [{ type: 'text', text: CANCELLED_REPLY }]);
-        return;
-      }
       logger.warn({ err }, `${context} timed out; result unknown to the user`);
       await replyMessage(replyToken, [{ type: 'text', text: TIMEOUT_REPLY }]);
       return;

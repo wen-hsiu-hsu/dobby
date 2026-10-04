@@ -5,11 +5,13 @@ import { findByUserId } from '../../services/notion/users-repository.js';
 import { replyMessage } from '../../services/line/reply-service.js';
 import { routeCommand } from '../../commands/command-router.js';
 import { trackUser } from '../../services/user-management.js';
+import { withEntryTicket } from '../../services/entry-gate.js';
 
 vi.mock('../../services/notion/users-repository.js');
 vi.mock('../../services/line/reply-service.js');
 vi.mock('../../commands/command-router.js');
 vi.mock('../../services/user-management.js');
+vi.mock('../../services/entry-gate.js');
 
 const { loggerMock } = vi.hoisted(() => ({
   loggerMock: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -27,9 +29,35 @@ function textEvent(text: string): MessageEvent {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  // Pass-through, so the ticket doesn't change what the other tests see.
+  vi.mocked(withEntryTicket).mockImplementation(async (_key, _ts, fn) => fn());
 });
 
 describe('handleMessage', () => {
+  it.each(['@Dobby +1', '@Dobby -1', '@Dobby 假', '@Dobby 銷假'])(
+    'takes an entry ticket for the event date before the USERS lookup for %s (ADR 0018)',
+    async (text) => {
+      vi.mocked(withEntryTicket).mockImplementation(async (_key, _ts, fn) => {
+        expect(findByUserId).not.toHaveBeenCalled();
+        return fn();
+      });
+      vi.mocked(findByUserId).mockResolvedValue(null);
+
+      await handleMessage({ ...textEvent(text), timestamp: 1700000000000 } as MessageEvent);
+
+      expect(withEntryTicket).toHaveBeenCalledWith(expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), 1700000000000, expect.any(Function));
+      expect(routeCommand).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each(['@Dobby 欠', '@Dobby 報名人', 'hello'])('does not take an entry ticket for %s', async (text) => {
+    vi.mocked(findByUserId).mockResolvedValue(null);
+
+    await handleMessage(textEvent(text));
+
+    expect(withEntryTicket).not.toHaveBeenCalled();
+  });
+
   it('replies with a generic error and skips routing when findByUserId throws', async () => {
     vi.mocked(findByUserId).mockRejectedValue(new Error('Notion API error'));
 

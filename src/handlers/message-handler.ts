@@ -5,7 +5,19 @@ import { findReply } from '../services/auto-reply.js';
 import { replyMessage } from '../services/line/reply-service.js';
 import { findByUserId } from '../services/notion/users-repository.js';
 import { trackUser } from '../services/user-management.js';
+import { withEntryTicket } from '../services/entry-gate.js';
+import { CommandType, type ParsedCommand } from '../types/commands.js';
+import { formatDate, getNextSaturday } from '../utils/date-utils.js';
 import { logger } from '../utils/logger.js';
+
+// Commands that read-compute-write the next event under its date lock. They share one
+// ticket line per date: `-N`/`假` free slots and `銷假` takes one, so each can change
+// what the requests behind it get.
+const ORDERED_COMMANDS = new Set<CommandType>([
+  CommandType.REGISTRATION,
+  CommandType.LEAVE,
+  CommandType.CANCEL_LEAVE,
+]);
 
 export async function handleMessage(event: MessageEvent): Promise<void> {
   // Stickers/images/etc. are frequent in group chats and never acted on, so
@@ -38,6 +50,22 @@ export async function handleMessage(event: MessageEvent): Promise<void> {
     'Message classified',
   );
 
+  // Ticket taken here, before the USERS lookup below: arrival order, not lookup-finish
+  // order, decides who joins the date lock's queue first (ADR 0018). Same key as
+  // withFreshCalendarEvent's lock.
+  if (command && ORDERED_COMMANDS.has(command.type)) {
+    const date = formatDate(getNextSaturday());
+    return withEntryTicket(date, event.timestamp, () => handleClassified(event, text, userId, command));
+  }
+  return handleClassified(event, text, userId, command);
+}
+
+async function handleClassified(
+  event: MessageEvent,
+  text: string,
+  userId: string,
+  command: ParsedCommand | null,
+): Promise<void> {
   // Determine context for user tracking
   const groupId = event.source.type === 'group' ? event.source.groupId : undefined;
   const multiChatId = event.source.type === 'room' ? event.source.roomId : undefined;
