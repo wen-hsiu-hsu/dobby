@@ -55,6 +55,13 @@ npm run dev:docker
 
 Flex 卡片的圖片在本機開發時一樣讀正式的 GitHub Pages（`src/config/flex-assets.ts`，不分環境）。新增或換掉 `assets/flex/` 的圖片後，要等它 push 到 `main`、Pages 發布完成，ngrok 測試時才看得到；在那之前卡片會顯示成破圖，不是程式錯誤（見 [ADR 0010](adr/0010-registration-status-flex-card.md)）。
 
+寫 Flex 卡片有兩個陷阱，LINE Flex Message Simulator 和單元測試都抓不到，只有真機看得出來，而且電腦版、手機版的症狀不一樣：
+
+- **用 span 的 text 也要帶 `text` 屬性**，內容跟 span 拼起來一樣（例如 `season-card.ts` 的 `statTileBox()`）。電腦版 LINE 不顯示 span，只讀 `text`，沒帶就整行空白。
+- **`flex: 0`（依內容收縮）的水平 box 裡，text 也要設 `flex: 0`**。text 在水平 box 裡預設 `flex: 1`，手機版會把它的寬度算成 0，只剩旁邊的圖示（例如 `payment-card.ts` 的 `copyButton()`）。電腦版照常顯示，所以只看電腦版會漏掉。
+
+狀態卡的「本週出席」列兩個都踩過（`flex-status-card.ts`），之後新增卡片時對照一下。
+
 `docker-compose.dev.yml` 的 `app` service 只把 `npm ci` 的結果 bake 進 image（`Dockerfile` 的 `dev` stage），原始碼是 bind mount 進去的，所以改 TypeScript 檔案會即時重啟，不用重建 image；只有改 `package.json` 才需要 `npm run dev:docker` 重新 `--build`。
 
 `docker-compose.dev.yml` 跟正式的 `docker-compose.yml` 各自用 `name:` 指定了不同的 compose project 名稱（`dobby-dev` / `dobby`）。兩者預設都會用資料夾名稱當 project 名稱，沒特別指定的話會撞名——`up` 其中一個會把另一個正在跑的 container 悄悄換掉，`down -v` 打錯檔案也會把對方的 volume 一起清掉。改指令時不要拿掉這個 `name:`。

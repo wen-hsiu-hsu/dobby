@@ -9,7 +9,7 @@
 | [commands.md](commands.md) | 所有 @Dobby 指令的說明與範例 | 新增/修改指令行為 |
 | [registration.md](registration.md) | 報名系統詳解：容量計算、guest 命名、Mutex（含逾時時回覆什麼）、報名／請假的決策摘要 log | 改報名、請假、容量計算相關邏輯 |
 | [schedulers.md](schedulers.md) | 定時推播與顯示名稱更新排程說明 | 改排程任務、推播訊息格式 |
-| [development.md](development.md) | 本地開發設定、環境變數、測試方式 | 建置、部署、加新指令的步驟、環境變數、本機 `.env` 該接哪個 LINE channel |
+| [development.md](development.md) | 本地開發設定、環境變數、測試方式 | 建置、部署、加新指令的步驟、環境變數、本機 `.env` 該接哪個 LINE channel、寫或改 Flex 卡片（真機才看得出的渲染陷阱） |
 | [notion/databases.md](notion/databases.md) | Notion 資料庫業務邏輯與欄位說明 | 改動任何讀寫 Notion 的邏輯 |
 | [logging.md](logging.md) | `/logs` 頁面的事件列表/時間軸版面、合併顯示、狀態判定（完成／降級／警告／失敗）、R2 同步折疊、遮蔽 ID 說明 | 要用 `/logs` 除錯、不確定這個頁面有什麼功能、看不懂某個事件為什麼是這個狀態 |
 | [achievements-rulebook.md](achievements-rulebook.md) | 成就系統（含賽季彩蛋）的遊戲規則，**尚未實作** | 要開發或討論成就系統；開工前先看 `TODO.md`「規劃中功能」 |
