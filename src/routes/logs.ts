@@ -879,6 +879,14 @@ function startStepTimeline(group: FlowGroup): TimelineStep {
   if (typeof webhookEventId === 'string' && webhookEventId) {
     parts.push(`webhookEventId: ${webhookEventId}`);
   }
+  // lagMs（事件發生到 Pi 開始處理）判讀限制見 docs/logging.md「起點」那段。
+  // 負值是 Pi／容器時鐘偏差，正常現象，照實顯示、不標色；重送事件的值本來
+  // 就很大，搭配下面的重送提示看。不用 formatDuration()，它把 ≤0 印成「—」。
+  // 舊 log 沒有這個欄位就不顯示。
+  const lagMs = entry['lagMs'];
+  if (typeof lagMs === 'number' && Number.isFinite(lagMs)) {
+    parts.push(`延遲 ${Math.round(lagMs)}ms`);
+  }
   // isRedelivery 平常幾乎都是 false，沒有資訊價值；只有 true（LINE 重送了
   // 同一筆事件）才值得跳出來讓人注意，所以只在這個情況才加進 note，並且
   // 把整行提升成跟「尚無回應記錄」同一種 warn 色塊，跟這個頁面其他「只在

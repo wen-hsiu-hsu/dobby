@@ -1012,6 +1012,26 @@ describe('createLogsRouter', () => {
     expect(html).toContain('收到訊息');
     expect(html).not.toContain('webhookEventId:');
     expect(html).not.toContain('LINE 重送這筆事件');
+    expect(html).not.toContain('延遲');
+  });
+
+  // lagMs 以前只記進 log、要點開「起點」看原始 JSON 才看得到。負值是 Pi／
+  // 容器時鐘偏差造成的正常現象，照實顯示，不能因此把整行標成 warn。
+  it('shows lagMs in the 起點 step note (HTML and ?format=text), including negative values without a warn tone', async () => {
+    const entries = [
+      { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), type: 'message', sourceType: 'group', reqId: 'req-lag', webhookEventId: 'wh-lag', isRedelivery: false, lagMs: 246, msg: 'Processing event' },
+      { level: 30, time: Date.UTC(2024, 0, 1, 1, 0, 0), type: 'message', sourceType: 'group', reqId: 'req-neg-lag', webhookEventId: 'wh-neg', isRedelivery: false, lagMs: -302, msg: 'Processing event' },
+    ];
+    vi.mocked(readRecentLogs).mockResolvedValueOnce(entries).mockResolvedValueOnce(entries);
+
+    const html = (await getEventDetailHtml('req-lag')) + (await getEventDetailHtml('req-neg-lag'));
+    expect(html).toContain('webhookEventId: wh-lag · 延遲 246ms');
+    expect(html).toContain('延遲 -302ms');
+    expect(html).not.toContain('tl-note-warn');
+
+    vi.mocked(readRecentLogs).mockResolvedValueOnce(entries);
+    const { text } = await getLogsText({ reqId: 'req-lag' });
+    expect(text).toContain('延遲 246ms');
   });
 
   it('renders a service-restart boundary marker from shutdown+startup lifecycle logs, positioned by time, not as a selectable event', async () => {
