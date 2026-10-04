@@ -57,6 +57,29 @@
 
 ## 已知問題（尚未處理）
 
+- [ ] **報名順序不保證「先送先報」：名額只剩幾個時，晚送出的人可能搶到名額。**（2026-10-04 分析，尚未處理。社團要求公平性必須達成，速度次之）
+  - **現象一：進鎖前的查詢讓順序對調。** 報名／請假的 Notion 讀寫在 `withMutex`（`src/services/mutex.ts`，每個活動日期一把鎖，FIFO）裡，依「呼叫 `withMutex` 的先後」執行。但呼叫之前有兩段串行的 Notion 查詢：
+    - 先在 `src/handlers/message-handler.ts:49` 查 USERS（判斷是不是管理員）。
+    - 再到 `src/commands/registration/registration-handler.ts:55`／`leave-handler.ts:55` 的 `Promise.all`，並行查 `resolveTarget`（People）和 `seasonRepo.findByName`。
+    - 全新使用者還要等 `trackUser` 建好 USERS／People（`message-handler.ts:59` 呼叫、`:62` await），約 2～3 秒。
+
+    這段每則 0.8～2.2 秒不等，所以實際上是「誰先查完誰先進鎖」。2026-10-04 測試環境實測過同一人的 `-1` 和 `假` 被對調（見 `docs/performance-observations.md` 的 43 秒寫入那條）。webhook 是 fire-and-forget（`src/routes/webhook.ts:27`），不同的 webhook 請求會並行處理；只有同一個 webhook 裡的多個事件是依序處理（`src/handlers/event-router.ts:9`）。
+  - **現象二：方向 1 的取消機制反而懲罰早送出的人。** commit `d7c6d67` 起，`with-fresh-calendar-event.ts:41` 對所有報名／請假都傳 `cancelIfNotStarted`：排隊滿 10 秒還沒輪到就取消（`mutex.ts:9`，從呼叫 `withMutex` 起算）。Notion 寫入卡住時，最早送出的人逾時點最早、最先被取消；卡住結束後，逾時點比較晚的後送者照常執行。
+    - 例：只剩 1 個名額，有一筆寫入從 :00 卡到 :13。A 在 :01 送 `+1`（逾時點 :11），B 在 :05 送（逾時點 :15）。A 收到「沒有執行，請稍後再送一次」，B 拿到名額，A 重送時已經名額不足。照下面第 2 項修完後：A 一樣逾時，但會照順序先執行、拿到名額（只收到「可能已完成」），B 收到「名額不足」。
+  - **是不是 bug**：資料都正確（mutex 守住了讀寫互斥），但違反「先送先報」，而社團要求這點必須做到。觸發條件：
+    - 現象一：兩人送出時間相差約 2 秒內，而且在搶最後幾個名額。
+    - 現象二：Notion 單次呼叫卡超過 10 秒（本機 log 1,378 次呼叫中只有 2 次），又剛好碰上搶報。平常名額滿了之後，後面的請求不會寫入，每則只佔鎖約 0.4 秒，排隊很短，不容易逾時。
+  - **如果要處理，下面兩項要一起做**，只做一項公平性只補到一半。之前討論過「同一人的指令照順序」的閘門，可以被第 1 項涵蓋，不用另外做。
+    1. **號碼牌閘門。** 收到訊息、`parseCommand` 判定是報名／請假之後，在 `message-handler.ts:49` 查 USERS 之前，就依收到的順序拿號碼。key 用活動日期（`formatDate(getNextSaturday())`，可以同步算出來）。`+N`、`-N`、`假`、`銷假` 共用同一條序列：四種都鎖同一個日期 key，`假`／`-1` 也會釋出名額。輪到自己時，先等前一號已經呼叫過 `withMutex`，再放行下一號。`withMutex` 裡的 `queues.set` 是同步執行的，呼叫之後不用 await 就可以放行。閘門用自己獨立的 Map，不要塞進 `mutex.ts` 的 `queues`：閘門管的是「誰先呼叫 `withMutex`」，mutex 管的是「誰先執行」，混在一起會讓 ADR 0002 的佇列保證變得難以推理。陷阱：
+       - 所有提早結束的路徑都要放行號碼，要用 try/finally，否則後面的人會一直等。這些路徑包括：message-handler 查 USERS 失敗、parse error、非管理員、查無對象、查無季資料、不是季租成員、`Promise.all` throw。
+       - 等前一號要有上限（例如 5 秒）。`notion-fetch.ts` 沒有請求逾時，只有 undici 預設的 300 秒，不能讓前一號的查詢卡住就拖住後面所有人。超過上限就放行並記 warn，這是唯一會破壞順序的退路。閘門的等待發生在呼叫 `withMutex` 之前，不算在 mutex 的 10 秒逾時裡，但會吃掉 replyToken 約 1 分鐘的有效時間（`docs/architecture.md`「Fire-and-Forget Webhook 處理」），上限不能設太長。
+       - 不能改成一進來就取鎖：那會把 0.8～2 秒的查詢搬進鎖內，佔鎖時間約加倍，搶報時會有更多人逾時。
+       - 排序依據先用 Pi 收到的順序，不加等待窗口。LINE 不保證送達順序，不同人之間有幾十到幾百毫秒的抖動。可以在拿號碼時記下 `event.timestamp`（LINE 收到訊息的時間，群組畫面也是依它排序），事後從 log 統計「Pi 收到的順序」和 timestamp 順序對調的頻率，有需要再考慮等待窗口。等待窗口的代價是每個人都變慢。
+    2. **`+N` 不開 `cancelIfNotStarted`。** `withFreshCalendarEvent` 改成由呼叫端決定要不要取消，`registration-handler.ts:87` 在 `delta > 0` 時傳 false。`-N`、`假`、`銷假` 維持取消：被取消時這次沒有執行，要使用者重送才會生效（不會自動補做），重送是安全的，也不影響報名者之間的先後。
+       - 代價：逾時的 `+N` 回到「可能已完成，請勿重複操作」（`with-fresh-calendar-event.ts:14`），使用者看不到結果。`+N` 不是冪等的，不理提示重送會多佔一個名額，所以這則文案不能拿掉「請勿重複操作」。
+       - 要同步改 ADR 0002 的「例外：還沒開始的任務可以取消」，寫明 `+N` 為什麼不取消：名額優先權比明確回覆重要。
+  - 速度相關的配套（進鎖前的查詢改用快取）記在 `docs/performance-observations.md`。快取只能降低對調的機率，保證不了順序，不能取代這裡的閘門。
+
 - [ ] **`src/routes/__tests__/logs.test.ts` 跑整套測試時偶發逾時，一次掛 2～12 個。**（2026-10-04 發現，還沒分析）
   - 現象：`npx vitest run --dir src` 跑約 15 次，有 3 次這支檔案的測試超過 vitest 預設的 5 秒逾時（`Error: Test timed out in 5000ms`），每次掛的測試不一樣，例如第 1123 行的 `shows a short request-body summary…`、第 1020 行的 `shows lagMs in the 起點 step note…`、第 1037 行的 `renders a service-restart boundary marker…`。其他次都是全過。單獨跑這支檔案（83 個測試）只要約 0.34 秒，從沒失敗過。同一天另有一次是 `src/__tests__/logs-auth.test.ts` 的 `GET /logs > accepts requests with the correct Bearer token` 失敗（也是打 `/logs` 路由，失敗訊息沒保留，不確定是不是逾時），可能是同一個問題。
   - 不是產品 bug，`/logs` 頁面本身沒問題，只影響測試結果的可信度。發現當時的改動（反向 relation 查詢）沒碰 `src/routes`；這支檔案最近一次改動是 commit `f75a27d`（起點摘要顯示 lagMs）。所以應該是原本就有的問題，不是那次造成的，但沒有在更早的 commit 上重現確認。
