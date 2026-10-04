@@ -38,7 +38,7 @@ export async function routeCommand(
       await handleParticipants(event.replyToken);
       break;
     case CommandType.NEXT_EVENT:
-      await handleNextEvent(event.replyToken, isAdmin);
+      await handleNextEvent(event.replyToken);
       break;
     case CommandType.NEWS:
       await handleNews(event.replyToken);

@@ -126,6 +126,7 @@ export function buildCommandListBubble({ isAdmin, nextSeasonName }: CommandListC
 
   const bodyContents: messagingApi.FlexComponent[] = [
     section(sectionHead(FLEX_ICONS.searchGray, '查詢'), [
+      commandRow(FLEX_ICONS.calendarCheckLight, '本週打球資訊', '@Dobby next'),
       commandRow(FLEX_ICONS.usersLight, '本季報名人', '@Dobby 報名人'),
       commandRow(FLEX_ICONS.megaphoneLight, '最新公告', '@Dobby 公告'),
       commandRow(FLEX_ICONS.creditCardLight, '付款資訊', '@Dobby 付款'),
@@ -154,7 +155,6 @@ export function buildCommandListBubble({ isAdmin, nextSeasonName }: CommandListC
     bodyContents.push(
       separator,
       section(sectionHead(FLEX_ICONS.shieldGray, '管理員專用'), [
-        commandRow(FLEX_ICONS.calendarCheckLight, '本週打球資訊', '@Dobby next'),
         commandRow(FLEX_ICONS.fileTextLight, '下一季公告草稿', `@Dobby season ${seasonArg(nextSeasonName)}`),
         hintRow(FLEX_ICONS.userPlusGray, '代他人報名／請假', '自己輸入 @Dobby +N @名字\n或 @Dobby @名字 假'),
       ])
@@ -209,13 +209,13 @@ export function buildCommandListAltText({ isAdmin, nextSeasonName }: CommandList
   const lines = [
     '🛠️ 指令列表',
     '【查詢】',
-    '@Dobby 報名人／公告／付款／欠',
+    '@Dobby next／報名人／公告／付款／欠',
     '【報名或請假】',
     '@Dobby +N／-N',
     '@Dobby 假／銷假（季租成員限定）',
   ];
   if (isAdmin) {
-    lines.push('【管理員專用】', '@Dobby next', `@Dobby season ${seasonArg(nextSeasonName)}`, '@Dobby +N @名字', '@Dobby @名字 假／銷假');
+    lines.push('【管理員專用】', `@Dobby season ${seasonArg(nextSeasonName)}`, '@Dobby +N @名字', '@Dobby @名字 假／銷假');
   }
   return truncateAltText(lines.join('\n'));
 }

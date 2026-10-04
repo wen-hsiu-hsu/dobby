@@ -212,6 +212,9 @@ export function createTestBot(overrides: FixtureOverrides = {}): TestBot {
   vi.mocked(mutexModule.withMutex).mockImplementation(
     async <T>(_key: string, fn: () => Promise<T>) => fn(),
   );
+  // Nothing is ever queued since withMutex runs fn directly; tests override this to
+  // simulate pending tasks (see next-event.test.ts).
+  vi.mocked(mutexModule.pendingTaskCount).mockReturnValue(0);
 
   async function run(text: string, user: UserContext): Promise<Message[]> {
     captured.length = 0;

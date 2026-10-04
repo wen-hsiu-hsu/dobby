@@ -1,5 +1,7 @@
 # 週報推播與 `@Dobby next` 改用 Flex 卡片，且必須輸出同一張
 
+> 後續變更：見 [ADR 0019](0019-members-verify-timeout-via-next.md)（`next` 開放給所有成員，不再有非管理員拒絕分支；有任務沒跑完時卡片後另附一則提醒，卡片本身不變）
+
 報名、請假的狀態回覆改成 Flex 卡片後（[ADR 0010](0010-registration-status-flex-card.md)），週報推播（`src/schedulers/weekly-push.ts`）跟 `@Dobby next`（`src/commands/next-event.ts`）還留著舊的純文字格式，兩邊共用 `src/commands/weekly-status-message.ts` 的 `buildWeeklyStatusMessage()`。這個分支把它們也換成卡片，沿用 `registration/flex-status-card.ts` 的 `buildStatusCardBubble()`／`buildStatusCardAltText()`，`buildWeeklyStatusMessage()` 換成回傳 `FlexMessage` 的 `buildWeeklyStatusReply()`。以下記錄幾個取捨。
 
 **`next` 跟週報推播必須輸出完全相同的卡片，這不是選配的一致性，是功能本身的一部分。** `next` 有兩個角色：管理員平常查看目前狀態，以及週報推播失敗時（`DOBBY_GROUP_IDS` 沒設、找不到當週行事曆頁面、Notion 查詢出錯……）管理員手動在群組補發同一份內容。如果兩邊格式不同，補發出來的東西就不是「原本應該推播的內容」，這個補救手段就失效了。因此卡片的每個欄位（徽章、標題、副標題、零打名單、請假、本週出席、底部按鈕）兩邊都是同一次 `buildWeeklyStatusReply()` 呼叫產生，不是各自組一份「看起來很像」的訊息。唯一的差異只在 `next` 對非管理員的拒絕分支（純文字「此指令僅限管理員使用」）——那個時候還沒有活動資料可以組卡片，跟報名／請假流程裡「查無對象」之類的前置檢查維持純文字是同一個道理。

@@ -12,8 +12,8 @@ const PAUSED_NOTE = '本週因故暫停，恢復後另行公告';
 
 /**
  * Renders the weekly status card shared by the Sunday push (`weekly-push.ts`) and the
- * `@Dobby next` admin command (`next-event.ts`) — both must show the exact same card: `next`
- * is both how an admin checks the current state and how a failed Sunday push gets manually
+ * `@Dobby next` command (`next-event.ts`) — both must show the exact same card: `next`
+ * is both how members check the current state and how a failed Sunday push gets manually
  * resent, so the two can't drift into two formats (see docs/adr/0011-weekly-status-flex-card.md).
  *
  * 卡片組裝本身沿用報名／請假共用的 `buildStatusCardBubble`／`buildStatusCardAltText`

@@ -4,9 +4,19 @@ const queues = new Map<string, Promise<unknown>>();
 // Tasks whose fn() has not truly settled yet (queued or running), counted per key.
 // Only drops when `tail` completes, not when the caller stops waiting, so it still counts
 // a task whose caller already timed out — which is exactly when `queuedAhead` matters most.
-// Observability only: nothing but the log lines reads it.
+// Read-only outside this file (`pendingTaskCount`): never used to decide whether to lock.
 const inFlight = new Map<string, number>();
 const TIMEOUT_MS = 10_000;
+
+/**
+ * Tasks for `key` that haven't truly settled yet (queued or running), including ones
+ * whose callers already timed out. Lets a lock-free reader (`@Dobby next`) warn that what
+ * it just read may still change; it is a snapshot, so don't use it to decide anything
+ * that needs the lock.
+ */
+export function pendingTaskCount(key: string): number {
+  return inFlight.get(key) ?? 0;
+}
 
 // Keys that are a bare ISO date (`withFreshCalendarEvent` locks by event date) carry
 // no user identity, so their summary can sit at info. Every other key — notably

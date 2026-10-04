@@ -102,19 +102,11 @@ describe('routeCommand dispatch', () => {
     expectOnlyCalled(handleParticipants);
   });
 
-  it('dispatches NEXT_EVENT to handleNextEvent with replyToken and isAdmin=true', async () => {
+  it('dispatches NEXT_EVENT to handleNextEvent with replyToken, for members too', async () => {
     const event = makeEvent({ replyToken: 'rt-5' });
-    await routeCommand(makeCommand(CommandType.NEXT_EVENT), event, true);
-
-    expect(handleNextEvent).toHaveBeenCalledWith('rt-5', true);
-    expectOnlyCalled(handleNextEvent);
-  });
-
-  it('dispatches NEXT_EVENT to handleNextEvent with replyToken and isAdmin=false', async () => {
-    const event = makeEvent({ replyToken: 'rt-5b' });
     await routeCommand(makeCommand(CommandType.NEXT_EVENT), event, false);
 
-    expect(handleNextEvent).toHaveBeenCalledWith('rt-5b', false);
+    expect(handleNextEvent).toHaveBeenCalledWith('rt-5');
     expectOnlyCalled(handleNextEvent);
   });
 

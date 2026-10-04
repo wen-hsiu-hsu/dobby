@@ -6,7 +6,7 @@ export enum CommandType {
   OWE = 'owe',                     // @Dobby 欠 / @Dobby owe
   COMMAND_LIST = 'command_list',   // @Dobby command / @Dobby 指令
   PARTICIPANTS = 'participants',   // @Dobby participants / people / 報名人
-  NEXT_EVENT = 'next_event',       // @Dobby next (admin only)
+  NEXT_EVENT = 'next_event',       // @Dobby next
   NEWS = 'news',                   // @Dobby news / announcement / 公告
   PAYMENT = 'payment',             // @Dobby payment / 付款
   SEASON_ANNOUNCEMENT = 'season_announcement', // @Dobby season 2026Q2（管理員限定）

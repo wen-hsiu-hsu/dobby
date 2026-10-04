@@ -118,7 +118,7 @@ describe('withFreshCalendarEvent', () => {
     await withFreshCalendarEvent('token', '2026-05-09', 'ctx', () => Promise.resolve(calEvent), vi.fn());
 
     expect(replyMessage).toHaveBeenCalledWith('token', [
-      { type: 'text', text: '處理時間較長，這次操作可能已經完成，請勿重複操作。如需確認，請洽管理員。' },
+      { type: 'text', text: '處理時間較長，這次操作可能已經完成，請勿重複操作。稍後可輸入「@Dobby next」查看目前名單。' },
     ]);
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({ err: expect.any(mutex.MutexTimeoutError) }),
@@ -132,7 +132,7 @@ describe('withFreshCalendarEvent', () => {
     expect(logger.info).not.toHaveBeenCalledWith(expect.anything(), 'ctx outcome');
   });
 
-  it('still tells the user not to retry when the mutex times out while the task is still queued', async () => {
+  it('tells the user the task is queued and will run, not to retry, when the mutex times out before it started', async () => {
     // Queued tasks aren't cancelled, so this one will run later and may still write.
     vi.mocked(mutex.withMutex).mockRejectedValue(new mutex.MutexTimeoutError('2026-05-09', false, false));
 
@@ -140,7 +140,7 @@ describe('withFreshCalendarEvent', () => {
 
     expect(replyMessage).toHaveBeenCalledTimes(1);
     expect(replyMessage).toHaveBeenCalledWith('token', [
-      { type: 'text', text: '處理時間較長，這次操作可能已經完成，請勿重複操作。如需確認，請洽管理員。' },
+      { type: 'text', text: '前面的操作處理較久，這次操作已排隊，會依序處理，請勿重複操作。稍後可輸入「@Dobby next」查看目前名單。' },
     ]);
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({ err: expect.any(mutex.MutexTimeoutError) }),

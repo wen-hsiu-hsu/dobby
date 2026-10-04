@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { createTestBot } from '../../test-utils/create-test-bot.js';
 import { replyText } from '../../test-utils/index.js';
 import { cardHeroSummary } from '../registration/__tests__/card-nav.js';
+import * as mutex from '../../services/mutex.js';
 
 vi.mock('../../services/notion/notion-fetch.js');
 vi.mock('../../config/line.js');
@@ -28,11 +29,37 @@ const adminUsers = {
 };
 
 describe('next-event', () => {
-  it('rejects non-admin users with plain text (not a card)', async () => {
+  it('shows members the same card as admins, with nothing else when no task is pending', async () => {
     const bot = createTestBot();
     const messages = await bot.run('@Dobby next', { userId: 'user-alice' });
-    expect(messages[0]?.type).toBe('text');
-    expect((messages[0] as any)?.text).toContain('僅限管理員');
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.type).toBe('flex');
+    expect(cardHeroSummary((messages[0] as any).contents).title).toBe('本週打球');
+  });
+
+  it('adds a separate text warning after the unchanged card while registrations for the date are pending', async () => {
+    const bot = createTestBot();
+    vi.mocked(mutex.pendingTaskCount).mockReturnValue(3);
+    const messages = await bot.run('@Dobby next', { userId: 'user-alice' });
+
+    // The card stays the first message, identical to the weekly push (ADR 0011).
+    expect(messages).toHaveLength(2);
+    expect(messages[0]?.type).toBe('flex');
+    expect(replyText(messages[1])).toContain('還有 3 筆報名／請假正在處理');
+    expect(replyText(messages[1])).toContain('不要重複操作');
+    // Counted on the event-date key that withFreshCalendarEvent locks.
+    expect(mutex.pendingTaskCount).toHaveBeenCalledWith(expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/));
+  });
+
+  it('warns when a task was pending before the read even if it finished during it', async () => {
+    const bot = createTestBot();
+    // Before the read: 1 pending (the card may not reflect it); after: settled.
+    vi.mocked(mutex.pendingTaskCount).mockReturnValueOnce(1).mockReturnValue(0);
+    const messages = await bot.run('@Dobby next', { userId: 'user-alice' });
+
+    expect(messages).toHaveLength(2);
+    expect(replyText(messages[1])).toContain('還有 1 筆');
   });
 
   it('shows the same status card as the weekly push for admin without query params', async () => {

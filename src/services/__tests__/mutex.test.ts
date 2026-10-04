@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { withMutex, MutexTimeoutError } from '../mutex.js';
+import { withMutex, MutexTimeoutError, pendingTaskCount } from '../mutex.js';
 import { logger } from '../../utils/logger.js';
 import { runWithContext, getReqId } from '../../utils/request-context.js';
 
@@ -349,6 +349,37 @@ describe('mutex', () => {
       resolveStuck();
       await vi.advanceTimersByTimeAsync(0);
       expect(order).toEqual(['queued-start']);
+    });
+  });
+
+  describe('pendingTaskCount', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('counts running and queued tasks for the key, keeps counting after the caller times out, and drops to 0 once they settle', async () => {
+      let resolveStuck!: () => void;
+      const stuck = withMutex('2026-11-07', () => new Promise<void>((r) => { resolveStuck = r; }));
+      const queued = withMutex('2026-11-07', async () => undefined);
+      const stuckAssertion = expect(stuck).rejects.toBeInstanceOf(MutexTimeoutError);
+      const queuedAssertion = expect(queued).rejects.toBeInstanceOf(MutexTimeoutError);
+
+      expect(pendingTaskCount('2026-11-07')).toBe(2);
+      expect(pendingTaskCount('2026-11-14')).toBe(0);
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      await stuckAssertion;
+      await queuedAssertion;
+      // Both callers gave up, but both tasks are still going to write.
+      expect(pendingTaskCount('2026-11-07')).toBe(2);
+
+      resolveStuck();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(pendingTaskCount('2026-11-07')).toBe(0);
     });
   });
 

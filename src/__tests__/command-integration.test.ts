@@ -24,7 +24,8 @@ describe('Command routing integration', () => {
 
     // 卡片 JSON（按鈕送出的指令、列上的文字）跟 altText 一起檢查
     const text = JSON.stringify(messages[0]);
-    expect(text).not.toContain('next');
+    // next 開放給所有成員（ADR 0019），列在查詢區
+    expect(text).toContain('@Dobby next');
     expect(text).not.toContain('season');
     expect(text).not.toContain('代他人');
     expect(text).not.toContain('管理員專用');

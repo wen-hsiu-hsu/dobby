@@ -63,6 +63,7 @@ describe('command-list', () => {
     expect(messages).toHaveLength(1);
     expect(messages[0]?.type).toBe('flex');
     expect(actionTexts(bodyOf(messages[0]!))).toEqual([
+      '@Dobby next',
       '@Dobby 報名人',
       '@Dobby 公告',
       '@Dobby 付款',
@@ -84,7 +85,7 @@ describe('command-list', () => {
     // 季度邊界另有固定時間的測試；這裡只確認 handler 把「今天的下一季」接到按鈕上
     const nextSeasonArg = getNextSeasonName(getCurrentSeasonName()).replace('-', '');
     const texts = actionTexts(bodyOf(messages[0]!));
-    expect(texts.slice(-2)).toEqual(['@Dobby next', `@Dobby season ${nextSeasonArg}`]);
+    expect(texts.slice(-1)).toEqual([`@Dobby season ${nextSeasonArg}`]);
     expect(replyText(messages[0]!)).toContain('【管理員專用】');
   });
 
@@ -93,6 +94,7 @@ describe('command-list', () => {
     const parsed = actionTexts(bubble.body).map((text) => ({ text, cmd: parseCommand(text) }));
 
     expect(parsed.map(({ cmd }) => cmd?.type)).toEqual([
+      CommandType.NEXT_EVENT,
       CommandType.PARTICIPANTS,
       CommandType.NEWS,
       CommandType.PAYMENT,
@@ -101,7 +103,6 @@ describe('command-list', () => {
       CommandType.REGISTRATION,
       CommandType.LEAVE,
       CommandType.CANCEL_LEAVE,
-      CommandType.NEXT_EVENT,
       CommandType.SEASON_ANNOUNCEMENT,
     ]);
     expect(parsed.filter(({ cmd }) => cmd?.type === CommandType.REGISTRATION).map(({ cmd }) => cmd?.delta)).toEqual(['+1', '-1']);

@@ -17,7 +17,7 @@
 - [ ] 「報名／請假沿用 message-handler 的 USERS 快照＋Season 並行查」部署後（[ADR 0009](docs/adr/0009-actor-users-snapshot-non-null-only.md)），到 `/logs` 看既有使用者在群組的 `+N`／`假`：時間軸只剩一次 USERS query；`resolveTarget` 的 People GET 和 Season query 起點幾乎相同。背景那筆 `GET /pages/<USERS 頁>` 是 `trackUser` 鎖內重讀（[ADR 0017](docs/adr/0017-track-user-always-rereads-inside-lock.md)），預期中。基準：改前成功的 `±N` 中位數 3.3 秒，預估 2.4～2.5 秒；沒達到不是 bug，記下實測數字即可。群組新使用者首次指令、一對一私訊仍查兩次 USERS，是預期的
 - [ ] Pi `/logs` footer 的「R2 備份」徽章：確認 R2 同步有啟用、最近一次成功（徽章語意見 `docs/logging.md`）。本機 log 只留約 7 天，季末對帳要靠 R2（`/logs` 讀不到 R2，要下載後用 `jq` 查）
 - [ ] 報名／請假 Flex 卡（[ADR 0010](docs/adr/0010-registration-status-flex-card.md)）：另加深色模式；文字疊在照片上仍清楚（深淺色漸層遮罩都看）；底部三顆按鈕 `+1 零打`／`−1 零打`／`請假`
-- [ ] 指令清單 Flex 卡（[ADR 0012](docs/adr/0012-command-list-flex-card.md)）：一般成員和管理員各下一次 `@Dobby 指令`，每列、每顆按鈕都按過；一般成員看不到「管理員專用」區；「下一季公告草稿」送出的是下一季
+- [ ] 指令清單 Flex 卡（[ADR 0012](docs/adr/0012-command-list-flex-card.md)）：一般成員和管理員各下一次 `@Dobby 指令`，每列、每顆按鈕都按過；一般成員看不到「管理員專用」區、查詢區第一列是「本週打球資訊」（[ADR 0019](docs/adr/0019-members-verify-timeout-via-next.md)）；「下一季公告草稿」送出的是下一季
 - [ ] 欠費名單／本季報名人 Flex 卡（[ADR 0013](docs/adr/0013-name-list-flex-card.md)）：`@Dobby 欠`、`@Dobby 報名人` 名單完整、長名字換行；欠費卡「付款資訊」按鈕回付款卡；沒人欠費時顯示「全部繳清」卡
 - [ ] 付款資訊 Flex 卡（[ADR 0014](docs/adr/0014-payment-flex-card.md)）：`@Dobby 付款` 和欠費卡的「付款資訊」各一次；按「複製」後剪貼簿是 `20201800934932`、無多餘字元、LINE 有已複製提示；Line Pay Money、現金沒有按鈕；有 LINE 14.0.0 以下舊版的話看按鈕行為。另下一次 `@Dobby 公告`，「付款方式」是 `PAYMENT_V2` 三種（一行一種），沒有 `{PAYMENT_V2}` 字樣
 - [ ] 公告 Flex 卡（[ADR 0015](docs/adr/0015-news-flex-card.md)）：`@Dobby 公告` 和指令清單卡「最新公告」各一次
@@ -26,9 +26,13 @@
     - 報名名單、打球日期、「其他」長句完整換行
     - 「付款資訊」回付款卡，「指令清單」回指令清單卡
 
-- [ ] 週報推播／`@Dobby next` Flex 卡（[ADR 0011](docs/adr/0011-weekly-status-flex-card.md)）：用管理員下 `@Dobby next` 即可，輸出應跟週日 09:00 推播一樣
+- [ ] 週報推播／`@Dobby next` Flex 卡（[ADR 0011](docs/adr/0011-weekly-status-flex-card.md)）：下 `@Dobby next` 即可，輸出應跟週日 09:00 推播一樣；一般成員下也回同一張卡，不再回「僅限管理員」
     - 正常週：灰底徽章＋`calendar-check-dark.png`、標題「本週打球」、副標題「不能到請喊聲」；當週場地數與季預設不同時副標題變「不能到請喊聲・本週 N 面場」、altText 場地行有「（本週調整）」；底部按鈕跟報名卡一致
     - 暫停週（Notion 行事曆活動狀態設「打球暫停」）：灰底＋`ban-dark.png`、標題「本週活動暫停」；剩餘名額／進度條與三段內文都不見，改成一行灰字「本週因故暫停，恢復後另行公告」；沒有按鈕
+
+- [ ] 報名／請假逾時訊息與 `next` 處理中提醒（[ADR 0019](docs/adr/0019-members-verify-timeout-via-next.md)）：同一人用卡片按鈕連按約 12 次 `+1 零打`／`−1 零打`（每則佔鎖約 1 秒，要明顯快於每秒 1 則才會積到第 10 則以後；手打太慢）
+    - 排在後面、還沒開始的回「前面的操作處理較久，這次操作已排隊，會依序處理…」。「…可能已經完成…」只有逾時剛好落在某則執行中時才會出現，沒看到不算失敗
+    - 收到逾時後立刻下 `@Dobby next`：卡片後面多一則「⏳ 還有 N 筆報名／請假正在處理…」；全部跑完後再下一次，只剩卡片
 
 - [ ] `@Dobby season` 純文字＋Flex 卡（[ADR 0016](docs/adr/0016-season-announcement-flex-card.md)）：管理員下 `@Dobby season 2026Q4`，也從指令清單卡「下一季公告草稿」點一次
     - 第一則是純文字（`NEWS_TEMPLATE`），長按複製貼進 LINE 記事本換行正常，人數、日期是指定那一季

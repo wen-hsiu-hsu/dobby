@@ -21,9 +21,9 @@ Dobby 會介紹自己並 @mention 觸發者和管理員。
 ```
 回覆是 LINE Flex 卡片（跟報名狀態卡同一套照片標題區與深色配色），分成「查詢」「本週報名／請假」「管理員專用」三區：
 
-- 不需要參數的指令一列一個（顯示中文名稱＋實際指令文字），點下去等同使用者自己打那行指令：`報名人`、`公告`、`付款`、`欠`。自我介紹（單獨的 `@Dobby`）刻意不列：Notion 的 INTRODUCE 內容有 `{MANAGER}` 時它會 @mention 管理員，做成一點就送的按鈕容易讓管理員多收通知。
+- 不需要參數的指令一列一個（顯示中文名稱＋實際指令文字），點下去等同使用者自己打那行指令：`next`（本週打球資訊）、`報名人`、`公告`、`付款`、`欠`。自我介紹（單獨的 `@Dobby`）刻意不列：Notion 的 INTRODUCE 內容有 `{MANAGER}` 時它會 @mention 管理員，做成一點就送的按鈕容易讓管理員多收通知。
 - 報名／請假區是四顆按鈕：`+1 零打`（`@Dobby +1`）、`−1 零打`（`@Dobby -1`）、`請假`（`@Dobby 假`）、`銷假`（`@Dobby 銷假`）。一次報名多位只放文字提示，要自己輸入 `@Dobby +2`。
-- 管理員專用區只在觸發者是管理員時出現，一般成員完全看不到這個章節存在：`本週打球資訊`（`@Dobby next`）、`下一季公告草稿`（`@Dobby season YYYYQn`，季度依今天日期算出下一季）、代他人操作（只放文字提示 `@Dobby +N @名字`、`@Dobby @名字 假`）。
+- 管理員專用區只在觸發者是管理員時出現，一般成員完全看不到這個章節存在：`下一季公告草稿`（`@Dobby season YYYYQn`，季度依今天日期算出下一季）、代他人操作（只放文字提示 `@Dobby +N @名字`、`@Dobby @名字 假`）。
 
 卡片由 `src/commands/command-list-card.ts` 組裝，handler 是 `src/commands/command-list.ts`。altText（通知、`/logs`、不支援 Flex 的舊版 LINE 看到的）列出卡片上每個指令的寫法。卡片和 altText 都只列中文關鍵字，英文別名照樣能用，只是不列出來。設計取捨見 [ADR 0012](adr/0012-command-list-flex-card.md)。
 
@@ -94,6 +94,16 @@ altText 是改版前的完整純文字公告，截到 400 字。卡片超過 LIN
 
 ---
 
+### 查看本週打球資訊
+```
+@Dobby next
+```
+所有成員都可以用，查看下次打球的完整資訊。回覆是跟每週打球資訊推播（`docs/schedulers.md`）**完全相同的 Flex 卡片**，由 `src/commands/weekly-status-message.ts` 的 `buildWeeklyStatusReply()` 共用產生（同一份卡片產生器 `registration/flex-status-card.ts`）—— `next` 只是手動查看目前狀態的方式，不是另一種摘要格式；也因為輸出完全一樣，`next` 可以在週報推播失敗（例如 `DOBBY_GROUP_IDS` 沒設或找不到活動）時，在群組手動補發同一份內容（見 [ADR 0011](adr/0011-weekly-status-flex-card.md)）。卡片底部保留跟報名卡片相同的三顆按鈕（`+1 零打`／`−1 零打`／`請假`），一律作用在目前這一場活動、操作者自己身上，規則跟「報名指令」一節相同。
+
+`next` 不進鎖，Notion 寫入卡住時也查得到；代價是可能讀到還沒寫入的狀態。所以同一個活動日期還有報名／請假在排隊或執行中時（`pendingTaskCount`，`src/services/mutex.ts`），卡片後面會另附一則文字：「⏳ 還有 N 筆報名／請假正在處理，上面的名單可能還會變動，請稍後再查一次，不要重複操作。」卡片本身不變。報名／請假逾時的回覆會引導使用者用 `next` 確認結果，見 [ADR 0019](adr/0019-members-verify-timeout-via-next.md)。
+
+---
+
 ## 報名指令
 
 以下指令（含請假指令）的回覆是 LINE Flex 卡片，不是純文字：目前完整的零打名單、剩餘名額、請假名單都在同一張卡片上，不用另外下指令查詢。卡片底部固定有三顆按鈕：`+1 零打`（送出 `@Dobby +1`）、`−1 零打`（送出 `@Dobby -1`）、`請假`（送出 `@Dobby 假`），按下去等同使用者自己打字，一律作用在目前這一場活動、操作者自己身上，跟手動輸入指令的規則相同（例如非季租成員按「請假」一樣會被拒絕）。卡片內容細節（各種結果對應的徽章顏色/圖示、標題、副標題）見 `docs/registration.md`「狀態卡（Flex）」。
@@ -152,12 +162,6 @@ altText 是改版前的完整純文字公告，截到 400 字。卡片超過 LIN
 報名／取消報名時 `+N`/`-N` 跟 `@mention` 的前後順序皆可解析（`@Dobby @Vic +1` 也可以），上面採用跟 `@Dobby command` 指令清單卡（`src/commands/command-list-card.ts`）一致的順序。
 
 **注意：** 電腦版 LINE 的 @mention 有時無法正確傳遞，建議用手機操作代他人指令。
-
-### 查看本週打球資訊
-```
-@Dobby next
-```
-管理員可查看下次打球的完整資訊。回覆是跟每週打球資訊推播（`docs/schedulers.md`）**完全相同的 Flex 卡片**，由 `src/commands/weekly-status-message.ts` 的 `buildWeeklyStatusReply()` 共用產生（同一份卡片產生器 `registration/flex-status-card.ts`）—— `next` 只是手動查看目前狀態的方式，不是另一種摘要格式；也因為輸出完全一樣，`next` 可以在週報推播失敗（例如 `DOBBY_GROUP_IDS` 沒設或找不到活動）時，由管理員在群組手動補發同一份內容。卡片底部保留跟報名卡片相同的三顆按鈕（`+1 零打`／`−1 零打`／`請假`），一律作用在目前這一場活動、操作者自己身上，規則跟「報名指令」一節相同。非管理員仍回一句純文字拒絕訊息，見 [ADR 0011](adr/0011-weekly-status-flex-card.md)。
 
 ### 產生新一季公告
 ```

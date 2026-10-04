@@ -13,7 +13,7 @@
 1. 讀取 `DOBBY_GROUP_IDS` 環境變數（逗號分隔字串），解析成多個推播目標的 LINE 群組 ID 清單
 2. 計算下一個週六的日期
 3. 呼叫 `getEventOccupancy(nextSaturday)`（`src/services/notion/event-occupancy.ts`）取得該日行事曆活動、活動日所屬季度的 season 資料（不是推播當天的季度，見 [ADR 0008](adr/0008-season-derived-from-event-date.md)）、總名額（`totalSlots`）與季租出席人數（`presentSeasonMembers`）——這個 helper 也被 `next-event.ts`、報名/請假流程共用，名額計算邏輯統一在一處，這支排程沒有另外算一次。活動或季資料任一個查不到時回 `null`，排程記 `Weekly push aborted: no calendar/season data for date` 後中止；是哪一個缺，看同一事件裡 `getEventOccupancy` 記的 info `Event occupancy unavailable: no event or season for date`（`{date, hasEvent, hasSeason}`）
-4. 把 `occupancy` 交給 `buildWeeklyStatusReply()`（`src/commands/weekly-status-message.ts`）組出 Flex 訊息——這個 builder 同時也是 `@Dobby next`（`docs/commands.md`）的訊息來源，兩邊輸出**完全相同的卡片**，不是各自維護一份格式：`next` 除了讓管理員查看目前狀態，也是這支推播失敗時的手動補發手段，見 [ADR 0011](adr/0011-weekly-status-flex-card.md)
+4. 把 `occupancy` 交給 `buildWeeklyStatusReply()`（`src/commands/weekly-status-message.ts`）組出 Flex 訊息——這個 builder 同時也是 `@Dobby next`（`docs/commands.md`）的訊息來源，兩邊輸出**完全相同的卡片**，不是各自維護一份格式：`next` 除了讓成員查看目前狀態，也是這支推播失敗時的手動補發手段，見 [ADR 0011](adr/0011-weekly-status-flex-card.md)
 5. 逐一發送 Push Message 到每個群組，個別 try/catch（單一群組失敗只記 log、不影響其他群組、不重試），跑完後記一行總結 log（成功/失敗/總數）
 
 ### 訊息格式

@@ -8,12 +8,16 @@ import { buildEventStatusReply, type EventStatusParams } from './event-status-me
 
 class EventNotFoundError extends Error {}
 
-// Timed out, whether the mutation had started or was still queued (queued tasks aren't
-// cancelled, see below): it keeps running or runs later and may still write, but nobody
-// can report its result: this message has already used the replyToken. `+N`/`-N`
-// are not idempotent, so the message must stop users from retrying. `next` is
-// admin-only, so it can't point regular members there.
-const TIMEOUT_REPLY = '處理時間較長，這次操作可能已經完成，請勿重複操作。如需確認，請洽管理員。';
+// Timed out: the mutation keeps running, or runs later if still queued (queued tasks aren't
+// cancelled, see below), and may still write, but nobody can report its result: this message
+// has already used the replyToken. `+N`/`-N` are not idempotent, so both messages must stop
+// users from retrying, and point them at `next`, whose reply adds a warning after the
+// (unchanged) card while tasks are still pending (ADR 0019).
+// Started: the write may already have landed or still be in flight — truly unknown.
+const TIMEOUT_REPLY_STARTED = '處理時間較長，這次操作可能已經完成，請勿重複操作。稍後可輸入「@Dobby next」查看目前名單。';
+// Queued: nothing was sent yet, and the task will run in its turn. It isn't "done" and its
+// outcome (e.g. full) isn't known, so it promises only that it will be handled.
+const TIMEOUT_REPLY_QUEUED = '前面的操作處理較久，這次操作已排隊，會依序處理，請勿重複操作。稍後可輸入「@Dobby next」查看目前名單。';
 
 export async function withFreshCalendarEvent<T>(
   replyToken: string,
@@ -50,7 +54,8 @@ export async function withFreshCalendarEvent<T>(
     }
     if (err instanceof MutexTimeoutError) {
       logger.warn({ err }, `${context} timed out; result unknown to the user`);
-      await replyMessage(replyToken, [{ type: 'text', text: TIMEOUT_REPLY }]);
+      const text = err.started ? TIMEOUT_REPLY_STARTED : TIMEOUT_REPLY_QUEUED;
+      await replyMessage(replyToken, [{ type: 'text', text }]);
       return;
     }
     logger.error({ err }, `${context} error`);
