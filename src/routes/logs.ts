@@ -456,7 +456,7 @@ function messageClassifiedEntry(group: FlowGroup): LogEntry | undefined {
  * 訊息事件是不是指令（`@Dobby +1` 這類）還是普通對話（走自動回覆）。
  *
  * 優先看 `message-handler.ts` 在所有分支之前記的 info 摘要
- * `Message classified`（`isCommand`/`parsed`/`commandType`），`LOG_LEVEL=info`
+ * `Message classified`（`isCommand`/`commandType`），`LOG_LEVEL=info`
  * 下也分得出來。被 `message-handler.ts` 直接略過的非文字訊息、沒有 userId 的
  * 訊息不會有這行，算對話（沒有指令被處理，也不該被標成「指令沒回覆」的警告）。
  *
@@ -475,9 +475,9 @@ function groupKind(group: FlowGroup): EventKind {
     if (classified) return classified['isCommand'] === true ? 'command' : 'chat';
     const flat = flattenEntries(group);
     if (flat.some((e) => MESSAGE_IGNORED_MSGS.has(String(e.msg ?? '')))) return 'chat';
-    // 'Routing command'／'Message looks like command but failed to parse'
-    // 都只會從 message-handler.ts 的 isCommand(text) 分支裡發出，即使後者
-    // 代表解析失敗，也一樣是「這被判定為指令」的證據。
+    // 'Routing command' 只會從 message-handler.ts 的指令分支發出；
+    // 'Message looks like command but failed to parse' 是那個分支以前的
+    // 解析失敗出口（實際上從沒走到過，已移除），兩者都當「被判定為指令」的證據。
     if (flat.some((e) => e.msg === 'Routing command' || e.msg === 'Message looks like command but failed to parse')) {
       return 'command';
     }
@@ -630,10 +630,7 @@ function eventMergeKey(kind: EventKind, origin: string, status: EventStatus): st
 function groupOrigin(group: FlowGroup, kind: EventKind): string {
   if (kind === 'command') {
     const classified = messageClassifiedEntry(group);
-    if (classified) {
-      if (typeof classified['commandType'] === 'string') return classified['commandType'];
-      if (classified['parsed'] === false) return '（指令解析失敗）';
-    }
+    if (classified && typeof classified['commandType'] === 'string') return classified['commandType'];
     // 舊 log 檔沒有 `Message classified`，只能靠 debug 層的 `Routing command`。
     for (const e of flattenEntries(group)) {
       if (e.msg === 'Routing command' && e['command'] && typeof e['command'] === 'object') {

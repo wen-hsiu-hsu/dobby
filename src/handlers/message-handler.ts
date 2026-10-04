@@ -1,5 +1,5 @@
 import type { MessageEvent } from '@line/bot-sdk';
-import { parseCommand, isCommand } from '../commands/command-parser.js';
+import { parseCommand } from '../commands/command-parser.js';
 import { routeCommand } from '../commands/command-router.js';
 import { findReply } from '../services/auto-reply.js';
 import { replyMessage } from '../services/line/reply-service.js';
@@ -30,12 +30,11 @@ export async function handleMessage(event: MessageEvent): Promise<void> {
   // debug-only 'Routing command'/'Auto-reply lookup' lines. Must never carry
   // the message text or userId (ADR 0005). routes/logs.ts matches this
   // message string literally.
-  const isCommandText = isCommand(text);
-  const command = isCommandText ? parseCommand(text) : null;
+  // null means "not a command" (chat); unrecognised @Dobby text is still a
+  // command, parsed as UNKNOWN.
+  const command = parseCommand(text);
   logger.info(
-    isCommandText
-      ? { isCommand: true, parsed: command !== null, commandType: command?.type ?? null }
-      : { isCommand: false },
+    command ? { isCommand: true, commandType: command.type } : { isCommand: false },
     'Message classified',
   );
 
@@ -60,14 +59,10 @@ export async function handleMessage(event: MessageEvent): Promise<void> {
     const tracking = trackUser(userId, { groupId, multiChatId }, notionUser);
     // Commands like +1 need the USERS record that tracking creates for a brand-new
     // user; left fire-and-forget, their first command always loses the race.
-    if (!notionUser && isCommandText) await tracking;
+    if (!notionUser && command) await tracking;
   }
 
-  if (isCommandText) {
-    if (!command) {
-      logger.debug({ text }, 'Message looks like command but failed to parse');
-      return;
-    }
+  if (command) {
     logger.debug({ command, isAdmin }, 'Routing command');
     await routeCommand(command, event as any, isAdmin, notionUser);
     return;

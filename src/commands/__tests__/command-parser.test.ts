@@ -1,18 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { parseCommand, isCommand } from '../command-parser.js';
+import { parseCommand } from '../command-parser.js';
 import { CommandType } from '../../types/commands.js';
-
-describe('isCommand', () => {
-  it('returns true for @Dobby prefix', () => {
-    expect(isCommand('@Dobby +1')).toBe(true);
-  });
-  it('returns false for non-command', () => {
-    expect(isCommand('hello')).toBe(false);
-  });
-  it('returns false for lowercase @dobby — the bot name is case-sensitive by design', () => {
-    expect(isCommand('@dobby +1')).toBe(false);
-  });
-});
 
 describe('parseCommand', () => {
   it('returns null for non-command', () => {

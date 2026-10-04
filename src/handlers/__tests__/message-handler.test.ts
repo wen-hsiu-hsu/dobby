@@ -127,9 +127,21 @@ describe('handleMessage', () => {
       await handleMessage(textEvent('@Dobby +1'));
 
       expect(classifiedCalls()).toEqual([
-        [{ isCommand: true, parsed: true, commandType: 'registration' }, 'Message classified'],
+        [{ isCommand: true, commandType: 'registration' }, 'Message classified'],
       ]);
       expectNoPiiAtInfo('@Dobby +1');
+    });
+
+    it('classifies unrecognised @Dobby text as an unknown command and still routes it (no auto-reply)', async () => {
+      vi.mocked(findByUserId).mockResolvedValue({ isAdmin: false } as any);
+      vi.mocked(trackUser).mockResolvedValue();
+
+      await handleMessage(textEvent('@Dobby hello'));
+
+      expect(classifiedCalls()).toEqual([
+        [{ isCommand: true, commandType: 'unknown' }, 'Message classified'],
+      ]);
+      expect(routeCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'unknown' }), expect.anything(), false, expect.anything());
     });
 
     it('is logged before the USERS lookup, so a lookup failure still has it', async () => {
@@ -138,7 +150,7 @@ describe('handleMessage', () => {
       await handleMessage(textEvent('@Dobby 假'));
 
       expect(classifiedCalls()).toEqual([
-        [{ isCommand: true, parsed: true, commandType: 'leave' }, 'Message classified'],
+        [{ isCommand: true, commandType: 'leave' }, 'Message classified'],
       ]);
     });
   });

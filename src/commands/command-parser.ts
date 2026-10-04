@@ -8,6 +8,11 @@ function normalizeFullWidth(text: string): string {
     .replace(/－/g, '-');
 }
 
+/**
+ * Returns null only when the text is not a command at all (no exact `@Dobby`
+ * prefix) — message-handler treats that as chat. Any `@Dobby` text it doesn't
+ * recognise is still a command and comes back as UNKNOWN, never null.
+ */
 export function parseCommand(text: string): ParsedCommand | null {
   if (!text.startsWith('@Dobby')) return null;
 
@@ -94,8 +99,4 @@ export function parseCommand(text: string): ParsedCommand | null {
   }
 
   return { type: CommandType.UNKNOWN, rawText: text };
-}
-
-export function isCommand(text: string): boolean {
-  return text.startsWith('@Dobby');
 }

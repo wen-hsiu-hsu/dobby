@@ -63,16 +63,7 @@
 
 ## 程式碼整理與小改善（非 bug，低優先）
 
-- [ ] **`message-handler.ts` 的「指令解析失敗」分支永遠走不到。** `src/handlers/message-handler.ts:66-69` 的 `if (!command)`（記 debug `Message looks like command but failed to parse` 後 return）不會執行：`isCommand()`（`src/commands/command-parser.ts:98-100`）就是 `text.startsWith('@Dobby')`，而 `parseCommand()` 只在「不是 `@Dobby` 開頭」時回 `null`（第 12 行），其餘至少回 `{ type: CommandType.UNKNOWN }`（第 95 行）。所以 `Message classified` 的 `parsed` 永遠是 `true`，打錯的指令會以 `commandType: 'unknown'` 進 `routeCommand`、被靜默忽略，`/logs` 顯示成「指令／警告」、「來自」`unknown`（2026-09-28 本機 reqId `d8dad6` 的 `@Dobby hello` 實測）。
-
-  不是 bug，行為正確，只是死碼加上幾處為它寫的顯示邏輯。不處理也沒有風險；風險只在之後有人改 `parseCommand()` 讓它對某些 `@Dobby` 開頭的文字回 `null` 時，這些分支才會突然「活過來」，所以處理時要決定是刪掉還是保留當防禦。
-
-  如果要處理：
-  - 相關的地方要一起看：`message-handler.ts:37` 的 `parsed: command !== null`、`src/routes/logs.ts:478-481`（舊 log fallback 認 `Message looks like command but failed to parse`）、`logs.ts:635`（`parsed === false` 時「來自」顯示「（指令解析失敗）」）、`docs/logging.md` 第 39、45、49、60 行的說明，以及 `src/routes/__tests__/logs.test.ts` 裡用到 `failed to parse`／`parsed: false` 的測試。
-  - **`logs.ts:478-481` 的舊 log fallback 不能刪**：`/logs` 會讀本機保留 7 天、R2 備份的舊 log 檔，裡面可能有這行。
-  - 如果改成保留分支，可以考慮讓 `parseCommand()` 的型別不回 `null`（呼叫端先確認 `isCommand()`），讓 TypeScript 直接擋掉這個分支；如果刪掉，`Message classified` 的 `parsed` 欄位要一起決定去留（`logs.ts:635` 在讀它）。
-
-- [ ] **`/logs`「起點」那一步的摘要沒顯示 `lagMs`。** `src/handlers/event-router.ts` 的 `Processing event` 從 2026-09-28 起帶 `lagMs`（事件發生到 Pi 開始處理的毫秒數，定義與判讀限制見 `docs/logging.md`「起點」那段），但 `src/routes/logs.ts:866-903` 的 `startStepTimeline()` 組 note 時只放訊息內容、事件類型、來源、`webhookEventId` 和 `isRedelivery`，沒有 `lagMs`，要點開「起點」看原始 JSON 才看得到；`?format=text` 也沒有。`docs/logging.md` 已經寫明「目前沒有顯示在起點的摘要文字裡」。
+- [ ] **`/logs`「起點」那一步的摘要沒顯示 `lagMs`。** `src/handlers/event-router.ts` 的 `Processing event` 從 2026-09-28 起帶 `lagMs`（事件發生到 Pi 開始處理的毫秒數，定義與判讀限制見 `docs/logging.md`「起點」那段），但 `src/routes/logs.ts:863-900` 的 `startStepTimeline()` 組 note 時只放訊息內容、事件類型、來源、`webhookEventId` 和 `isRedelivery`，沒有 `lagMs`，要點開「起點」看原始 JSON 才看得到；`?format=text` 也沒有。`docs/logging.md` 已經寫明「目前沒有顯示在起點的摘要文字裡」。
 
     不是 bug，只是不方便。如果要處理：在 note 加一段（例如「延遲 246ms」），舊 log 沒有這個欄位時不要顯示。**負值是正常的**（Pi／容器時鐘偏差，本機實測看過 -302），不要當成錯誤標紅；重送事件（`isRedelivery`）的值本來就很大，搭配既有的黃色重送提示看。改完要同步 `docs/logging.md` 那句「目前沒有顯示」，`logs.test.ts` 有起點 note 的測試可以參考。
 
