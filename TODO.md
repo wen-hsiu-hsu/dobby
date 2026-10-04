@@ -56,46 +56,6 @@
 
 ## 已知問題（尚未處理）
 
-- [ ] **同一個 webhook 事件送達兩次時會被處理兩次，`+N`／`-N` 可能重複寫入。**（2026-09-29 對照 LINE 官方文件發現）
-
-  **嚴重度：潛在的資料錯誤，沒有觀察到，低優先、不是急件。** 2026-09-29 已在 LINE Developers Console 確認 **Webhook redelivery 是關閉的**，所以下方「重送」與「2 秒逾時」兩種來源目前都不會觸發重複送達；剩下的只有 LINE 文件那句沒講清楚適用範圍的「網路路由問題」。**如果之後要打開 Webhook redelivery，要先處理這一條。** 沒打開的話，可以先照下方「動手前先確認」開 Error statistics 觀察，確認真的有重複送達再決定要不要做。
-
-  現況：`src/routes/webhook.ts:9-30` 驗完簽章就回 200（第 11 行），再把 `events` 丟給 `processEvents()`。`src/handlers/event-router.ts` 對每筆事件在 `Processing event`（第 24-33 行）記下 `webhookEventId`、`isRedelivery`，但**沒有任何去重**，同一個 `webhookEventId` 來幾次就處理幾次。
-
-  LINE 官方文件說會有同一事件送達不只一次的情況（網頁版是 JS 渲染，要讀內容可以 `curl -sL <網址>/index.html.md` 抓 Markdown 原始檔）：
-  - [Receive messages → Redeliver a webhook that failed to be received](https://developers.line.biz/en/docs/messaging-api/receiving-messages/#webhook-redelivery)：
-    - **Webhook 重送預設關閉**，要在 Console 的 Messaging API 分頁手動開啟。開啟後，bot 伺服器沒回 2xx 時 LINE 會重送，次數和間隔不公開、可能不經通知變更。
-    - 重送的事件內容跟原本一樣（`webhookEventId`、`replyToken` 都不變），只有 `deliveryContext.isRedelivery` 變成 `true`。
-    - 同一段的注意事項：「The same webhook event may be sent to your bot server more than once by different reasons such as network routing problem. To detect duplicates, use `webhookEventId`」，以及「重送時事件到達的順序可能跟發生的順序不同」。這兩句寫在「開啟重送前要注意」的段落裡，沒講清楚重送關閉時會不會發生。
-  - [Check webhook error statistics](https://developers.line.biz/en/docs/messaging-api/check-webhook-error-statistics/)：LINE 等回應只等 **2 秒**，超過就記成 `request_timeout`，而且文件明講「Note that the webhook may have been successfully received by the bot server」。也就是說，「Pi 已經處理、LINE 卻當成失敗」不只發生在 200 遺失，只要 200 超過 2 秒才回到 LINE 就算。正式環境的路徑是 LINE → Cloudflare Tunnel → Pi（`docs/overview.md:66`），Pi 負載高、事件迴圈卡住、tunnel 抖動都可能讓回應超過 2 秒。
-
-  **動手前先確認**：
-  1. Console → Messaging API 分頁，「Webhook redelivery」有沒有開（2026-09-29 確認為關閉；有人改過設定的話要重新評估）。
-  2. 同一頁打開「Error statistics aggregation」（預設關閉、不會回溯），觀察一段時間，看有沒有 `request_timeout` 或 `error_status_code`。這比到 `/logs` 逐筆看更適合確認現況。
-  3. Pi 的 `/logs`：`isRedelivery` 為 true 時，「起點」那一步會顯示黃色的「LINE 重送這筆事件（isRedelivery）」（`src/routes/logs.ts:884-901`）；重複處理時第二次的 `Reply failed` 會讓事件卡片變紅（`groupStatus()` 的 `hasReplyFailure`，`logs.ts:661-664`），可以用 `webhookEventId` 搜尋對照。
-  - 本機 `logs/`（檔案日期 2026-09-21、22、26、27、28）沒有任何 `isRedelivery: true`，也沒有重複的 `webhookEventId`。但本機是 ngrok 開發環境的資料（`docs/development.md`），不能當正式環境的證據。
-
-  會出事的情境（同一事件被處理兩次時）：
-  - **`+N` 會再加最多 N 筆**（`commands/registration/capacity-calculator.ts:98-171`），編號接著排。非管理員會被剩餘名額截斷；管理員不受名額上限，可能超額；名額已滿時第二次被拒絕、不寫入。
-  - **`-N` 會再刪最多 N 筆**（第 173-208 行），前提是對方還有剩下的報名；沒有就回「找不到報名紀錄」、不寫入。
-  - 第二次的回覆會因為 replyToken 已用過而被 LINE 拒絕（`Reply failed`），所以**當下的回覆看不出被重複寫入**；之後的 `@Dobby next`、週報、下一次報名的回覆名單才會顯示多出來或少掉的那筆。
-  - **`假`／`銷假`**：`leave-handler.ts` 在鎖內重讀狀態，單純重複會走「已請假」／「未請假」的 no-op。但前提是兩次之間沒有相反的指令：LINE 說重送順序可能亂掉，「假 → 銷假 → 遲到的重送『假』」會**重新登記請假**，寫錯資料。
-  - **發言數**：群組／多人聊天的**所有文字訊息**（不只指令，閒聊也算）重複送達都會讓 `trackUser` 多算 1；一對一聊天不追蹤（`handlers/message-handler.ts:59-64`）。新使用者的第一則訊息重複送達不會建出兩個 USERS 頁（鎖內一律重讀 USERS，`services/user-management.ts:95`），只會多算 1。
-  - 其他只會多一筆 `Reply failed`、不會寫壞資料的：自動回覆、其他唯讀指令（owe、next、news 等）、`join`；`memberJoined` 的 `trackJoinedMember` 不計發言數、groups 是合併寫入，重複也是冪等的。
-
-
-  如果要處理：
-  - **位置**：放在 `event-router.ts` 的 `runWithContext` 裡面、`Processing event` 那行 info log 之後、`switch` 之前。放在 `runWithContext` 外面，略過時記的 log 沒有 reqId，在 `/logs` 會變成「背景/未關聯事件」；放在 `Processing event` 之前，就沒有「起點」那一步，`isRedelivery` 也不會記下來。原本那次和重複那次一定是兩個不同的 reqId（`utils/request-context.ts:13` 每次隨機產生），`/logs` 上只能靠 `webhookEventId` 把兩者對起來。
-  - **依據只能是 `webhookEventId`，不能用 `isRedelivery` 判斷要不要略過**：網路路由造成的重複，`isRedelivery` 可能是 false；Pi 當機後的重送 `isRedelivery` 是 true，而那種反而應該處理（原本那次根本沒處理到）。
-  - **沒有 `webhookEventId` 時不要去重**：`src/handlers/__tests__/event-router.test.ts` 的事件大多沒帶這個欄位（undefined），`src/__tests__/auto-reply.test.ts` 帶的是空字串。拿 undefined 或 `''` 當 key 的話，第一筆之後全部會被當成重複。
-  - **「檢查」和「記下」要在同一段同步程式裡，中間不能有任何 `await`**：兩個 webhook 請求會各自呼叫 `processEvents()`、交錯執行，`has` 和 `set` 之間夾了 `await` 的話，同時到的兩份都會通過檢查。要在開始處理時就記下 ID，不是處理完才記：原本那次還在 mutex 排隊時，重複的那份就可能到了。
-  - **保存方式**：in-memory 的 Map（事件 ID → 收到時間），定期清掉過期的項目，控制記憶體用量。保留時間**不能照 replyToken 的 20 分鐘抓**：20 分鐘只限制 replyToken 還能不能用，不限制重送什麼時候到；超過 20 分鐘才到的重送仍然會寫入資料，而且完全沒辦法回覆，是最糟的情況。重送的次數和間隔不公開，保留時間要寬鬆（例如 1 小時），並在程式註解寫明這是推估。
-  - Pi 重啟後 Map 清空，可以接受：重啟前處理過、重啟後才被重送的組合非常少見；Pi 當機時原本那次通常根本沒處理，重送本來就該處理。要跨重啟去重得另外存（檔案或 Notion），成本不成比例，要做的話先評估。
-  - 同一個 webhook 裡的多筆事件各自有自己的 `webhookEventId`，去重的單位是「事件」，不是整個 webhook 請求。放在 event-router 會自動涵蓋 `join`／`memberJoined`，對它們去重也無害。
-  - **`/logs` 呈現**：略過時記一行 info（例如 `Duplicate webhook event skipped`，帶 `webhookEventId`、`isRedelivery`，不帶 userId；不要用 warn，否則卡片會變黃）。**要注意的方向**：被略過的訊息事件不會有 `Message classified`、也沒有 Notion 步驟，`groupKind()`（`routes/logs.ts:468-491`）會把它判成「對話」、`groupStatus()` 判成「完成」，變成一張看不出是重複事件的綠色卡片。要讓 `groupKind()`／`groupStatus()`（或標題、預覽）認得這個訊息字串，在 `/logs` 上一眼分辨出「這是被略過的重複事件」。
-  - **測試**：寫在 `src/handlers/__tests__/event-router.test.ts`（那裡的 `handleMessage` 本來就是 mock），同一個 `webhookEventId` 送兩次，斷言 `handleMessage` 只被呼叫一次；另外測沒有 `webhookEventId` 的事件不會被去重。去重的 Map 在模組層級，測試之間會殘留，要提供重置函式（在 `beforeEach` 呼叫），或每個測試用不同的 ID。**不要用 `createTestBot` 測**：它的 `run()` 直接呼叫 `handleMessage`（`src/test-utils/create-test-bot.ts:219`），完全不經過 `processEvents()`，測不到去重；如果為了測試改成經過 `processEvents()`，`buildLineEvent` 把 `webhookEventId` 寫死成 `'evt-1'`（第 140 行），同一個測試檔裡第二次以後的 `run()` 會全部被當成重複吞掉。
-  - 同步文件：`docs/architecture.md`「Fire-and-Forget Webhook 處理」小節（目前寫「本專案沒有開啟重送」，改完要一起更新），以及 `docs/logging.md` 對「起點」和事件種類／狀態的說明（新 log 行要寫進去）。
-
 - [ ] **`truncateAltText()` 截斷 altText 時，可能把 emoji 切成半個字元。** `src/commands/flex-card-parts.ts:117-119` 用 `text.slice(0, ALT_TEXT_MAX - 1) + '…'`（`ALT_TEXT_MAX = 400`，第 114 行）截字。`slice` 和 `.length` 算的是 UTF-16 code unit，不是字。🏸、🎉 這類 emoji 佔 2 個 code unit（surrogate pair），如果第 399 個 code unit 剛好是某個 emoji 的前半，截完的結尾就會是「孤立的前半個 surrogate＋…」。2026-10-01 實測 `truncateAltText('a'.repeat(398) + '🏸' + 'b'.repeat(10))`，結尾是 `"a\ud83c…"`。
 
   **算是潛在 bug，但不會讓訊息送不出去。** 同一天把這個 altText 送到 LINE validate API（`POST /v2/bot/message/validate/reply`），回 200：`JSON.stringify` 會把孤立的 surrogate 轉成 `\ud83c` 跳脫字元，LINE 也接受。影響只在顯示：LINE 通知、聊天列表預覽、`/logs` 看到的 altText 結尾，可能多一個亂碼字元（通常是 �），出現在「…」前面。實際在手機上長什麼樣子還沒驗證過。卡片本身不受影響，因為卡片內容不經過 `truncateAltText`。

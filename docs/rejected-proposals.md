@@ -28,3 +28,10 @@
 
 - **部署後逐項驗證 log 改動的手動測試項、重測本機沒送到的情境**（2026-09-29 決定）— 不加進「手動測試追蹤」。2026-09-28 的 log 可觀測性改動已在本機用真實 LINE 訊息驗證過 30 個事件（原始 log 與 `/logs` 呈現都正確）；閒聊、貼圖、連續兩次 `假`、非管理員代報、從 LINE 選單點選的真正 mention、mutex 逾時這幾種當時沒送到本機伺服器或沒觸發，決定不再補測。部署到 Pi 後確認 `stop_grace_period` 生效（`docker inspect` 的 `StopTimeout` 為 15）也不列成追蹤項目。
 - **`notion-fetch.test.ts` 兩個 429 重試測試各跑 1 秒、3 秒**（2026-09-28 發現）— 不處理。原因是測試用 `Retry-After: '0'`，程式把 0 視為無效、退回預設 1 秒等待；只影響測試速度，不影響正確性。新寫的 429 測試已改用 fake timers。
+- **用 `webhookEventId` 對 webhook 事件去重，避免同一事件被處理兩次**（2026-09-29 發現、2026-10-04 決定）— 不做。現況：`src/handlers/event-router.ts` 會把 `webhookEventId`、`isRedelivery` 記在 `Processing event`，但沒有去重，同一事件送達幾次就處理幾次。重複處理時，`+N`／`-N` 會再寫入一次；「假 → 銷假 → 晚到的重送『假』」會重新登記請假；群組文字訊息的發言數會多算 1。第二次回覆會因 replyToken 已用過而 `Reply failed`，所以當下的回覆看不出重複寫入。不做的理由：
+  1. **主要的重複來源都關著。** LINE 的 Webhook redelivery 預設關閉，2026-09-29 在 LINE Developers Console 確認本專案也是關閉的，而且**決定不會去改這個設定**。重送關閉時，Pi 回應超過 2 秒（`request_timeout`）或回非 2xx，LINE 都不會重送。
+  2. **剩下的來源沒有證據。** LINE 文件寫了「The same webhook event may be sent to your bot server more than once by different reasons such as network routing problem」，但這句放在「開啟重送前要注意」的段落裡，沒講清楚重送關閉時會不會發生（[Redeliver a webhook that failed to be received](https://developers.line.biz/en/docs/messaging-api/receiving-messages/#webhook-redelivery)）。到目前為止也沒觀察到重複的 `webhookEventId`。
+
+  如果真的發生，`/logs` 看得出來：同一個 `webhookEventId` 會出現兩次，第二次的 `Reply failed` 會讓事件卡片變紅。
+
+  重新評估的條件：Console 的 Webhook redelivery 被打開；或在 `/logs`、Console 的 Error statistics 實際看到同一個 `webhookEventId` 被處理兩次。要做的話，先看 git 歷史中被刪掉的 `TODO.md` 項目「同一個 webhook 事件送達兩次時會被處理兩次」，裡面整理了去重放的位置、保留時間、測試寫法和幾個陷阱（例如沒有 `webhookEventId` 的事件不能去重、檢查和記下之間不能有 `await`、不能用 `isRedelivery` 判斷要不要略過）。

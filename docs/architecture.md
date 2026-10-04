@@ -66,7 +66,7 @@ Webhook 收到 LINE 事件後，立即回傳 200，再非同步處理事件。
 
 **原因：** LINE 只等 bot 伺服器 2 秒，超過就記成 `request_timeout`（[Check webhook error statistics](https://developers.line.biz/en/docs/messaging-api/check-webhook-error-statistics/)）；Reply Token 也只保證在收到 webhook 後 1 分鐘內可用。指令處理常要好幾秒（多次 Notion 呼叫），同步處理完才回 200 會逾時，所以先回 200 再非同步處理。
 
-LINE 的 webhook 重送（redelivery）預設關閉，本專案也沒有開啟（2026-09-29 在 LINE Developers Console 確認），所以回應逾時或非 2xx 時 LINE **不會**重送。開啟的話，同一事件可能被處理兩次，要先做 `webhookEventId` 去重，見 `TODO.md`「同一個 webhook 事件送達兩次時會被處理兩次」。
+LINE 的 webhook 重送（redelivery）預設關閉，本專案也沒有開啟（2026-09-29 在 LINE Developers Console 確認），而且決定不會打開，所以回應逾時或非 2xx 時 LINE **不會**重送。程式沒有用 `webhookEventId` 去重，同一事件送達兩次就會處理兩次；決定不做去重的理由和重新評估的條件見 [rejected-proposals.md](rejected-proposals.md)「用 `webhookEventId` 對 webhook 事件去重」。
 
 ### In-Process Mutex
 
