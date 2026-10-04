@@ -3,6 +3,7 @@ import { withFreshCalendarEvent } from '../with-fresh-calendar-event.js';
 import * as mutex from '../../../services/mutex.js';
 import { replyMessage } from '../../../services/line/reply-service.js';
 import { logger } from '../../../utils/logger.js';
+import { buildEventStatusReply, type EventStatusParams } from '../event-status-message.js';
 
 // Keep the real MutexTimeoutError so the wrapper's instanceof check sees the same class.
 vi.mock('../../../services/mutex.js', async (importOriginal) => ({
@@ -10,6 +11,7 @@ vi.mock('../../../services/mutex.js', async (importOriginal) => ({
   withMutex: vi.fn(),
 }));
 vi.mock('../../../services/line/reply-service.js');
+vi.mock('../event-status-message.js');
 vi.mock('../../../utils/logger.js', () => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
@@ -22,6 +24,22 @@ const calEvent = {
   isPaused: false,
   courts: null,
 };
+
+const status: EventStatusParams = {
+  date: '2026-05-09',
+  headline: '報名成功 ✅',
+  badgeColor: 'lime',
+  badgeIcon: 'icon',
+  title: '報名成功',
+  subtitle: 'Alice 報名 1 位',
+  guests: ['Alice'],
+  totalSlots: 4,
+  presentSeasonMembers: 8,
+  guestFee: 200,
+  eventPageId: 'evt-1',
+  absenteePageIds: ['person-1'],
+};
+const card = { type: 'flex', altText: 'alt', contents: { type: 'bubble' } } as const;
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -44,12 +62,53 @@ describe('withFreshCalendarEvent', () => {
 
   it('locks by date and runs mutation with the refetched value', async () => {
     const fresh = { ...calEvent, guests: ['Alice'] };
-    const mutation = vi.fn();
+    const mutation = vi.fn().mockResolvedValue(status);
+    vi.mocked(buildEventStatusReply).mockResolvedValue(card);
 
     await withFreshCalendarEvent('token', '2026-05-09', 'ctx', () => Promise.resolve(fresh), mutation);
 
     expect(mutex.withMutex).toHaveBeenCalledWith('2026-05-09', expect.any(Function));
     expect(mutation).toHaveBeenCalledWith(fresh);
+  });
+
+  it("builds and sends the mutation's status card only after the lock is released", async () => {
+    let lockHeld = false;
+    vi.mocked(mutex.withMutex).mockImplementation(async (_key, fn) => {
+      lockHeld = true;
+      try {
+        return await fn();
+      } finally {
+        lockHeld = false;
+      }
+    });
+    const heldDuring: boolean[] = [];
+    vi.mocked(buildEventStatusReply).mockImplementation(async () => {
+      heldDuring.push(lockHeld);
+      return card;
+    });
+    vi.mocked(replyMessage).mockImplementation(async () => {
+      heldDuring.push(lockHeld);
+    });
+
+    await withFreshCalendarEvent('token', '2026-05-09', 'ctx', () => Promise.resolve(calEvent), () => Promise.resolve(status));
+
+    expect(buildEventStatusReply).toHaveBeenCalledWith(status);
+    expect(replyMessage).toHaveBeenCalledWith('token', [card]);
+    expect(heldDuring).toEqual([false, false]);
+  });
+
+  it('falls back to the headline, not "系統錯誤", when building the status card throws', async () => {
+    vi.mocked(buildEventStatusReply).mockRejectedValue(new Error('Notion 502'));
+
+    await withFreshCalendarEvent('token', '2026-05-09', 'ctx', () => Promise.resolve(calEvent), () => Promise.resolve(status));
+
+    expect(replyMessage).toHaveBeenCalledTimes(1);
+    expect(replyMessage).toHaveBeenCalledWith('token', [{ type: 'text', text: '報名成功 ✅\n（名額狀態暫時無法顯示）' }]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(Error) }),
+      'ctx status card failed; replied with the headline only',
+    );
+    expect(logger.error).not.toHaveBeenCalled();
   });
 
   it('tells the user the result is unknown and not to retry when the mutex times out', async () => {
@@ -65,6 +124,9 @@ describe('withFreshCalendarEvent', () => {
       'ctx timed out; result unknown to the user',
     );
     expect(logger.error).not.toHaveBeenCalled();
+    // Only the timeout message: the background task's card would be rejected anyway.
+    expect(replyMessage).toHaveBeenCalledTimes(1);
+    expect(buildEventStatusReply).not.toHaveBeenCalled();
     // The warn already says what happened; the background task logs its own outcome later.
     expect(logger.info).not.toHaveBeenCalledWith(expect.anything(), 'ctx outcome');
   });

@@ -12,7 +12,7 @@
 | [development.md](development.md) | 本地開發設定、環境變數、測試方式 | 建置、部署、加新指令的步驟、環境變數、本機 `.env` 該接哪個 LINE channel、寫或改 Flex 卡片（真機才看得出的渲染陷阱） |
 | [notion/databases.md](notion/databases.md) | Notion 資料庫業務邏輯與欄位說明 | 改動任何讀寫 Notion 的邏輯 |
 | [logging.md](logging.md) | `/logs` 頁面的事件列表/時間軸版面、合併顯示、狀態判定（完成／降級／警告／失敗）、R2 同步折疊、遮蔽 ID 說明 | 要用 `/logs` 除錯、不確定這個頁面有什麼功能、看不懂某個事件為什麼是這個狀態 |
-| [performance-observations.md](performance-observations.md) | 從真實 log 分析出的效能待辦（鎖內組回覆訊息、Notion 長尾造成連鎖逾時） | 要處理效能、改 Notion 呼叫模式或鎖內流程 |
+| [performance-observations.md](performance-observations.md) | 從真實 log 分析出的效能待辦（Notion 長尾造成連鎖逾時、狀態卡重複查本人姓名） | 要處理效能、改 Notion 呼叫模式或鎖內流程 |
 | [rejected-proposals.md](rejected-proposals.md) | 已評估、不採納的提案（SQLite、表格驅動路由、分頁等），各附重新評估條件 | 提出重構、效能優化、新機制之前，先 grep 確認沒被否決過 |
 | [achievements-rulebook.md](achievements-rulebook.md) | 成就系統（含賽季彩蛋）的遊戲規則，**尚未實作** | 要開發或討論成就系統；開工前先看 `TODO.md`「規劃中功能」 |
 

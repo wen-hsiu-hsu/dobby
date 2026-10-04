@@ -59,9 +59,9 @@ export async function findMembersOfSeasons(
  * 請假／銷假成功時是剛 PATCH 完 `請假人` 就查：2026-10-04 實測 8 次寫入後立刻 query 都已反映，
  * 萬一沒反映，漏掉的由 queryAlignedToIds 逐筆補查、多的丟掉，輸出仍以傳入的 `absentees` 為準。
  *
- * query 本身失敗時退回逐筆 GET。報名／請假是在鎖內、寫完 `請假人` 之後才查姓名，這裡丟錯會讓使用者
- * 收到「系統錯誤」，但寫入其實已經成功，`+N` 重打就會重複報名。`📅 行事曆` 被改名、或 relation 被
- * 改成單向時，query 會 100% 失敗，所以不能讓它擋住回覆。
+ * query 本身失敗時退回逐筆 GET。報名／請假是在寫完之後、放鎖之後才查姓名，這裡丟錯的話
+ * `withFreshCalendarEvent` 會退回只回 headline 一句話，使用者看不到完整狀態卡。`📅 行事曆` 被改名、
+ * 或 relation 被改成單向時，query 會 100% 失敗，所以不能讓 query 一失敗就降級。
  * catch 也涵蓋 queryAlignedToIds 內部補查 GET 或轉換資料的錯誤，這時會整份重新逐筆 GET；
  * 這要「query 沒反映寫入」又剛好「補查失敗」才會發生，很少見，接受這個成本，不為它細分錯誤來源。
  */

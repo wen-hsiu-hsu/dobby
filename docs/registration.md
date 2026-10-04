@@ -36,13 +36,17 @@ Capacity Calculator
 更新 Notion 行事曆（零打 multi-select）
     │
     ▼
-組訊息並回覆 LINE：新名單 + 剩餘名額 + 請假名單（目前在鎖內送出）
+mutation 回傳狀態卡要用的資料（鎖內算出的快照：新名單、名額、請假人 pageId）
     │
     ▼
 釋放 Mutex
+    │
+    ▼
+鎖外組狀態卡（查請假人姓名）並回覆 LINE；逾時的話不會走到這步
+  └── 組卡片 throw（查姓名失敗）→ 回 headline 純文字＋「（名額狀態暫時無法顯示）」，不回「系統錯誤」
 ```
 
-失敗或邊界情況（名額不足、重複請假、未請假卻銷假等）也會回覆同一種「完整名額狀態」卡片，只是徽章顏色／圖示、標題、副標題換成對應的說明，而不是只回一句話。從取鎖開始的流程中，只有 `withFreshCalendarEvent` 統一處理的三種情況維持純文字：找不到活動、mutex 逾時（見下方「Mutex 保護」）、其他非預期錯誤（「系統錯誤，請稍後再試」）。取鎖前的檢查（指定對象語法錯誤、非管理員代操、查無對象、查無季資料、對象不是季租成員、查詢 throw 時的「系統錯誤」）也都是純文字，因為這些情況還沒有活動資料可以組卡片。例外情況見下方「請假邏輯」一節。
+失敗或邊界情況（名額不足、重複請假、未請假卻銷假等）也會回覆同一種「完整名額狀態」卡片，只是徽章顏色／圖示、標題、副標題換成對應的說明，而不是只回一句話。從取鎖開始的流程中，只有 `withFreshCalendarEvent` 統一處理的四種情況維持純文字：找不到活動、mutex 逾時（見下方「Mutex 保護」）、鎖內其他非預期錯誤（「系統錯誤，請稍後再試」）、鎖外組狀態卡失敗（回 headline，例如「報名成功 ✅」，下一行接「（名額狀態暫時無法顯示）」）。最後一種不回「系統錯誤」，因為這時寫入已經成功，`+N` 不是冪等的，引導重試會重複報名；也不改組一張請假欄位空白或不完整的卡片，因為請假名單一律完整列出。取鎖前的檢查（指定對象語法錯誤、非管理員代操、查無對象、查無季資料、對象不是季租成員、查詢 throw 時的「系統錯誤」）也都是純文字，因為這些情況還沒有活動資料可以組卡片。例外情況見下方「請假邏輯」一節。
 
 ### 狀態卡（Flex）
 
@@ -132,7 +136,7 @@ Mutex 以活動日期字串為 key（不是 calendar 頁面 ID，這樣不用多
 | `callerTimedOut` | 呼叫端是否已經因 10 秒逾時放棄等待 |
 | `fnFailed` | `fn()` 是否丟出錯誤。呼叫端逾時後，背景任務失敗只有這個欄位看得到，錯誤本身不會再被任何人記下。注意報名／請假「找不到活動」也會是 `true`：`withFreshCalendarEvent` 是在鎖內丟 `EventNotFoundError` 再由 wrapper 接住，這是正常流程，不是失敗（看同一 reqId 的 `… outcome` 是不是 `event-not-found`） |
 
-看法：`queuedAhead > 0` 表示有人同時操作同一場活動；`waitMs` 大而 `heldMs` 正常是被前面的人拖住，`heldMs` 本身就大則是鎖內的 Notion 呼叫或 LINE 回覆慢（對照同一 reqId 時間軸上的各步 `durationMs`）。逾時時，呼叫端那一行 warn 也帶 `queuedAhead`，摘要則要等背景任務跑完才寫出，會排在該事件 `Event processed` 之後。
+看法：`queuedAhead > 0` 表示有人同時操作同一場活動；`waitMs` 大而 `heldMs` 正常是被前面的人拖住，`heldMs` 本身就大則是鎖內的 Notion 呼叫慢（2026-10-04 起請假人姓名查詢和 LINE 回覆都移到鎖外，不算在 `heldMs` 裡）（對照同一 reqId 時間軸上的各步 `durationMs`）。逾時時，呼叫端那一行 warn 也帶 `queuedAhead`，摘要則要等背景任務跑完才寫出，會排在該事件 `Event processed` 之後。
 
 等級依 key 格式決定：key 是純日期（`YYYY-MM-DD`）才記 info，其他 key 一律 debug。`user-track-${userId}` 這種含 userId 的 key 因此不會把 userId 寫進 info 層（ADR 0005）；之後新增的 key 格式預設也走 debug，要放 info 得先確認 key 不含身分資訊，再改 `mutex.ts` 的 `INFO_SUMMARY_KEY`。
 
@@ -220,7 +224,8 @@ LINE 電腦版和手機版的 `mentionees` 行為不一致：
 outcome 行不是「每個事件恰好一行」，例外有這些：
 
 - **mutex 逾時**：當下沒有 outcome，wrapper 已有 warn。背景的讀寫跑完後，它自己的 outcome 仍會用同一個 reqId 寫出，時間軸上排在 `Event processed` 之後。例外：背景 refetch 才發現沒有活動時，`EventNotFoundError` 會被 mutex 吞掉，不會有 `event-not-found` 行（很少見）。
-- **鎖內非預期錯誤**：wrapper 的 `… error` 那行就是結果。outcome 是在判斷完、組回覆訊息之前記的，所以如果是組訊息時（`buildEventStatusReply` 查請假人姓名；2 人以上時反向查詢失敗會先退回逐筆 GET，見 [notion/databases.md](notion/databases.md)，GET 也失敗才會丟錯）才 throw，會同時有 outcome 行和 error 行——outcome 代表判斷結果（寫入成功的分支代表已經寫入），error 代表回覆沒送出。
+- **鎖內非預期錯誤**：wrapper 的 `… error` 那行就是結果。
+- **鎖外組狀態卡失敗**：outcome 照常寫出（判斷和寫入都在鎖內完成了），另外有一行 warn `… status card failed; replied with the headline only`，使用者收到的是 headline 純文字。這只在 `buildEventStatusReply` 查請假人姓名丟錯時發生：0 人不查；1 人是直接 GET，失敗就丟錯；2 人以上時反向查詢失敗會先退回逐筆 GET（見 [notion/databases.md](notion/databases.md)），GET 也失敗才會丟錯。這時 `/logs` 會照規則 1 把事件判成「失敗」、標「Notion API 失敗」（見 [logging.md](logging.md)），但寫入其實已經成功，使用者也收到了 headline，要看同一 reqId 的 outcome 和 PATCH 判斷結果。
 - **取鎖前的查詢 throw**（`resolveTarget`／`seasonRepo.findByName`）：沒有 outcome，也不經過 wrapper；handler 自己記一行跟 wrapper 同名的 `… error`（`Registration handler error`／`Leave handler error`），並回「系統錯誤，請稍後再試」。對象查無但 Season 查詢 throw 時，也是回「系統錯誤」，不是「找不到您的帳號」「找不到您的資料」這類查無對象的回覆，因為兩個查詢並行，`Promise.all` 整個 reject。
 
 報名被拒的四種（`paused`／`full`／`no-registration`／`zero-delta`）是 handler 依 `delta` 和 `isPaused` 推出來的（`registration-handler.ts` 的 `rejectionOutcome()`），因為 `CapacityResult` 只有給使用者看的錯誤文字。**`capacity-calculator.ts` 如果新增拒絕路徑，`rejectionOutcome()` 要一起改**，不然會被歸成 `full` 或 `no-registration`。

@@ -5,7 +5,6 @@ import { getEventOccupancy } from '../../services/notion/event-occupancy.js';
 import { calculateTotalSlots } from './capacity-calculator.js';
 import { resolveTarget } from './target-resolver.js';
 import { parseRegistrationTarget } from './registration-parser.js';
-import { buildEventStatusReply } from './event-status-message.js';
 import { FLEX_ICONS } from '../../config/flex-assets.js';
 import { formatDate, getNextSaturday, getSeasonNameForDate } from '../../utils/date-utils.js';
 import { withFreshCalendarEvent } from './with-fresh-calendar-event.js';
@@ -114,7 +113,7 @@ export async function handleLeave(
       if (!isCancel && isCurrentlyAbsent) {
         logOutcome(LOG_CONTEXT, { outcome: 'already-absent', ...lockedSummary }, targetDetail);
         const headline = `${resolved.displayName} 已請假，無需重複操作`;
-        const reply = await buildEventStatusReply({
+        return {
           date: nextSaturday,
           headline,
           badgeColor: 'gray',
@@ -127,15 +126,13 @@ export async function handleLeave(
           guestFee: freshSeason.guestFee,
           eventPageId: freshEvent.pageId,
           absenteePageIds: freshEvent.absentees,
-        });
-        await replyMessage(event.replyToken, [reply]);
-        return;
+        };
       }
 
       if (isCancel && !isCurrentlyAbsent) {
         logOutcome(LOG_CONTEXT, { outcome: 'not-absent', ...lockedSummary }, targetDetail);
         const headline = `${resolved.displayName} 目前未請假`;
-        const reply = await buildEventStatusReply({
+        return {
           date: nextSaturday,
           headline,
           badgeColor: 'gray',
@@ -148,9 +145,7 @@ export async function handleLeave(
           guestFee: freshSeason.guestFee,
           eventPageId: freshEvent.pageId,
           absenteePageIds: freshEvent.absentees,
-        });
-        await replyMessage(event.replyToken, [reply]);
-        return;
+        };
       }
 
       const newAbsentees = !isCancel
@@ -174,7 +169,7 @@ export async function handleLeave(
         },
         targetDetail
       );
-      const reply = await buildEventStatusReply({
+      return {
         date: nextSaturday,
         headline: isCancel ? '銷假成功 ✅' : '請假成功 ✅',
         badgeColor: isCancel ? 'lime' : 'blue',
@@ -187,8 +182,7 @@ export async function handleLeave(
         guestFee: freshSeason.guestFee,
         eventPageId: freshEvent.pageId,
         absenteePageIds: newAbsentees,
-      });
-      await replyMessage(event.replyToken, [reply]);
+      };
     }
   );
 }

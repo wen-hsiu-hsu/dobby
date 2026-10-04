@@ -6,7 +6,6 @@ import { withFreshCalendarEvent } from './with-fresh-calendar-event.js';
 import { resolveTarget } from './target-resolver.js';
 import { calculateAddCapacity, calculateRemoveCapacity } from './capacity-calculator.js';
 import { parseRegistrationTarget } from './registration-parser.js';
-import { buildEventStatusReply } from './event-status-message.js';
 import { FLEX_ICONS } from '../../config/flex-assets.js';
 import { logger } from '../../utils/logger.js';
 import { logOutcome, describeTargetRequest, type RegistrationOutcome } from './outcome-log.js';
@@ -112,7 +111,7 @@ export async function handleRegistration(
       if (!result.canAdd) {
         const outcome = rejectionOutcome(delta, freshEvent.isPaused);
         logOutcome(LOG_CONTEXT, { outcome, ...lockedSummary }, targetDetail);
-        const reply = await buildEventStatusReply({
+        return {
           date: nextSaturday,
           headline: result.error ?? '操作失敗',
           badgeColor: 'orange',
@@ -125,9 +124,7 @@ export async function handleRegistration(
           guestFee: occupancy.season.guestFee,
           eventPageId: freshEvent.pageId,
           absenteePageIds: freshEvent.absentees,
-        });
-        await replyMessage(event.replyToken, [reply]);
-        return;
+        };
       }
 
       const updatedGuests = result.newGuests ?? [];
@@ -174,7 +171,7 @@ export async function handleRegistration(
         }
       }
 
-      const reply = await buildEventStatusReply({
+      return {
         date: nextSaturday,
         headline,
         badgeColor,
@@ -188,8 +185,7 @@ export async function handleRegistration(
         guestFee: occupancy.season.guestFee,
         eventPageId: freshEvent.pageId,
         absenteePageIds: freshEvent.absentees,
-      });
-      await replyMessage(event.replyToken, [reply]);
+      };
     }
   );
 }

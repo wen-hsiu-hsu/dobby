@@ -11,37 +11,28 @@
 >
 > 慢的原因是呼叫模式（逐筆查、人為延遲），不是 Notion 本身或 rate limit。以下都**不是 bug**：結果正確，只是慢，不是急件，依效益排序。做完任何一項後，都要在 `/logs` 時間軸比對同類指令前後的 Notion 呼叫數與總耗時。
 
-- [ ] **報名／請假的回覆訊息在鎖內組，拉長鎖持有時間。** `buildEventStatusReply`（`event-status-message.ts:32-33`）在 `withFreshCalendarEvent` 的 mutation 裡被呼叫，會查請假人姓名，後面的 `replyMessage` 也在 mutation 裡，所以鎖要等姓名查詢和 LINE API 都回應後才釋放。共有 5 處：
-    - `registration-handler.ts:115-129`（名額不足）、`177-192`（成功）
-    - `leave-handler.ts:117-131`（已請假，no-op）、`138-152`（未請假，no-op）、`177-191`（成功）
+- [ ] **報名／請假的狀態卡，操作對象本人是唯一請假人時，他的 People 頁會 GET 兩次。** 一次在鎖外的 `resolveTarget`（`target-resolver.ts:38` 本人、`:47` mention 代操，`:55` 依姓名代操是 query 但一樣拿到 People 姓名），一次在 `with-fresh-calendar-event.ts` 的 `replyStatus` 呼叫 `buildEventStatusReply`（`event-status-message.ts:33`）→ `peopleRepo.findAbsenteesOfEvent`，只有 1 位請假人時是直接 GET 那一頁。會發生在請假成功、「已請假，無需重複操作」，以及已請假的季租成員報名 `+N` 這些情況。
 
-    2026-10-04 起，請假人姓名改用 `peopleRepo.findAbsenteesOfEvent`：2 人以上用反向欄位 `📅 行事曆` 一次 query（約 0.5 秒，不隨人數增加），1 人直接 GET（約 0.3 秒）。在這之前是逐筆 GET 加 400ms 間隔，2～3 人要 1～1.7 秒、5～6 人要 3.1～3.8 秒。所以現在鎖內組訊息多出的時間固定在約 0.3～0.5 秒，加上 LINE reply 約 0.2 秒。
+    不是 bug，兩次拿到的姓名相同。2026-10-04 起組狀態卡已經移到鎖外，所以這次多出的 GET（約 0.3 秒）不會拉長佔鎖時間，只會讓這個使用者晚約 0.3 秒收到回覆。2 人以上請假時是一次反向 query，本人在不在名單裡成本都一樣，沒有重複。0 人時不查。
 
-    改用反向查詢之前的實測鎖持有時間：中位數約 1.43 秒（0.85～4.44 秒，n=34，測試流量、請假人 0～2 人；4.4 秒那筆是 calendar PATCH 長尾）。現在可以直接看 `Mutex task finished` 的 `heldMs`／`waitMs`／`queuedAhead`（見 `docs/registration.md`「從 log 看鎖競爭」）比對效果。從 calendar payload 看，7/04～9/19 各週的最終請假人數是 0～6 人（中位數約 2.5）。
-
-    這項不是 bug，單一使用者的回覆時間也不會變短，只在有人排隊時才有幫助：縮短後面的人的等待，降低 mutex 逾時的機率。`withMutex` 的 10 秒逾時從呼叫時起算、含排隊時間（見 [ADR 0002](adr/0002-mutex-timeout-does-not-cancel-task.md)）。2026-09-28 本機實測：同一人快速連發 4 則 ±1，其中一次 calendar PATCH 花了 4.2 秒，最後一則排隊 7.7 秒、從呼叫到完成 9.1 秒，離逾時只差約 0.9 秒。逾時的使用者會收到「這次操作可能已經完成，請勿重複操作」，背景寫入照常完成。請假人姓名改成一次 query 之後，這項剩下的效益是每次持鎖再少約 0.5～0.7 秒，優先度比當初低。
-
-    如果要處理：可以讓 mutation 回傳組訊息需要的資料，改到鎖外組訊息並 `replyMessage`。要改 `with-fresh-calendar-event.ts:19` 的 mutation 簽名，它現在是 `(fresh: T) => Promise<void>`。
-    - 移到鎖外不會造成資料不一致：訊息內容仍然用 mutation 在鎖內算出的快照（`updatedGuests`、`newAbsentees`、`totalSlots`），跟現在一樣。差別只有姓名查詢晚一點（姓名不會變），以及 B 的回覆可能比 A 先到，都無害。
-    - 移到鎖外還有一個附帶好處：現在姓名查詢如果丟錯，寫入已經成功，使用者卻收到「系統錯誤」，`+N` 重打會重複報名（`docs/registration.md`「鎖內非預期錯誤」）。`findAbsenteesOfEvent` 已經在 query 失敗時退回逐筆 GET，降低了這個機率，但 GET 本身失敗（網路錯誤、429 重試用完）時還是會發生。
-    - 另有一個可以單獨做的小改善：只有 1 位請假人、而且就是操作對象本人時（請假成功、「已請假，無需重複操作」，或已請假的季租成員自己 `+N`），他的 People 頁會 GET 兩次，一次在鎖外的 `resolveTarget`（`target-resolver.ts:38`），一次在鎖內的 `findAbsenteesOfEvent`。不是 bug，姓名相同，只是鎖內多一次約 0.3 秒的 GET。2 人以上時鎖內是一次 query，本人是否在名單裡都一樣，沒有重複的成本。如果要處理：可以讓 `buildEventStatusReply` 多收一個「已知 pageId → 姓名」參數（傳 `resolved.personPageId` → `resolved.displayName`），已知的就跳過查詢。pageId 出現在請假名單就一定有 People 頁，所以這時 `displayName` 一定是 People 的 `Name`，不會拿到 LINE 名稱。
+    如果要處理：可以讓 `EventStatusParams` 多帶一個「已知 pageId → 姓名」（handler 傳 `resolved.personPageId` → `resolved.displayName`），`buildEventStatusReply` 遇到已知的就跳過查詢。這樣做是安全的：pageId 出現在請假名單就一定有 People 頁，這時 `resolveTarget` 給的 `displayName` 一定是 People 的 `Name`，不會是 LINE 名稱（沒有 People 頁時 `personPageId` 是空字串，不會跟請假名單對上）。效益只有單一使用者少等 0.3 秒，優先度低。
 
 - [ ] **一次 Notion 寫入卡 43 秒，同一天的報名／請假全部連鎖逾時；另外發現進鎖順序不等於送出順序。**（2026-10-04 測試環境實測，本機 `logs/app.2026-10-04.1.log`）
 
-    經過：同一人在群組快速連送兩輪 `+1`、`-1`、`假`、`銷假`，共 8 則，全部收到逾時訊息「處理時間較長，這次操作可能已經完成，請勿重複操作」（`with-fresh-calendar-event.ts:12`）。
+    經過：同一人在群組快速連送兩輪 `+1`、`-1`、`假`、`銷假`，共 8 則，全部收到逾時訊息「處理時間較長，這次操作可能已經完成，請勿重複操作」（`with-fresh-calendar-event.ts:14`）。
     - 起因是第一則 `+1`（reqId `a7d55c`，17:46:22）寫零打名單的 PATCH 花了 **43.2 秒**。這段時間沒有 429，也沒有重試，同時段其他 Notion 呼叫都在 0.4～0.5 秒。完全相同的 payload 在同一頁寫過十幾次都約 0.5 秒，所以不是「零打」多選欄位新增選項造成的，是 Notion 端偶發的慢回應。本機 log 共 1,378 次 Notion 呼叫：中位數 0.39 秒，p99 2.4 秒，超過 10 秒的只有 2 次，這次是最大值。
     - 其餘 7 則都鎖在同一個 key（活動日期 `2026-10-10`），排在它後面，等滿 10 秒（`mutex.ts:9` 的 `TIMEOUT_MS`）就收到逾時訊息。第二輪（17:47:01～04）進來時第一輪還有 3 個任務在排隊，所以也各等了 11～13 秒（`waitMs` 11001～13443）。第二輪如果沒有這些積壓，4 個任務每個佔鎖 1.4～2.3 秒，不會逾時。
     - 背景寫入照 FIFO 全部完成，兩輪都是一加一減，最後狀態跟操作前一樣，資料正確。背景完成後送出的回覆全部 `Reply failed`（400），這是預期的，replyToken 已經被逾時訊息用掉了（[ADR 0002](adr/0002-mutex-timeout-does-not-cancel-task.md)）。
 
     **不是 bug**：mutex 照設計守住了資料正確性，逾時訊息也正確地叫使用者不要重試。觸發條件是 Notion 的罕見長尾，不是急件。
 
-    **另一個觀察：進鎖順序是「誰先查完」，不是「誰先送出」。** 第二輪送出順序是 `+1 → -1 → 假 → 銷假`，進鎖順序卻是 `+1 → 假 → -1 → 銷假`（看 `queuedAhead` 4、6、5、7）。原因是進鎖前要先並行查對象和季資料（`registration-handler.ts:56`、`leave-handler.ts:56` 的 `Promise.all`），這段花了 0.8～2.2 秒不等，`-1` 比 `假` 晚查完。
+    **另一個觀察：進鎖順序是「誰先查完」，不是「誰先送出」。** 第二輪送出順序是 `+1 → -1 → 假 → 銷假`，進鎖順序卻是 `+1 → 假 → -1 → 銷假`（看 `queuedAhead` 4、6、5、7）。原因是進鎖前要先並行查對象和季資料（`registration-handler.ts:55`、`leave-handler.ts:55` 的 `Promise.all`），這段花了 0.8～2.2 秒不等，`-1` 比 `假` 晚查完。
     - 這次的組合最後結果相同，所以沒事。
     - **會出錯的情境**：同一人在 1～2 秒內送出彼此衝突的指令，而且順序被對調，最終狀態會跟他的意圖相反。例如送 `假` 再送 `銷假`，若 `銷假` 先進鎖，會回「未請假」（no-op），接著 `假` 寫入，最後變成「請假中」；`+1` 再 `-1` 對調則最後變成「已報名」。兩則回覆都會照實寫出結果，使用者看得出來，但不一定會注意。
     - LINE 本身也不保證 webhook 送達順序，所以就算進鎖順序照收到的順序，也不是完全保證。
 
     如果要處理，各方向都有代價：
-    - **縮短佔鎖時間**：見上一項「報名／請假的回覆訊息在鎖內組」。能減少連鎖逾時波及的範圍，但擋不住第一個卡住的寫入。
+    - **縮短佔鎖時間**：2026-10-04 已把請假人姓名查詢和 LINE 回覆移到鎖外（`with-fresh-calendar-event.ts` 的 `replyStatus`），每次佔鎖少約 0.5～0.7 秒。能減少連鎖逾時波及的範圍，但擋不住第一個卡住的寫入。另外，背景完成後的那次 `Reply failed` 也不會再出現了：逾時後不會走到鎖外組卡片、回覆那步。
     - **拉長 mutex 逾時**：replyToken 約 1 分鐘內有效（`docs/architecture.md`「Fire-and-Forget Webhook 處理」），這次 8 則都在送出後 49 秒內完成，逾時改成約 50 秒的話，大家都會收到真正的結果。陷阱：使用者在群組裡可能乾等幾十秒沒有任何回應（LINE 的「輸入中」動畫只支援一對一聊天），比較容易重打；`+N` 不是冪等的，重打會重複報名，比現在的「請勿重複操作」更糟。要改的話，`TIMEOUT_MS` 是所有 key 共用的，`trackUser` 的鎖也會跟著變長。
     - **不要幫 Notion 請求加逾時中斷（AbortController）**：被中斷的 PATCH 可能稍後仍在 Notion 端生效。這時排在後面的任務已經讀完、寫完，晚到的舊 PATCH 會把它蓋掉，造成真正的資料錯誤。只對 GET 加逾時是安全的，但這次卡住的是 PATCH，幫不上忙。
     - **進鎖順序**：如果要讓同一人的指令照收到的順序執行，可以在進鎖前的查詢之前，就先依收到的順序排隊（例如在 handler 一進來就取得順序，或以 `message-handler` 收到的時間排序）。但不能直接把取鎖提前到查詢之前，因為那會把 0.8～2 秒的查詢搬進鎖內，拉長所有人的佔鎖時間，跟上一項的方向衝突。LINE 事件帶有 `timestamp`，可以考慮用它判斷先後，但送達順序本身不保證。

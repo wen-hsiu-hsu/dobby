@@ -297,6 +297,19 @@ describe('handleRegistration', () => {
     expect(mutex.withMutex).not.toHaveBeenCalled();
   });
 
+  // 寫入已經成功才查請假人姓名，這時回「系統錯誤」會讓使用者重打 +N、重複報名。
+  it('replies with the headline (not "系統錯誤") when the absentee-name lookup throws after the write', async () => {
+    vi.mocked(calendarRepo.findByDate).mockResolvedValue(baseCalendarEvent({ absentees: ['person-9'] }));
+    vi.mocked(peopleRepo.findAbsenteesOfEvent).mockRejectedValue(new Error('Notion 502'));
+
+    await handleRegistration(makeEvent('@Dobby +1'), 1, false);
+
+    expect(calendarRepo.updateGuests).toHaveBeenCalledWith('evt-1', ['Alice的朋友']);
+    expect(replyMessage).toHaveBeenCalledTimes(1);
+    expect(replyText()).toBe('報名成功 ✅\n（名額狀態暫時無法顯示）');
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
   it('replies when the event season cannot be found, without touching the calendar', async () => {
     vi.mocked(seasonRepo.findByName).mockResolvedValue(null);
     const event = makeEvent('@Dobby +1');

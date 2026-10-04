@@ -22,8 +22,9 @@ export interface EventStatusParams {
 }
 
 /**
- * 組出報名／請假操作後要回覆的 Flex 狀態卡（含 altText）。成功、失敗、no-op
- * 每個結束分支都呼叫這裡，使用者永遠看到目前完整的名額狀態，不是只有一句話。
+ * 組出報名／請假操作後要回覆的 Flex 狀態卡（含 altText）。成功、失敗、no-op 每個結束分支
+ * 都回傳這份參數，由 `withFreshCalendarEvent` 放鎖後呼叫這裡，使用者看到目前完整的名額狀態，
+ * 不是只有一句話（這裡丟錯時 wrapper 才退回只回 headline）。
  *
  * 卡片 JSON 本身（buildStatusCardBubble/buildStatusCardAltText，見 flex-status-card.ts）
  * 是純函式，這裡只多做一件事：把 absenteePageIds 查成姓名（Notion 呼叫），所以整個

@@ -222,6 +222,18 @@ describe('handleLeave', () => {
     expect(peopleRepo.findAbsenteesOfEvent).toHaveBeenCalledWith({ pageId: 'evt-1', absentees: ['person-1'] });
   });
 
+  // 寫入已經成功才查請假人姓名，這時回「系統錯誤」會讓使用者以為沒請到假而重打。
+  it('replies with the headline (not "系統錯誤") when the absentee-name lookup throws after the write', async () => {
+    vi.mocked(peopleRepo.findAbsenteesOfEvent).mockRejectedValue(new Error('Notion 502'));
+
+    await handleLeave(event, false, false);
+
+    expect(calendarRepo.updateAbsentees).toHaveBeenCalledWith('evt-1', ['person-1']);
+    expect(replyMessage).toHaveBeenCalledTimes(1);
+    expect(replyText()).toBe('請假成功 ✅\n（名額狀態暫時無法顯示）');
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
   it('replies with full status (not a bare one-liner) when cancelling leave', async () => {
     vi.mocked(calendarRepo.findByDate).mockResolvedValue({
       pageId: 'evt-1',
