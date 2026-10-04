@@ -58,7 +58,7 @@
 ## 已知問題（尚未處理）
 
 - [ ] **`src/routes/__tests__/logs.test.ts` 跑整套測試時偶發逾時，一次掛 2～12 個。**（2026-10-04 發現，還沒分析）
-  - 現象：`npx vitest run --dir src` 跑約 15 次，有 3 次這支檔案的測試超過 vitest 預設的 5 秒逾時（`Error: Test timed out in 5000ms`），每次掛的測試不一樣，例如第 1123 行的 `shows a short request-body summary…`、第 1020 行的 `shows lagMs in the 起點 step note…`、第 1037 行的 `renders a service-restart boundary marker…`。其他次都是全過。單獨跑這支檔案（83 個測試）只要約 0.34 秒，從沒失敗過。
+  - 現象：`npx vitest run --dir src` 跑約 15 次，有 3 次這支檔案的測試超過 vitest 預設的 5 秒逾時（`Error: Test timed out in 5000ms`），每次掛的測試不一樣，例如第 1123 行的 `shows a short request-body summary…`、第 1020 行的 `shows lagMs in the 起點 step note…`、第 1037 行的 `renders a service-restart boundary marker…`。其他次都是全過。單獨跑這支檔案（83 個測試）只要約 0.34 秒，從沒失敗過。同一天另有一次是 `src/__tests__/logs-auth.test.ts` 的 `GET /logs > accepts requests with the correct Bearer token` 失敗（也是打 `/logs` 路由，失敗訊息沒保留，不確定是不是逾時），可能是同一個問題。
   - 不是產品 bug，`/logs` 頁面本身沒問題，只影響測試結果的可信度。發現當時的改動（反向 relation 查詢）沒碰 `src/routes`；這支檔案最近一次改動是 commit `f75a27d`（起點摘要顯示 lagMs）。所以應該是原本就有的問題，不是那次造成的，但沒有在更早的 commit 上重現確認。
   - 推測一（沒驗證）：整套測試平行跑時機器負載高，每個測試都用 supertest 起一個新的 express app（第 92-124 行的 `getLogsHtml`／`getEventDetailHtml`／`getLogsText`），偶爾超過 5 秒。
   - 推測二（沒驗證）：一次掛好幾個，可能是連鎖失敗。這支檔案沒有 `beforeEach`／`afterEach` 重設 mock，很多測試用 `vi.mocked(readRecentLogs).mockResolvedValueOnce(...)` 疊加假資料（第 100-107 行的註解有說明疊加規則）。如果一個測試逾時，它還沒被消耗掉的 `mockResolvedValueOnce` 會留給後面的測試，後面的測試就拿到錯的資料而失敗。
