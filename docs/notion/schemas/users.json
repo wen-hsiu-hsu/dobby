@@ -50,7 +50,8 @@
       "description": "關聯至「人員清單」，建立 LINE 帳號與球員名冊的對應。新使用者會自動連到自動建立的人員頁面，有值不代表是季租球員（季租身分看季租承租紀錄的「報名人」）",
       "config": {
         "database_id": "252f388d-4ac7-49a4-82ae-a7f18044f701",
-        "type": "dual_property"
+        "type": "dual_property",
+        "synced_property_name": "USER"
       }
     },
     "message_counts": {

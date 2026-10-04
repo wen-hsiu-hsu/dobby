@@ -15,7 +15,8 @@
       "description": "關聯至 USERS 資料庫，建立球員名冊與 LINE 帳號的對應",
       "config": {
         "database_id": "2e44dbf2-e21c-80d1-af81-c3b61579b3bb",
-        "type": "dual_property"
+        "type": "dual_property",
+        "synced_property_name": "Registered name"
       }
     },
     "報名季度": {
@@ -23,7 +24,8 @@
       "description": "此球員參與的季度，關聯至「季租承租紀錄」",
       "config": {
         "database_id": "7deede34-579d-4c77-b79b-20b9f4f000e7",
-        "type": "dual_property"
+        "type": "dual_property",
+        "synced_property_name": "報名人"
       }
     },
     "結清": {
@@ -54,13 +56,18 @@
       "description": "關聯至付款紀錄資料庫",
       "config": {
         "database_id": "4573dc24-ef10-4241-971f-af4ed8a986d1",
-        "type": "dual_property"
+        "type": "dual_property",
+        "synced_property_name": "付款｜人"
       }
     },
     "📅 行事曆": {
       "type": "relation",
-      "description": "關聯至「行事曆」，推測用於記錄此球員參與/請假的活動。目前程式碼（`people-repository.ts`）未讀取此欄位，用途細節未確認",
-      "config": null
+      "description": "行事曆 `請假人` 的反向欄位（雙向 relation，2026-10-04 用 Notion API 確認），列出此球員請過假的活動。目前程式碼未讀取此欄位",
+      "config": {
+        "database_id": "0fd76b77-9f07-4aa3-a3c9-12ba18dbe32e",
+        "type": "dual_property",
+        "synced_property_name": "請假人"
+      }
     }
   }
 }

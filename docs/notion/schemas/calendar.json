@@ -39,7 +39,8 @@
       "description": "本週請假的季租球員，Relation 至「人員清單」。請假人數影響容量計算",
       "config": {
         "database_id": "252f388d-4ac7-49a4-82ae-a7f18044f701",
-        "type": "single_property"
+        "type": "dual_property",
+        "synced_property_name": "📅 行事曆"
       }
     },
     "零打": {
@@ -52,7 +53,8 @@
       "description": "關聯至「季租承租紀錄」，用於取得當季場地數和成員清單",
       "config": {
         "database_id": "7deede34-579d-4c77-b79b-20b9f4f000e7",
-        "type": "dual_property"
+        "type": "dual_property",
+        "synced_property_name": "打球日"
       }
     },
     "詳細內容": {

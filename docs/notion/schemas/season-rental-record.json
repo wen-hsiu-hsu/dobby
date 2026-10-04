@@ -22,7 +22,8 @@
       "description": "本季的季租成員清單，關聯至「人員清單」。成員數量直接影響每週可用零打名額",
       "config": {
         "database_id": "252f388d-4ac7-49a4-82ae-a7f18044f701",
-        "type": "dual_property"
+        "type": "dual_property",
+        "synced_property_name": "報名季度"
       }
     },
     "零打費用": {
@@ -37,7 +38,8 @@
       "description": "本季對應的行事曆頁面，關聯至「行事曆」",
       "config": {
         "database_id": "0fd76b77-9f07-4aa3-a3c9-12ba18dbe32e",
-        "type": "dual_property"
+        "type": "dual_property",
+        "synced_property_name": "季度"
       }
     },
     "報名人數": {
@@ -97,7 +99,8 @@
       "description": "關聯至「所有公告」",
       "config": {
         "database_id": "2e24dbf2-e21c-80b7-83f6-ef99c1dd9425",
-        "type": "dual_property"
+        "type": "dual_property",
+        "synced_property_name": "季度"
       }
     },
     "合約": {
