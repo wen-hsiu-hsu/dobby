@@ -23,6 +23,9 @@ vi.mock('../services/notion/users-repository.js', () => ({
   findByUserId: vi.fn().mockImplementation((userId: string) =>
     Promise.resolve(userId === 'manager-user-id' ? ADMIN_USER : REGULAR_USER)
   ),
+  findByPageId: vi.fn().mockImplementation((pageId: string) =>
+    Promise.resolve(pageId === ADMIN_USER.pageId ? ADMIN_USER : REGULAR_USER)
+  ),
   findAdmin: vi.fn().mockResolvedValue(ADMIN_USER),
   create: vi.fn().mockResolvedValue(REGULAR_USER),
   update: vi.fn().mockResolvedValue(undefined),

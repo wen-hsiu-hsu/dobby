@@ -2,7 +2,7 @@ import { logger } from '../utils/logger.js';
 import * as usersRepo from './notion/users-repository.js';
 import * as peopleRepo from './notion/people-repository.js';
 import { getProfile } from './line/profile-service.js';
-import { withMutex, isLocked } from './mutex.js';
+import { withMutex } from './mutex.js';
 import type { NotionUser } from '../types/notion-models.js';
 
 type TrackContext = { groupId?: string; multiChatId?: string };
@@ -81,21 +81,18 @@ async function _trackUserAsync(
   const key = `user-track-${userId}`;
   const { knownUser } = options;
 
-  // `knownUser` is a snapshot the caller took (e.g. for an admin check) before this
-  // call reaches the mutex — reusing it saves a redundant Notion query, but it's only
-  // safe when no other trackUser() call for the same userId is already queued/running:
-  // otherwise that other call may write groups/multiChats/message_counts in between,
-  // and computing this call's update from the stale snapshot would silently clobber
-  // it (two quick messages from the same person, each fire-and-forget). Checked here,
-  // synchronously and before withMutex marks this call as pending below, so it only
-  // ever reflects an *other*, already in-flight call — never this one.
-  // A null snapshot is never trusted: another call (e.g. a memberJoined write) may have
-  // created the page and released the lock while the caller's lookup was in flight,
-  // and trusting "doesn't exist" would create a duplicate page.
-  const trustKnownUser = knownUser != null && !isLocked(key);
-
+  // `knownUser` is a snapshot the caller took (e.g. for an admin check) before this call
+  // reached the mutex, so it's never used as-is: another trackUser()/trackJoinedMember()
+  // for the same userId may have written groups/multiChats/message_counts since, and
+  // computing this update from the snapshot would clobber that write (message_counts is
+  // written as an absolute value). Whether anything is "locked" can't tell us it's safe:
+  // a write keeps running after its caller timed out, and an earlier write may have
+  // finished between the snapshot read and this call. So always re-read inside the lock.
+  // The snapshot only saves the userId query when the page is already known; a null
+  // snapshot is re-queried, since a page may have been created meanwhile. (ADR 0017)
   await withMutex(key, async () => {
-    const existing = trustKnownUser ? knownUser : await usersRepo.findByUserId(userId, 'track-user');
+    const reread = knownUser ? await usersRepo.findByPageId(knownUser.pageId) : null;
+    const existing = reread ?? (await usersRepo.findByUserId(userId, 'track-user'));
 
     if (!existing) {
       const customName = await resolveNewUserName(userId, context, options.displayName);

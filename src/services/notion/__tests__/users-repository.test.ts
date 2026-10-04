@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { notionPost, notionPatch } from '../notion-fetch.js';
-import { findByUserId, findAll, create, update, incrementMessageCount } from '../users-repository.js';
+import { notionGet, notionPost, notionPatch } from '../notion-fetch.js';
+import { findByUserId, findByPageId, findAll, create, update, incrementMessageCount } from '../users-repository.js';
 import { getPurpose } from '../../../utils/request-context.js';
 
 vi.mock('../notion-fetch.js');
 
+const notionGetMock = vi.mocked(notionGet);
 const notionPostMock = vi.mocked(notionPost);
 const notionPatchMock = vi.mocked(notionPatch);
 
@@ -14,6 +15,7 @@ function makePage(properties: Record<string, unknown>, id = 'user-page-1') {
 
 describe('users-repository', () => {
   beforeEach(() => {
+    notionGetMock.mockReset();
     notionPostMock.mockReset();
     notionPatchMock.mockReset();
   });
@@ -91,6 +93,47 @@ describe('users-repository', () => {
         '查詢被 @ 的對象的 bot 使用者帳號',
         '追蹤使用者時重查 bot 使用者帳號（發話者或新加入的成員）',
       ]);
+    });
+  });
+
+  describe('findByPageId', () => {
+    it('reads the page itself (not a database query) and maps it to NotionUser', async () => {
+      notionGetMock.mockResolvedValue({
+        ...makePage({
+          user_id: { type: 'title', title: [{ plain_text: 'user-alice' }] },
+          message_counts: { type: 'number', number: 7 },
+          groups: { type: 'multi_select', multi_select: [{ name: 'A' }] },
+        }),
+        archived: false,
+        in_trash: false,
+      });
+
+      const user = await findByPageId('user-page-1');
+
+      expect(notionGetMock).toHaveBeenCalledWith('/pages/user-page-1');
+      expect(notionPostMock).not.toHaveBeenCalled();
+      expect(user).toMatchObject({ pageId: 'user-page-1', userId: 'user-alice', messageCount: 7, groups: ['A'] });
+    });
+
+    it.each([
+      ['archived', { archived: true, in_trash: false }],
+      ['in the trash', { archived: false, in_trash: true }],
+    ])('returns null when the page is %s', async (_label, flags) => {
+      notionGetMock.mockResolvedValue({ ...makePage({}), ...flags });
+
+      expect(await findByPageId('user-page-1')).toBeNull();
+    });
+
+    it('labels the read for the /logs timeline', async () => {
+      let purpose: string | undefined;
+      notionGetMock.mockImplementation(async () => {
+        purpose = getPurpose();
+        return { ...makePage({}), archived: false, in_trash: false };
+      });
+
+      await findByPageId('user-page-1');
+
+      expect(purpose).toBe('追蹤發話者時依 page ID 重讀 bot 使用者帳號');
     });
   });
 

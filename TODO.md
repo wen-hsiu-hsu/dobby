@@ -14,7 +14,7 @@
 
 - [ ] 全形 `＋`/`－` 符號 —— 程式碼已支援（`command-parser.ts`／`registration-parser.ts` 的 `normalizeFullWidth()`），只需要實際傳 `@Dobby ＋1` 這種全形指令驗證一次即可，不需要改 code
 - [ ] 正式切換後第一次 `display-name-update`（2026-09-28 週一 04:00）—— 到 `/logs` 的排程分頁確認有跑完、更新筆數合理；USERS `groups` 裡殘留的測試群組 ID 造成的 404 是預期中的（見 `docs/overview.md`「從 n8n 遷移」），不是錯誤；2026-09-29 已手動清掉無關的群組 ID，之後的週次應該會少很多
-- [ ] 部署「報名／請假沿用 message-handler 的 USERS 快照＋Season 並行查」（2026-09-28，見 [ADR 0009](docs/adr/0009-actor-users-snapshot-non-null-only.md)）後，到 `/logs` 看既有使用者在群組的 `@Dobby +N`／`@Dobby 假`：時間軸應該只剩一次 USERS query（`message-handler` 那次），`resolveTarget` 的 People GET 和 Season query 起點應該幾乎相同。改之前的基準：成功寫入的 `+N`／`-N` 每次 7～12 個 Notion 呼叫、中位數 3.3 秒，預估降到 2.4～2.5 秒（原始分析見 git 歷史中被刪掉的 TODO 項目「報名／請假：同一個請求查兩次 USERS」）。群組新使用者的第一個指令、一對一私訊仍會查兩次 USERS，這是預期的。沒達到預估不是 bug，把實測數字記在下方即可。
+- [ ] 部署「報名／請假沿用 message-handler 的 USERS 快照＋Season 並行查」（2026-09-28，見 [ADR 0009](docs/adr/0009-actor-users-snapshot-non-null-only.md)）後，到 `/logs` 看既有使用者在群組的 `@Dobby +N`／`@Dobby 假`：時間軸應該只剩一次 USERS query（`message-handler` 那次）；另外會有一筆背景的 `GET /pages/<USERS 頁>`（目的「追蹤發話者時依 page ID 重讀 bot 使用者帳號」），那是 `trackUser` 在鎖內重讀（[ADR 0017](docs/adr/0017-track-user-always-rereads-inside-lock.md)），預期中的、不在指令的關鍵路徑上，不代表快照沿用失效；`resolveTarget` 的 People GET 和 Season query 起點應該幾乎相同。改之前的基準：成功寫入的 `+N`／`-N` 每次 7～12 個 Notion 呼叫、中位數 3.3 秒，預估降到 2.4～2.5 秒（原始分析見 git 歷史中被刪掉的 TODO 項目「報名／請假：同一個請求查兩次 USERS」）。群組新使用者的第一個指令、一對一私訊仍會查兩次 USERS，這是預期的。沒達到預估不是 bug，把實測數字記在下方即可。
 - [ ] 到 Pi 的 `/logs` 頁面，看底部 footer 的「R2 備份」徽章，確認 R2 同步真的有啟用、最近一次同步成功（徽章語意見 `docs/logging.md`「R2 同步狀態徽章」段）。本機 log 保留約 7 天，當週的申訴夠用；但季末對帳或事後爭議只能靠 R2，沒啟用的話 7 天前的 log 就沒了。R2 上的檔案 `/logs` 讀不到，要自己下載再用 `jq` 查。
 - [ ] 報名／請假狀態回覆改用 Flex 卡片後（見 [ADR 0010](docs/adr/0010-registration-status-flex-card.md)），部署後在真實 LINE（iOS、Android、電腦版、深色模式）分別看一次報名／請假卡片：標題照片（`header-shuttle.jpg`）與各徽章圖示有正常顯示、文字疊在照片上仍然讀得清楚（深色模式跟淺色模式的漸層遮罩都要看）、卡片底部三顆按鈕（`+1 零打`／`−1 零打`／`請假`）按下去有送出正確的指令文字、LINE 推播通知彈出的內容跟 `/logs` 顯示的內容是 altText（不是卡片 JSON 或空白）。**前置條件**：repo 的 Settings → Pages → Source 要選「GitHub Actions」（見 `.github/workflows/pages.yml`），且 `https://wen-hsiu-hsu.github.io/dobby/flex/` 底下的圖片網址要能回 200——這件事要先確認完成，才能讓 bot 部署接真實流量，否則卡片會整張破圖。
 - [ ] 指令清單改用 Flex 卡片後（見 [ADR 0012](docs/adr/0012-command-list-flex-card.md)），部署後在真實 LINE（iOS、Android、電腦版）用一般成員和管理員各下一次 `@Dobby 指令`：標題照片與各列圖示有正常顯示；每一列、每顆按鈕按下去送出的指令文字正確，而且 bot 有照該指令回覆；一般成員看不到「管理員專用」區；管理員的「下一季公告草稿」送出的季度是下一季。**前置條件**：這批新增的圖示（`assets/flex/` 底下 `list-dark.png`、`*-light.png`、`search-gray.png` 等，commit `95ccacd`）要先推上 `main`、GitHub Pages 發布完成、網址回 200，才能部署程式，否則卡片會破圖。
@@ -56,46 +56,6 @@
 
 ## 已知問題（尚未處理）
 
-- [ ] **`trackUser` 可能用過時的 USERS 快照寫回，少算一次發言數，少數情況會弄丟一個群組 ID。**（2026-09-28 code review 發現，是既有問題，不是當天 log 改動造成的）
-
-  **嚴重度：低優先、不是急件。** 這是 bug，但沒有觀察到實際發生（見下方「有沒有發生過」）。`message_counts` 目前沒有任何程式讀取，成就規則也不用它；groups 只有暱稱排程在讀，而且弄丟群組需要很少見的時序。
-
-  機制：`src/services/user-management.ts:95` 的 `trustKnownUser = knownUser != null && !isLocked(key)` 決定要不要沿用快照 `knownUser`。快照是 `src/handlers/message-handler.ts:49` 的 `findByUserId` 讀的，第 59 行再把它傳給 `trackUser`。沿用快照的話，鎖內就不重查 USERS，直接拿快照算更新：
-  - `groups`／`multiChats`：只有「這次的群組／聊天室不在快照裡」時，才把「快照的陣列＋這次的 ID」整包寫回（第 129-138 行）。
-  - `message_counts`：寫的是絕對值。`incrementMessageCount(pageId, existing.messageCount)` 寫入「快照的數字＋1」（`services/notion/users-repository.ts:124-130`），不是 Notion 端自己加一。
-
-  快照過時的話，前一次寫入的結果會被蓋掉。「前一次」可能是 `trackUser`，也可能是 `trackJoinedMember`（`handlers/member-joined-handler.ts:27`，用同一把 `user-track-${userId}` 鎖，也會寫 groups／multiChats）。有兩種情況會讓過時的快照被信任：
-  1. **前一次呼叫逾時、但背景還在跑。** `isLocked()`（`services/mutex.ts:158-160`）讀的是 `pending`，也就是「還有沒有呼叫端在等」，在 `withMutex` 的 `finally` 裡減一（`mutex.ts:105-111`），逾時的呼叫端也會走到這裡。呼叫端 10 秒逾時放棄後，只要沒有其他呼叫端還在排隊，`pending` 就歸零；但 `fn()` 還在背景持鎖寫入（ADR 0002）。這時同一人的下一則訊息會信任快照。鎖的 FIFO 仍然成立，它會等前一個 `fn()` 寫完才執行，但拿的是寫入前的快照去算。要 Notion 卡住超過 10 秒才會發生。
-  2. **快照在前一次寫入生效前讀取，但檢查 `isLocked` 時前一次已經結束。** 第 95 行在 `_trackUserAsync` 第一個 await 之前同步執行，所以檢查點是「呼叫 `trackUser` 那一刻」，不是「讀快照那一刻」。`trackUser` 是 fire-and-forget（只有「新使用者＋指令」才 await，`message-handler.ts:62`），同一人快速連發兩則時，第二則的 `findByUserId` 會和第一則的 `fn()` 重疊。如果 Notion 處理第二則查詢時第一則的 PATCH 還沒生效，而查詢的回應在第一則 `fn()` 結束後才回來，第二則就會信任舊快照。不需要逾時，但時間窗很窄。
-
-  影響：
-  - **`message_counts` 少算 1**，不會自己修正。目前沒有任何程式讀這個欄位。規劃中的成就系統也不會用它：`docs/achievements-rulebook.md:30` 寫發話類成就「不看訊息數量」，第 107 行規定發話要算貼圖，但 `message_counts` 不算貼圖（`docs/notion/databases.md:32`）。
-  - **群組 ID 遺失，條件很窄**：同一人要在時間窗內，先後在兩個「他從沒講過話的群組」X、Y 發言（Y ≠ X）。後一次拿不含 X 的快照寫回 `[...快照, Y]`，X 就被洗掉。只是「從不同群組發言」不會觸發，因為群組已經在快照裡就不寫 groups。multiChats 同理。
-    - 遺失的 ID 要等這個人之後又在那個群組發言（或再觸發一次 memberJoined）才會加回去，不再發言就永久遺失。
-    - groups 目前唯一的讀取者是 `schedulers/display-name-update.ts:47-55`，靠它查 LINE 暱稱。少一個群組，只有在其他群組都查不到 profile 時才會影響暱稱更新。
-  - **不會建出重複的 USERS 頁**：`null` 快照從來不被信任（第 92-94 行註解），鎖內會重查。
-
-  有沒有發生過：
-  - 本機 `logs/` 有一筆看起來像的紀錄，但**不是這個 bug**：`/pages/2e44dbf2-…93d7` 在 2026-09-22 01:00:33 被寫了兩次 `message_counts: 515`（reqId `bd613b`、`77151d`，相差 120ms）。兩個 PATCH 是同時送出的，那是 `_trackUserAsync` 還沒加鎖時的舊 race，commit `78ce9cf`（2026-09-25）加了 `withMutex` 之後就不會再這樣。
-  - `78ce9cf` 之後的 log 沒有觀察到這條描述的情況。
-  - 要檢查的話：找「`累加使用者發言次數`」的 PATCH，看同一個 page 有沒有兩次寫入同一個數字，而且兩次 PATCH 沒有重疊（有鎖之後應該一前一後）。PATCH body 只在 `LOG_LEVEL=debug` 才有記錄（`services/notion/notion-fetch.ts` 的 `Notion API request payload`）；info 等級下只看得到 path 裡的 pageId，看不到寫了什麼數字。
-
-  如果要處理：
-  - **只修第 1 種**：新增一個讀 `inFlight` 的函式（例如 `isBusy(key)`）。`inFlight` 是 `mutex.ts` 為 `Mutex task finished` 摘要加的計數，只在 `fn()` 真正結束時才減一。`user-management.ts:95` 改用它。
-    - **檢查位置不能動**：必須跟現在一樣，在呼叫 `withMutex` **之前**同步檢查（第 89-91 行註解說明了原因）。`withMutex` 一被呼叫就會把這次算進 `inFlight`，之後才檢查的話永遠回 true。
-    - **不要直接改 `isLocked()` 讀的東西**：`services/__tests__/mutex.test.ts:235` 的測試鎖住的就是「`isLocked` 反映呼叫端有沒有在等」這個語意，ADR 0002 第 11 行也寫了 `trackUser` 依賴它。要改就要連同測試、ADR 一起改，並說明語意變更的理由。
-    - `inFlight` 的註解（`mutex.ts:5-8`）目前寫「只給 log 用」，拿來做判斷時要一起改。
-  - **要連第 2 種一起修**：檢查點要移到讀快照之前，例如在讀快照前記下這個 key「已完成幾次」，`trackUser` 時比對。陷阱：
-    - 快照是在 `message-handler.ts:49` 讀的，所以要在那之前記下計數，再傳給 `trackUser`。這要改 `trackUser` 的簽名，`message-handler` 也要拿得到 key，而 `user-track-${userId}` 目前是 `user-management.ts` 內部的格式。
-    - 比對計數之外，仍然要檢查 `inFlight`（或上面的 `isBusy`）：前一個任務如果讀快照時已經在跑、到呼叫 `trackUser` 時還沒結束，已完成次數不會變，只比計數會漏掉。
-    - 計數不能照抄 `inFlight` 的清理方式（歸零就 `delete`）：刪掉再重建的計數可能剛好回到一樣的數字，就會錯誤地信任快照。計數也要在 `tail` 完成時遞增，不是在呼叫端的 `finally`，否則第 1 種還是存在。
-  - **另一個做法是拿掉快照優化，鎖內一律重查 USERS**：每則群組訊息多一次 Notion 查詢（約 0.45 秒，見 ADR 0009；在 fire-and-forget 裡，使用者感覺不到），但會多吃 rate limit。會弄壞 `services/__tests__/user-management.test.ts:69`（斷言 `findByUserId` 沒被呼叫）和 `:308`（斷言只呼叫 1 次），`docs/adr/0009-actor-users-snapshot-non-null-only.md` 第 7 行附近提到 `trustKnownUser` 的地方也要同步。
-  - **沒驗證過的前提**：不管哪種做法，最後都靠「鎖內重查拿到最新值」。重查用的是 database query（`findByUserId` → `/databases/…/query`），`docs/architecture.md:75` 只實測過「新建的頁面立刻查得到」，沒測過「PATCH 更新數字屬性後，query 立刻拿到新值」。如果 Notion 在這裡有延遲，連現在不信任快照的路徑也會少算。改用 `GET /pages/{pageId}` 讀會比較穩。
-  - `message_counts` 更根本的修法是不寫絕對值，但 Notion API 沒有原子加一，還是要靠「鎖內讀最新值」。
-  - 測試：`createTestBot` 把 `withMutex` mock 掉了（`test-utils/create-test-bot.ts:196-199`），重現不了。要加在 `services/__tests__/user-management.test.ts` 既有的 `describe('trackUser concurrency')`（第 270 行起，用的是真的 mutex），不要另外寫一套。
-    - 第 2 種很好重現：拿同一份舊快照，先 `await trackUser(A)`，再呼叫 `trackUser(B)`，不需要手動控制 resolve 時機。
-    - 第 1 種要用 fake timers 觸發 10 秒逾時。該檔的 `flush()` 用 `setImmediate`，vitest 的 fake timers 可能連 `setImmediate` 也假掉，讓 `flush()` 卡住，寫之前先確認。
-
 - [ ] **同一個 webhook 事件送達兩次時會被處理兩次，`+N`／`-N` 可能重複寫入。**（2026-09-29 對照 LINE 官方文件發現）
 
   **嚴重度：潛在的資料錯誤，沒有觀察到，低優先、不是急件。** 2026-09-29 已在 LINE Developers Console 確認 **Webhook redelivery 是關閉的**，所以下方「重送」與「2 秒逾時」兩種來源目前都不會觸發重複送達；剩下的只有 LINE 文件那句沒講清楚適用範圍的「網路路由問題」。**如果之後要打開 Webhook redelivery，要先處理這一條。** 沒打開的話，可以先照下方「動手前先確認」開 Error statistics 觀察，確認真的有重複送達再決定要不要做。
@@ -120,7 +80,7 @@
   - **`-N` 會再刪最多 N 筆**（第 173-208 行），前提是對方還有剩下的報名；沒有就回「找不到報名紀錄」、不寫入。
   - 第二次的回覆會因為 replyToken 已用過而被 LINE 拒絕（`Reply failed`），所以**當下的回覆看不出被重複寫入**；之後的 `@Dobby next`、週報、下一次報名的回覆名單才會顯示多出來或少掉的那筆。
   - **`假`／`銷假`**：`leave-handler.ts` 在鎖內重讀狀態，單純重複會走「已請假」／「未請假」的 no-op。但前提是兩次之間沒有相反的指令：LINE 說重送順序可能亂掉，「假 → 銷假 → 遲到的重送『假』」會**重新登記請假**，寫錯資料。
-  - **發言數**：群組／多人聊天的**所有文字訊息**（不只指令，閒聊也算）重複送達都會讓 `trackUser` 多算 1；一對一聊天不追蹤（`handlers/message-handler.ts:58-63`）。新使用者的第一則訊息重複送達不會建出兩個 USERS 頁（null 快照一律重查，`services/user-management.ts:95`），只會多算 1。
+  - **發言數**：群組／多人聊天的**所有文字訊息**（不只指令，閒聊也算）重複送達都會讓 `trackUser` 多算 1；一對一聊天不追蹤（`handlers/message-handler.ts:59-64`）。新使用者的第一則訊息重複送達不會建出兩個 USERS 頁（鎖內一律重讀 USERS，`services/user-management.ts:95`），只會多算 1。
   - 其他只會多一筆 `Reply failed`、不會寫壞資料的：自動回覆、其他唯讀指令（owe、next、news 等）、`join`；`memberJoined` 的 `trackJoinedMember` 不計發言數、groups 是合併寫入，重複也是冪等的。
 
 
@@ -133,7 +93,7 @@
   - Pi 重啟後 Map 清空，可以接受：重啟前處理過、重啟後才被重送的組合非常少見；Pi 當機時原本那次通常根本沒處理，重送本來就該處理。要跨重啟去重得另外存（檔案或 Notion），成本不成比例，要做的話先評估。
   - 同一個 webhook 裡的多筆事件各自有自己的 `webhookEventId`，去重的單位是「事件」，不是整個 webhook 請求。放在 event-router 會自動涵蓋 `join`／`memberJoined`，對它們去重也無害。
   - **`/logs` 呈現**：略過時記一行 info（例如 `Duplicate webhook event skipped`，帶 `webhookEventId`、`isRedelivery`，不帶 userId；不要用 warn，否則卡片會變黃）。**要注意的方向**：被略過的訊息事件不會有 `Message classified`、也沒有 Notion 步驟，`groupKind()`（`routes/logs.ts:468-491`）會把它判成「對話」、`groupStatus()` 判成「完成」，變成一張看不出是重複事件的綠色卡片。要讓 `groupKind()`／`groupStatus()`（或標題、預覽）認得這個訊息字串，在 `/logs` 上一眼分辨出「這是被略過的重複事件」。
-  - **測試**：寫在 `src/handlers/__tests__/event-router.test.ts`（那裡的 `handleMessage` 本來就是 mock），同一個 `webhookEventId` 送兩次，斷言 `handleMessage` 只被呼叫一次；另外測沒有 `webhookEventId` 的事件不會被去重。去重的 Map 在模組層級，測試之間會殘留，要提供重置函式（在 `beforeEach` 呼叫），或每個測試用不同的 ID。**不要用 `createTestBot` 測**：它的 `run()` 直接呼叫 `handleMessage`（`src/test-utils/create-test-bot.ts:204`），完全不經過 `processEvents()`，測不到去重；如果為了測試改成經過 `processEvents()`，`buildLineEvent` 把 `webhookEventId` 寫死成 `'evt-1'`（第 136 行），同一個測試檔裡第二次以後的 `run()` 會全部被當成重複吞掉。
+  - **測試**：寫在 `src/handlers/__tests__/event-router.test.ts`（那裡的 `handleMessage` 本來就是 mock），同一個 `webhookEventId` 送兩次，斷言 `handleMessage` 只被呼叫一次；另外測沒有 `webhookEventId` 的事件不會被去重。去重的 Map 在模組層級，測試之間會殘留，要提供重置函式（在 `beforeEach` 呼叫），或每個測試用不同的 ID。**不要用 `createTestBot` 測**：它的 `run()` 直接呼叫 `handleMessage`（`src/test-utils/create-test-bot.ts:219`），完全不經過 `processEvents()`，測不到去重；如果為了測試改成經過 `processEvents()`，`buildLineEvent` 把 `webhookEventId` 寫死成 `'evt-1'`（第 140 行），同一個測試檔裡第二次以後的 `run()` 會全部被當成重複吞掉。
   - 同步文件：`docs/architecture.md`「Fire-and-Forget Webhook 處理」小節（目前寫「本專案沒有開啟重送」，改完要一起更新），以及 `docs/logging.md` 對「起點」和事件種類／狀態的說明（新 log 行要寫進去）。
 
 - [ ] **`truncateAltText()` 截斷 altText 時，可能把 emoji 切成半個字元。** `src/commands/flex-card-parts.ts:117-119` 用 `text.slice(0, ALT_TEXT_MAX - 1) + '…'`（`ALT_TEXT_MAX = 400`，第 114 行）截字。`slice` 和 `.length` 算的是 UTF-16 code unit，不是字。🏸、🎉 這類 emoji 佔 2 個 code unit（surrogate pair），如果第 399 個 code unit 剛好是某個 emoji 的前半，截完的結尾就會是「孤立的前半個 surrogate＋…」。2026-10-01 實測 `truncateAltText('a'.repeat(398) + '🏸' + 'b'.repeat(10))`，結尾是 `"a\ud83c…"`。
@@ -155,7 +115,7 @@
 
 ## 程式碼整理與小改善（非 bug，低優先）
 
-- [ ] **`message-handler.ts` 的「指令解析失敗」分支永遠走不到。** `src/handlers/message-handler.ts:65-68` 的 `if (!command)`（記 debug `Message looks like command but failed to parse` 後 return）不會執行：`isCommand()`（`src/commands/command-parser.ts:98-100`）就是 `text.startsWith('@Dobby')`，而 `parseCommand()` 只在「不是 `@Dobby` 開頭」時回 `null`（第 12 行），其餘至少回 `{ type: CommandType.UNKNOWN }`（第 95 行）。所以 `Message classified` 的 `parsed` 永遠是 `true`，打錯的指令會以 `commandType: 'unknown'` 進 `routeCommand`、被靜默忽略，`/logs` 顯示成「指令／警告」、「來自」`unknown`（2026-09-28 本機 reqId `d8dad6` 的 `@Dobby hello` 實測）。
+- [ ] **`message-handler.ts` 的「指令解析失敗」分支永遠走不到。** `src/handlers/message-handler.ts:66-69` 的 `if (!command)`（記 debug `Message looks like command but failed to parse` 後 return）不會執行：`isCommand()`（`src/commands/command-parser.ts:98-100`）就是 `text.startsWith('@Dobby')`，而 `parseCommand()` 只在「不是 `@Dobby` 開頭」時回 `null`（第 12 行），其餘至少回 `{ type: CommandType.UNKNOWN }`（第 95 行）。所以 `Message classified` 的 `parsed` 永遠是 `true`，打錯的指令會以 `commandType: 'unknown'` 進 `routeCommand`、被靜默忽略，`/logs` 顯示成「指令／警告」、「來自」`unknown`（2026-09-28 本機 reqId `d8dad6` 的 `@Dobby hello` 實測）。
 
   不是 bug，行為正確，只是死碼加上幾處為它寫的顯示邏輯。不處理也沒有風險；風險只在之後有人改 `parseCommand()` 讓它對某些 `@Dobby` 開頭的文字回 `null` 時，這些分支才會突然「活過來」，所以處理時要決定是刪掉還是保留當防禦。
 
@@ -232,7 +192,7 @@
     - news 的 24 次 GET 會變成 2 次 query，預估從約 11.5 秒降到 2～3.5 秒。participants 從 1＋11 次降到 2 次。
     - schema 顯示 `報名人`（季租紀錄）↔`報名季度`（People）、`打球日`（季租紀錄）↔`季度`（行事曆）各自是兩個 DB 之間唯一的 `dual_property`，很可能就是配對的兩端。但 `docs/notion/schemas/` 沒記錄配對的屬性名，實作前要先用 Notion API 讀 database schema 的 `synced_property_name` 確認。
     - season-announcement：打球日只查本季（第 90 行），People 要查本季＋上一季的成員（第 91 行，`allMemberIds`），要用 `or` 篩兩個季度，或查兩次。另外有更便宜的做法：這裡的 `people` 只拿來當 `buildMentionResolver` 的保底姓名，第 22 行註解寫 USERS 找不到的情況「理論上不會發生」，所以也可以改成用到時才查，或直接拿掉保底。
-    - 成員超過 100 位要處理分頁，寫法參考 `users-repository.ts:39-56`。
+    - 成員超過 100 位要處理分頁，寫法參考 `users-repository.ts:67-84` 的 `findAll`。
   - **備案：People DB 全表建 `pageId → name` 的 in-memory Map（TTL 約 10 分鐘）。** 對整季名單的效益跟首選差不多，但多了下面的快取陷阱。它的範圍比首選大：`請假人` 是單向 relation，沒有反向欄位可篩，只有快取能加速鎖內的請假人姓名查詢（`event-status-message.ts:30`），等於順便處理下面「回覆訊息在鎖內組」那一項。只有在想一起處理那一項時才值得考慮。新 LINE 使用者自動建立的 People 頁面（見 `docs/notion/databases.md` 第 49 行）不在快取裡，要走 miss 路徑逐筆 GET。
 
   已知陷阱：
@@ -240,7 +200,7 @@
   - **打球日的查詢結果不能拿去算名額。** Calendar query 回來的是完整 `CalendarEvent`，內含 `guests`／`absentees`。在鎖外查到的這份只能用在公告列日期，算名額一律照 [ADR 0001](docs/adr/0001-explicit-fresh-calendar-event-wrapper.md) 在鎖內重讀。
   - **若走快取備案，不要快取整個 `PersonRecord`。** 它帶有 `hasPaid`（`結清` formula，`people-repository.ts:13`）。目前全 repo 沒有其他地方讀 `hasPaid`（`owe` 走 `findAllUnpaid`），所以現在不會出錯。風險在之後：有人從快取讀 `hasPaid`，會拿到最多 TTL 前的繳費狀態，而且不會有任何錯誤訊息。快取只存 name，或在型別上分開。
   - **若走快取備案，快取是 module 層級狀態，測試之間會殘留。** 要提供 reset 函式，在測試檔的 `beforeEach` 呼叫。**不要**在 `src/test-utils/setup.ts` 用靜態 import 引入：那支檔案只負責在任何 module 載入前設定 env var，靜態 import 會被 hoist 到 env 設定之前，讓 `env.ts` 驗證失敗，也可能讓測試檔對 `notion-fetch.js` 的 `vi.mock` 失效。
-  - **測試 fixture：** `create-test-bot.ts:74-86` 的 `routePost` 只依 DB ID 回 fixture、不看 filter，改用 DB query 後現有 fixture 大多可以直接用。另外 `routeGet` 的 `/pages/:id`（第 102-109 行）一律從 people fixture 找，所以現在測試裡 calendar 的 `findByPageIds` 拿到的其實是 people 頁面。改成 calendar query 後反而更正確，但既有斷言可能要跟著調整。
+  - **測試 fixture：** `create-test-bot.ts:74-86` 的 `routePost` 只依 DB ID 回 fixture、不看 filter，改用 DB query 後現有 fixture 大多可以直接用。另外 `routeGet` 的 `/pages/:id`（第 101-113 行）先在 users fixture、再在 people fixture 找同 id 的頁面，都找不到就回 people 第一筆，所以現在測試裡 calendar 的 `findByPageIds` 拿到的其實是 people 頁面。改成 calendar query 後反而更正確，但既有斷言可能要跟著調整。
 
 - [ ] **報名／請假的回覆訊息在鎖內組，拉長鎖持有時間。** `buildEventStatusMessage` 在請假人數 >0 時會呼叫 `peopleRepo.findByPageIds` 查請假人姓名（`event-status-message.ts:29-31`）。它在 `withFreshCalendarEvent` 的 mutation 裡被呼叫，後面的 `replyMessage` 也在 mutation 裡，所以鎖要等 LINE API 回應後才釋放。共有 5 處：
   - `registration-handler.ts:102-110`（名額不足）、`142-150`（成功）

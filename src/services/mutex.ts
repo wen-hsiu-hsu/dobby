@@ -155,6 +155,11 @@ function raceAgainstTimeout<T>(
   return Promise.race([settle, timeout]).finally(() => clearTimeout(timer));
 }
 
+/**
+ * Whether a caller is still waiting on `key` — not whether a task is still running: a task
+ * whose caller timed out keeps writing in the background but no longer counts. So this
+ * can't tell you a snapshot read earlier is still fresh (see ADR 0017).
+ */
 export function isLocked(key: string): boolean {
   return (pending.get(key) ?? 0) > 0;
 }

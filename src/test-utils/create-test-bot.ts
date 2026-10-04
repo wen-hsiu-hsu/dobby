@@ -98,10 +98,14 @@ function routeGet(path: string, overrides: FixtureOverrides): unknown {
     return fixtureBlocks ?? { results: [], has_more: false, next_cursor: null };
   }
 
-  // /pages/<pageId> — look up in people fixture
+  // /pages/<pageId> — look up in the users fixture (trackUser re-reads the sender's page
+  // by ID), then people
   const pageMatch = path.match(/\/pages\/([^/]+)/);
   if (pageMatch) {
     const pageId = pageMatch[1]!;
+    const users = mergeFixture(loadFixture('users'), overrides.users as Partial<NotionQueryResponse>);
+    const user = (users.results as Array<{ id: string }>).find((p) => p.id === pageId);
+    if (user) return user;
     const peopleBase = loadFixture('people');
     const people = mergeFixture(peopleBase, overrides.people as Partial<NotionQueryResponse>);
     const found = (people.results as Array<{ id: string }>).find((p) => p.id === pageId);

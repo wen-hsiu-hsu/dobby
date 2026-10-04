@@ -1,5 +1,5 @@
 import { env } from '../../config/env.js';
-import { notionPost, notionPatch } from './notion-fetch.js';
+import { notionGet, notionPost, notionPatch } from './notion-fetch.js';
 import {
   getTitle,
   getRichText,
@@ -47,6 +47,21 @@ export async function findByUserId(userId: string, reason: UserLookupReason = 'a
     }) as any;
     if (response.results.length === 0) return null;
     return pageToUser(response.results[0] as PageObjectResponse);
+  });
+}
+
+/**
+ * trackUser's in-lock re-read when the page is already known. Reads the page itself rather
+ * than querying the database: query freshness right after a PATCH is unverified
+ * (docs/architecture.md only measured it for newly created pages), while this read has to
+ * see the previous call's write. A trashed page returns null, matching what a query would.
+ * The purpose label is trackUser's; a new caller needs a `reason` parameter like findByUserId's.
+ */
+export async function findByPageId(pageId: string): Promise<NotionUser | null> {
+  return withPurpose('追蹤發話者時依 page ID 重讀 bot 使用者帳號', async () => {
+    const page = await notionGet(`/pages/${pageId}`) as PageObjectResponse;
+    if (page.archived || page.in_trash) return null;
+    return pageToUser(page);
   });
 }
 

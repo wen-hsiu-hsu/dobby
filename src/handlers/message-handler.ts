@@ -43,7 +43,8 @@ export async function handleMessage(event: MessageEvent): Promise<void> {
   const groupId = event.source.type === 'group' ? event.source.groupId : undefined;
   const multiChatId = event.source.type === 'room' ? event.source.roomId : undefined;
 
-  // Lazy-load admin status from USERS DB (result reused below for tracking, no duplicate query)
+  // Lazy-load admin status from USERS DB (result reused below: tracking takes its pageId,
+  // registration/leave reuse it as the actor's record)
   let notionUser;
   try {
     notionUser = await findByUserId(userId);

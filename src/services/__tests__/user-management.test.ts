@@ -42,6 +42,7 @@ beforeEach(() => {
 describe('trackUser', () => {
   it('does not call update() when there is nothing new to merge (already-known group, no multiChat)', async () => {
     const existing = makeUser({ groups: ['group-1'] });
+    vi.mocked(usersRepo.findByPageId).mockResolvedValue({ ...existing });
 
     trackUser('user-1', { groupId: 'group-1' }, existing);
     await flush();
@@ -52,6 +53,7 @@ describe('trackUser', () => {
 
   it('calls update() when a new group needs merging', async () => {
     const existing = makeUser({ groups: ['group-1'] });
+    vi.mocked(usersRepo.findByPageId).mockResolvedValue({ ...existing });
 
     trackUser('user-1', { groupId: 'group-2' }, existing);
     await flush();
@@ -60,13 +62,29 @@ describe('trackUser', () => {
     expect(usersRepo.incrementMessageCount).toHaveBeenCalledWith('page-1', 3);
   });
 
-  it('reuses a passed-in knownUser instead of querying findByUserId again', async () => {
-    const existing = makeUser();
+  it('re-reads a known user by page ID inside the lock and computes the update from that, not the snapshot', async () => {
+    const snapshot = makeUser({ groups: ['group-1'], messageCount: 3 });
+    vi.mocked(usersRepo.findByPageId).mockResolvedValue(makeUser({ groups: ['group-1', 'group-9'], messageCount: 7 }));
 
-    trackUser('user-1', {}, existing);
+    trackUser('user-1', { groupId: 'group-2' }, snapshot);
     await flush();
 
+    expect(usersRepo.findByPageId).toHaveBeenCalledWith('page-1');
     expect(usersRepo.findByUserId).not.toHaveBeenCalled();
+    expect(usersRepo.update).toHaveBeenCalledWith('page-1', { groups: ['group-1', 'group-9', 'group-2'] });
+    expect(usersRepo.incrementMessageCount).toHaveBeenCalledWith('page-1', 7);
+  });
+
+  it('falls back to looking the user up by userId when the known page has been trashed', async () => {
+    vi.mocked(usersRepo.findByPageId).mockResolvedValue(null);
+    vi.mocked(usersRepo.findByUserId).mockResolvedValue(makeUser({ pageId: 'page-2', messageCount: 10 }));
+
+    trackUser('user-1', {}, makeUser());
+    await flush();
+
+    expect(usersRepo.findByUserId).toHaveBeenCalledWith('user-1', 'track-user');
+    expect(usersRepo.incrementMessageCount).toHaveBeenCalledWith('page-2', 10);
+    expect(usersRepo.create).not.toHaveBeenCalled();
   });
 });
 
@@ -278,7 +296,7 @@ describe('trackUser concurrency', () => {
     const snapshotB = { ...liveUser };
 
     const incrementCallArgs: number[] = [];
-    vi.mocked(usersRepo.findByUserId).mockImplementation(async () => ({ ...liveUser }));
+    vi.mocked(usersRepo.findByPageId).mockImplementation(async () => ({ ...liveUser }));
     vi.mocked(usersRepo.update).mockImplementation(async (_pageId, updates) => {
       liveUser = { ...liveUser, ...updates };
     });
@@ -302,10 +320,71 @@ describe('trackUser concurrency', () => {
     expect(liveUser.groups.sort()).toEqual(['group-1', 'group-2', 'group-3']);
     expect(liveUser.messageCount).toBe(5);
     expect(incrementCallArgs).toEqual([3, 4]);
-    // First call trusts its snapshot (nothing else was in flight yet); the second
-    // call queues behind it and must re-read fresh instead of trusting its own stale
-    // snapshot.
-    expect(usersRepo.findByUserId).toHaveBeenCalledTimes(1);
+    // Both calls re-read the page inside the lock; neither trusts its snapshot.
+    expect(usersRepo.findByPageId).toHaveBeenCalledTimes(2);
+    expect(usersRepo.findByUserId).not.toHaveBeenCalled();
+  });
+
+  it('does not trust a snapshot taken before an earlier call for the same user finished writing', async () => {
+    // message-handler read the snapshot while the previous message's trackUser() was still
+    // writing, but that call has finished by the time this one starts — nothing is locked,
+    // yet the snapshot is stale. No timeout needed.
+    let liveUser = makeUser({ groups: ['group-1'], multiChats: [], messageCount: 3 });
+    const staleSnapshot = { ...liveUser };
+    vi.mocked(usersRepo.findByPageId).mockImplementation(async () => ({ ...liveUser }));
+    vi.mocked(usersRepo.update).mockImplementation(async (_pageId, updates) => {
+      liveUser = { ...liveUser, ...updates };
+    });
+    vi.mocked(usersRepo.incrementMessageCount).mockImplementation(async (_pageId, currentCount) => {
+      liveUser = { ...liveUser, messageCount: currentCount + 1 };
+    });
+
+    await trackUser('user-1', { groupId: 'group-2' }, staleSnapshot);
+    await trackUser('user-1', { groupId: 'group-3' }, staleSnapshot);
+
+    expect(liveUser.groups.sort()).toEqual(['group-1', 'group-2', 'group-3']);
+    expect(liveUser.messageCount).toBe(5);
+  });
+
+  it('does not trust the snapshot while an earlier call is still writing after its caller timed out', async () => {
+    // Only fake setTimeout: flush() relies on a real setImmediate.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    // Also released in `finally`: if this test fails midway, a write left blocked would
+    // stall the module-level mutex queue for this userId and fail the later tests too.
+    let releaseFirstWrite!: () => void;
+    const firstWriteBlocked = new Promise<void>((resolve) => { releaseFirstWrite = resolve; });
+    try {
+      let liveUser = makeUser({ groups: ['group-1'], multiChats: [], messageCount: 3 });
+      const snapshot = { ...liveUser };
+      vi.mocked(usersRepo.findByPageId).mockImplementation(async () => ({ ...liveUser }));
+      vi.mocked(usersRepo.update)
+        .mockImplementationOnce(async (_pageId, updates) => {
+          await firstWriteBlocked;
+          liveUser = { ...liveUser, ...updates };
+        })
+        .mockImplementation(async (_pageId, updates) => {
+          liveUser = { ...liveUser, ...updates };
+        });
+      vi.mocked(usersRepo.incrementMessageCount).mockImplementation(async (_pageId, currentCount) => {
+        liveUser = { ...liveUser, messageCount: currentCount + 1 };
+      });
+
+      const first = trackUser('user-1', { groupId: 'group-2' }, snapshot);
+      await flush();
+      // The first caller gives up after 10s; its write keeps running in the background
+      // (ADR 0002), so no caller is waiting on the lock any more.
+      await vi.advanceTimersByTimeAsync(10_000);
+      await first;
+      const second = trackUser('user-1', { groupId: 'group-3' }, snapshot);
+      releaseFirstWrite();
+      await second;
+
+      expect(liveUser.groups.sort()).toEqual(['group-1', 'group-2', 'group-3']);
+      expect(liveUser.messageCount).toBe(5);
+    } finally {
+      releaseFirstWrite();
+      vi.useRealTimers();
+    }
   });
 
   it('creates only one page when a brand-new member joins and immediately sends a message', async () => {
