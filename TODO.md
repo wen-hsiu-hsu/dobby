@@ -14,7 +14,10 @@
 
 - [ ] 全形 `＋`/`－` 符號 —— 程式碼已支援（`normalizeFullWidth()`），實際傳一次 `@Dobby ＋1` 驗證即可，不用改 code
 - [ ] 第一次正式 `display-name-update`（2026-09-28 週一 04:00）—— 到 `/logs` 排程分頁確認有跑完、更新筆數合理。USERS `groups` 殘留測試群組 ID 造成的 404 是預期的（見 `docs/overview.md`「從 n8n 遷移」）；2026-09-29 已清掉無關群組 ID，之後應少很多
-- [ ] 「報名／請假沿用 message-handler 的 USERS 快照＋Season 並行查」部署後（[ADR 0009](docs/adr/0009-actor-users-snapshot-non-null-only.md)），到 `/logs` 看既有使用者在群組的 `+N`／`假`：時間軸只剩一次 USERS query；`resolveTarget` 的 People GET 和 Season query 起點幾乎相同。背景那筆 `GET /pages/<USERS 頁>` 是 `trackUser` 鎖內重讀（[ADR 0017](docs/adr/0017-track-user-always-rereads-inside-lock.md)），預期中。基準：改前成功的 `±N` 中位數 3.3 秒，預估 2.4～2.5 秒；沒達到不是 bug，記下實測數字即可。群組新使用者首次指令、一對一私訊仍查兩次 USERS，是預期的
+- [ ] 進鎖前讀取快取（[ADR 0020](docs/adr/0020-pre-lock-read-cache.md)）部署後，到 `/logs` 確認：
+    - 啟動後有一張「排程」卡片，「來自」是 `read-cache-refresh`，`Read cache refresh complete` 的 `entries` 筆數跟 USERS／People 表相符（本機 2026-10-05 是 users 33、people 41，Notion 那邊還沒對過）；之後每 15 分鐘一張，連續成功的會折疊成「讀取快取重載 × N」，也不會讓「重新整理」按鈕亮「有新 log」
+    - 在 Notion 改自己 USERS 的 `is_admin`，約 15 分鐘內（下一輪重載後）權限才跟著變，是預期的
+    - `/logs` 頁首「遮蔽 ID」右邊的「清除快取」：在 Notion 改季租名單或自己的 `is_admin` 後按一下，按鈕顯示「已清除並重載（N／M 筆）」，接著下的指令馬上反映新資料；`/logs` 多一張「來自」`read-cache-clear` 的卡片，沒被折疊進定時重載
 - [ ] Pi `/logs` footer 的「R2 備份」徽章：確認 R2 同步有啟用、最近一次成功（徽章語意見 `docs/logging.md`）。本機 log 只留約 7 天，季末對帳要靠 R2（`/logs` 讀不到 R2，要下載後用 `jq` 查）
 - [ ] 報名／請假 Flex 卡（[ADR 0010](docs/adr/0010-registration-status-flex-card.md)）：另加深色模式；文字疊在照片上仍清楚（深淺色漸層遮罩都看）；底部三顆按鈕 `+1 零打`／`−1 零打`／`請假`
 - [ ] 指令清單 Flex 卡（[ADR 0012](docs/adr/0012-command-list-flex-card.md)）：一般成員和管理員各下一次 `@Dobby 指令`，每列、每顆按鈕都按過；一般成員看不到「管理員專用」區、查詢區第一列是「本週打球資訊」（[ADR 0019](docs/adr/0019-members-verify-timeout-via-next.md)）；「下一季公告草稿」送出的是下一季

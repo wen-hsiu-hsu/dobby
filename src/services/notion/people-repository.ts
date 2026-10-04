@@ -4,6 +4,7 @@ import { getTitle, getFormulaBoolean } from './property-helpers.js';
 import { queryAlignedToIds } from './reverse-relation-query.js';
 import { withPurpose } from '../../utils/request-context.js';
 import { logger } from '../../utils/logger.js';
+import { ReadCache } from './read-cache.js';
 import type { CalendarEvent, PersonRecord, SeasonRecord } from '../../types/notion-models.js';
 import type { PageObjectResponse } from '@notionhq/client/build/src/api-endpoints.js';
 
@@ -27,6 +28,52 @@ async function getPeopleOneByOne(pageIds: string[]): Promise<PersonRecord[]> {
     records.push(await getPerson(id));
   }
   return records;
+}
+
+type PersonName = Pick<PersonRecord, 'pageId' | 'name'>;
+
+/** 定時整表重載的間隔是 15 分鐘（schedulers/read-cache-refresh.ts），容許一次重載失敗。 */
+export const PEOPLE_CACHE_MAX_AGE_MS = 30 * 60 * 1000;
+
+// 只存姓名：`結清` 是 formula，管理員登記付款就會變，不能快取。
+const nameCache = new ReadCache<PersonName>('people', PEOPLE_CACHE_MAX_AGE_MS, (p) => p.pageId);
+
+/**
+ * 報名／請假進鎖前解析對象用（target-resolver.ts），走快取（ADR 0020）。姓名只會由管理員在
+ * Notion 手動改，改了之後最多晚一次重載才生效；bot 自己不會改既有 People 的姓名。
+ */
+export async function findNameByPageId(pageId: string): Promise<PersonName | null> {
+  return nameCache.getOrLoad(pageId, () =>
+    withPurpose('查詢成員姓名', async () => {
+      const { name } = await getPerson(pageId);
+      return { pageId, name };
+    }),
+  );
+}
+
+/** 定時排程用整張 People 表換掉姓名快取，回傳快取筆數。 */
+export async function refreshCache(): Promise<number> {
+  return withPurpose('重載成員姓名快取', () =>
+    nameCache.replaceAll(async () => {
+      const people: Array<[string, PersonName]> = [];
+      let cursor: string | undefined;
+      let first = true;
+      do {
+        if (!first) await new Promise((r) => setTimeout(r, 400)); // Notion rate limit
+        first = false;
+        const response = await notionPost(`/databases/${env.NOTION_DB_PEOPLE}/query`, {
+          page_size: 100,
+          ...(cursor ? { start_cursor: cursor } : {}),
+        }) as { results: PageObjectResponse[]; has_more: boolean; next_cursor: string | null };
+        for (const page of response.results) {
+          const { pageId, name } = pageToRecord(page);
+          people.push([pageId, { pageId, name }]);
+        }
+        cursor = response.has_more ? (response.next_cursor ?? undefined) : undefined;
+      } while (cursor);
+      return people;
+    }),
+  );
 }
 
 // 逐筆 GET，每筆之間 400ms。整季名單請用 findMembersOfSeasons，活動請假人請用 findAbsenteesOfEvent（一次 query）。

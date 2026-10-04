@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { notionGet, notionPost } from '../notion-fetch.js';
 import { logger } from '../../../utils/logger.js';
 import { getPurpose } from '../../../utils/request-context.js';
-import { create, findAbsenteesOfEvent, findMembersOfSeasons } from '../people-repository.js';
+import { create, findAbsenteesOfEvent, findMembersOfSeasons, findNameByPageId, refreshCache } from '../people-repository.js';
 
 vi.mock('../notion-fetch.js');
 vi.mock('../../../utils/logger.js', () => ({
@@ -189,6 +189,37 @@ describe('people-repository', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  // ADR 0020：報名／請假進鎖前解析對象用的姓名快取
+  describe('findNameByPageId', () => {
+    it('returns only pageId and name, and serves a repeat from the cache', async () => {
+      notionGetMock.mockResolvedValue(personPage('person-1', 'Alice'));
+
+      await findNameByPageId('person-1');
+      const again = await findNameByPageId('person-1');
+
+      expect(again).toEqual({ pageId: 'person-1', name: 'Alice' });
+      expect(notionGetMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('is a hit right after refreshCache, which pages through the whole People table', async () => {
+      notionPostMock
+        .mockResolvedValueOnce({ results: [personPage('person-1', 'Alice')], has_more: true, next_cursor: 'c2' })
+        .mockResolvedValueOnce({ results: [personPage('person-2', 'Bob')], has_more: false, next_cursor: null });
+      vi.useFakeTimers();
+      try {
+        const refreshing = refreshCache();
+        await vi.runAllTimersAsync();
+        expect(await refreshing).toBe(2);
+      } finally {
+        vi.useRealTimers();
+      }
+
+      expect(await findNameByPageId('person-2')).toEqual({ pageId: 'person-2', name: 'Bob' });
+      expect(notionPostMock).toHaveBeenNthCalledWith(2, expect.any(String), expect.objectContaining({ start_cursor: 'c2' }));
+      expect(notionGetMock).not.toHaveBeenCalled();
     });
   });
 });

@@ -54,7 +54,7 @@ export async function handleLeave(
   try {
     [resolved, activeSeason] = await Promise.all([
       resolveTarget(target, event.source.userId, actorUser),
-      seasonRepo.findByName(seasonName),
+      seasonRepo.findByNameCached(seasonName),
     ]);
   } catch (err) {
     logger.error({ err }, `${LOG_CONTEXT} error`);

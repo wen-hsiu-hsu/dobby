@@ -11,12 +11,6 @@
 >
 > 慢的原因是呼叫模式（逐筆查、人為延遲），不是 Notion 本身或 rate limit。以下都**不是 bug**：結果正確，只是慢，不是急件，依效益排序。做完任何一項後，都要在 `/logs` 時間軸比對同類指令前後的 Notion 呼叫數與總耗時。
 
-- [ ] **報名／請假的狀態卡，操作對象本人是唯一請假人時，他的 People 頁會 GET 兩次。** 一次在鎖外的 `resolveTarget`（`target-resolver.ts:38` 本人、`:47` mention 代操，`:55` 依姓名代操是 query 但一樣拿到 People 姓名），一次在 `with-fresh-calendar-event.ts` 的 `replyStatus` 呼叫 `buildEventStatusReply`（`event-status-message.ts:33`）→ `peopleRepo.findAbsenteesOfEvent`，只有 1 位請假人時是直接 GET 那一頁。會發生在請假成功、「已請假，無需重複操作」，以及已請假的季租成員報名 `+N` 這些情況。
-
-    不是 bug，兩次拿到的姓名相同。2026-10-04 起組狀態卡已經移到鎖外，所以這次多出的 GET（約 0.3 秒）不會拉長佔鎖時間，只會讓這個使用者晚約 0.3 秒收到回覆。2 人以上請假時是一次反向 query，本人在不在名單裡成本都一樣，沒有重複。0 人時不查。
-
-    如果要處理：可以讓 `EventStatusParams` 多帶一個「已知 pageId → 姓名」（handler 傳 `resolved.personPageId` → `resolved.displayName`），`buildEventStatusReply` 遇到已知的就跳過查詢。這樣做是安全的：pageId 出現在請假名單就一定有 People 頁，這時 `resolveTarget` 給的 `displayName` 一定是 People 的 `Name`，不會是 LINE 名稱（沒有 People 頁時 `personPageId` 是空字串，不會跟請假名單對上）。效益只有單一使用者少等 0.3 秒，優先度低。
-
 - [ ] **一次 Notion 寫入卡 43 秒，同一天的報名／請假全部連鎖逾時。**（2026-10-04 測試環境實測，本機 `logs/app.2026-10-04.1.log`）
 
     經過：同一人在群組快速連送兩輪 `+1`、`-1`、`假`、`銷假`，共 8 則，全部收到當時的逾時訊息「處理時間較長，這次操作可能已經完成，請勿重複操作」（現在的文案見 `with-fresh-calendar-event.ts:17`、`:20`）。
@@ -53,25 +47,4 @@
     - 擋不住 43 秒那種卡住的單次寫入（排隊中的照樣逾時），只能讓卡住結束後的積壓一次清空，不再拖累下一輪（43 秒那次，第二輪的 `waitMs` 11～13 秒就是被積壓拖到的）。
     - 合併之後，號碼牌閘門（[ADR 0018](adr/0018-entry-gate-orders-lock-entry.md)）保證的「照收到順序」要在批次內的套用順序維持住，不能因為合併而重排。
     - 不要用拉長 `TIMEOUT_MS` 來替代：理由見上一條的「拉長 mutex 逾時」。
-
-- [ ] **報名／請假進鎖前的 Notion 查詢可以改用 in-memory 快取，縮短等待，也縮短號碼牌閘門的等待。**（2026-10-04 討論）
-
-    現況：每則報名／請假進鎖前要串行打兩段 Notion，合計約 0.8～2.2 秒：
-    - 先在 `src/handlers/message-handler.ts:77` 查 `usersRepo.findByUserId`（USERS）。
-    - 再到 `registration-handler.ts:55`／`leave-handler.ts:55` 並行查兩樣東西：
-        - `resolveTarget`：`target-resolver.ts:38`／`:47` 的 `peopleRepo.findByPageIds`、`:55` 的 `peopleRepo.findByName`；mention 代操時多一次 `usersRepo.findByUserId`。
-        - `seasonRepo.findByName`（`season-repository.ts:46`）。
-    - 群組裡的全新使用者，兩段中間還要等 `trackUser` 建好 USERS／People（`message-handler.ts:90`），約 2～3 秒。
-
-    不是 bug。效益有兩個：使用者少等約 1 秒；而這段時間長短不一，以前正是進鎖順序對調的根源；2026-10-04 起由號碼牌閘門保證順序（[ADR 0018](adr/0018-entry-gate-orders-lock-entry.md)），慢的查詢改成讓排在後面的人在閘門多等。快取命中時這段縮到毫秒級，閘門就很少需要真的等前一號。快取保證不了順序，**不能取代閘門**；它只是讓閘門的等待變短。全新使用者那 2～3 秒快取幫不上（USERS 本來就查無，`null` 也不能快取，見下方），搶報時排在他後面的人會在閘門多等這段，最多等到拿號碼後 5 秒。
-
-    `docs/rejected-proposals.md` 否決的是 SQLite，當時的結論是「讀取快取用 in-memory Map 就夠了」，沒有否決 in-memory 快取。2026-10-04 使用者確認季租名單和管理員身分幾乎不會改，所以失效策略可以簡單（例如 TTL）。
-
-    如果要處理，有這些陷阱：
-    - **季資料的快取會直接影響名額。** 現況已經是「季資料在進鎖前讀、鎖內不重讀」：鎖內的 `getEventOccupancy` 拿到 handler 傳進來的 `activeSeason` 就不會重讀（`event-occupancy.ts:27`），快取只是把這份資料的年齡從幾秒拉長到 TTL。所以 `members.length`、季預設 `courts` 都會用快取值算 `calculateTotalSlots`，`guestFee` 也是。季資料改了之後，TTL 內名額可能算錯，甚至超賣。要快取的話，只能二選一，並寫清楚選了哪個：季資料的 TTL 設短；或改成在鎖內重讀季資料，代價是多一次查詢、佔鎖變長。
-    - **USERS 查無此人（`null`）不能快取。** 全新使用者的第一則訊息之後，`trackUser` 會建頁；快取 null 的話，之後的指令都會回「找不到您的帳號」。ADR 0009 也規定只信任非 null 的快照。
-    - **USERS 的 `customName` 每週會變。** 每週一的 `display-name-update`（`schedulers/display-name-update.ts`）會更新它。沒有 People 頁的人報名時，零打名稱用的是 `customName`（`target-resolver.ts:40`、`:49` 的 `person?.name ?? user.customName`）。快取到舊名的話，`+1` 會寫進舊名，之後 `-1` 依名稱比對會找不到。TTL 要短，或在排程更新後清掉快取。
-    - **`isAdmin` 也來自 USERS**：管理員身分被拿掉之後，TTL 內仍然有管理員權限；被新增時，TTL 內還沒有權限（只是不方便，不會出事）。
-    - **`trackUser` 鎖內的重讀必須繞過快取。** `user-management.ts:94` 的 `findByPageId` 和 `:95` 的 `findByUserId(userId, 'track-user')` 是 ADR 0017 規定的鎖內重讀，它會用讀到的 `groups`／`multiChats`／`message_counts` 算出新值寫回（`message_counts` 是絕對值）。如果快取直接做在 `usersRepo.findByUserId` 裡，這條路徑也會吃到舊值，蓋掉別人的寫入。只有 `reason` 是 `'actor'`／`'mention-target'` 的呼叫可以走快取；快取記錄裡的 `groups`／`message_counts` 也不能拿來算任何寫入。ADR 0009 也提過同類風險。
-    - 快取層放在 repository 裡面，不要讓 handler 繞過 repository 直接讀快取（`CLAUDE.md`：Notion 存取一律走 repository）。
 

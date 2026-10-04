@@ -18,11 +18,11 @@
 
 搜尋框比對的是事件標題、預覽內容、`reqId`、使用者顯示名稱/userId、報名／請假的「對象」名稱、「來自」欄位，不是逐行比對 log 訊息文字。
 
-事件卡片（清單這一側）都是伺服器端一次算好、跟著頁面一起送出，切換分頁、搜尋都只是顯示/隱藏已經渲染好的區塊，不需要等瀏覽器重新整理或重新計算。**完整時間軸明細**（含展開後的 Notion/LINE payload JSON 樹）則只有預設選中的那筆事件會內嵌在初始頁面裡（最新一筆「不會被折疊」的事件，見下方「連續 R2 同步折疊成一列」；全部都可折疊時才退回最新一筆），其餘事件第一次點開時才由前端呼叫 `?detail=<reqId>` 現組現拿、插入頁面並快取起來，之後再點回同一筆不會重複打 API——7 天份量的事件裡實際只會點開其中一兩筆，先把每一筆的 JSON 樹都組好送出去很浪費（見下方「讀取範圍與載入效能」）。
+事件卡片（清單這一側）都是伺服器端一次算好、跟著頁面一起送出，切換分頁、搜尋都只是顯示/隱藏已經渲染好的區塊，不需要等瀏覽器重新整理或重新計算。**完整時間軸明細**（含展開後的 Notion/LINE payload JSON 樹）則只有預設選中的那筆事件會內嵌在初始頁面裡（最新一筆「不會被折疊」的事件，見下方「連續 R2 同步、讀取快取重載折疊成一列」；全部都可折疊時才退回最新一筆），其餘事件第一次點開時才由前端呼叫 `?detail=<reqId>` 現組現拿、插入頁面並快取起來，之後再點回同一筆不會重複打 API——7 天份量的事件裡實際只會點開其中一兩筆，先把每一筆的 JSON 樹都組好送出去很浪費（見下方「讀取範圍與載入效能」）。
 
 ## 有新 log 時的提示
 
-頁面不會自動輪詢重畫整份清單（避免使用者正在看的事件被換掉），但右上角「重新整理」按鈕會每 20 秒用既有的 `?format=text` 端點（見下方「精簡純文字匯出」）比對最新一筆事件有沒有變化，有的話按鈕會變色並加上「（有新 log）」文字提示。比對時會跳過成功的 R2 同步（`[排程/完成]` 且標題是 `R2 log sync complete` 的那行）跟「…還有 N 筆」那行——`LOG_LEVEL=debug` 下同步每 15 分鐘一輪，算進去的話按鈕幾乎永遠亮著。這個後綴字串要跟 `renderEventListText()` 的行格式對得上，改行格式時記得一起看 `POLL_IGNORED_LINE_SUFFIX`。這只是提示，實際重新整理仍要使用者自己按下去；分頁切到背景（`document.hidden`）時會跳過這次檢查。
+頁面不會自動輪詢重畫整份清單（避免使用者正在看的事件被換掉），但右上角「重新整理」按鈕會每 20 秒用既有的 `?format=text` 端點（見下方「精簡純文字匯出」）比對最新一筆事件有沒有變化，有的話按鈕會變色並加上「（有新 log）」文字提示。比對時會跳過成功的 R2 同步、讀取快取重載（`[排程/完成]` 且標題是 `R2 log sync complete`／`Read cache refresh complete` 的那行）跟「…還有 N 筆」那行——兩者都每 15 分鐘一輪，算進去的話按鈕幾乎永遠亮著。這些後綴字串要跟 `renderEventListText()` 的行格式對得上，改行格式時記得一起看 `POLL_IGNORED_LINE_SUFFIXES`。這只是提示，實際重新整理仍要使用者自己按下去；分頁切到背景（`document.hidden`）時會跳過這次檢查。
 
 ## 讀取範圍與載入效能
 
@@ -39,8 +39,8 @@
 | 指令 | 有 `Processing event`（`type: 'message'`），且 info 摘要 `Message classified` 的 `isCommand` 是 `true`（`parseCommand()` 只對不是 `@Dobby` 開頭的文字回 `null`，打錯的指令仍算指令，是 `commandType: 'unknown'`）。舊 log 檔沒有這行時，改看底下有沒有 `Routing command` 或 `Message looks like command but failed to parse`（見下方說明） | 訊息 |
 | 對話 | 有 `Processing event`（`type: 'message'`），但不是指令——通常是自動回覆（`services/auto-reply.ts`，靜態 JSON）。`message-handler.ts` 直接略過的訊息（`Message ignored: not text`、`Message ignored: no userId`）也算對話 | 訊息 |
 | 加入 | `Processing event` 的 `type` 是 `join` 或 `memberJoined` | 訊息 |
-| 排程 | 沒有 `Processing event`，但有 `reqId`——`weekly-push.ts`/`display-name-update.ts` 各自用 `runWithContext` 包住整次執行；R2 同步的 `uploadAllLogs()`（`log-upload.ts`，含 graceful shutdown 那次）也一樣（見下方「排程事件的 reqId」） | 排程 |
-| 系統 | 完全沒有 `reqId`，且不是伺服器生命週期訊息（見下方「服務重啟分隔線」；兩個排程啟動時各記一次的 `... scheduler started` 也算生命週期訊息，不會變成卡片）。有專屬文案的有三種：LINE webhook 簽章驗證失敗（`index.ts` 的全域錯誤處理，發生在事件處理、也就是 reqId 產生之前，真正的異常）、`webhook.ts` 一次收到兩筆以上事件時的批次提示（正常、預期內的情況，不是錯誤）、`log-upload.ts` 在 R2 未設定時於啟動時記一次的提示（debug 層，非錯誤）。其他沒有 reqId 的訊息——例如 `log-cleanup.ts` 的 `Deleted old log file`、錯誤處理的 `.catch` 記下的 `Log cleanup run failed`/`R2 log sync run failed`/`R2 log sync on shutdown failed`/`Error processing events`、`index.ts` 的 `Unhandled request error`、`crash-handlers.ts` 在 process crash 前記的 fatal（見 `docs/overview.md`「日誌」小節）——會退回通用文案：「來自」顯示「（未知系統來源）」，「來源」顯示中性的「未知」 | 系統 |
+| 排程 | 沒有 `Processing event`，但有 `reqId`——`weekly-push.ts`/`display-name-update.ts`/`read-cache-refresh.ts` 各自用 `runWithContext` 包住整次執行；R2 同步的 `uploadAllLogs()`（`log-upload.ts`，含 graceful shutdown 那次）也一樣（見下方「排程事件的 reqId」） | 排程 |
+| 系統 | 完全沒有 `reqId`，且不是伺服器生命週期訊息（見下方「服務重啟分隔線」；排程啟動時各記一次的 `... scheduler started` 也算生命週期訊息，不會變成卡片）。有專屬文案的有三種：LINE webhook 簽章驗證失敗（`index.ts` 的全域錯誤處理，發生在事件處理、也就是 reqId 產生之前，真正的異常）、`webhook.ts` 一次收到兩筆以上事件時的批次提示（正常、預期內的情況，不是錯誤）、`log-upload.ts` 在 R2 未設定時於啟動時記一次的提示（debug 層，非錯誤）。其他沒有 reqId 的訊息——例如 `log-cleanup.ts` 的 `Deleted old log file`、錯誤處理的 `.catch` 記下的 `Log cleanup run failed`/`R2 log sync run failed`/`R2 log sync on shutdown failed`/`Error processing events`、`index.ts` 的 `Unhandled request error`、`crash-handlers.ts` 在 process crash 前記的 fatal（見 `docs/overview.md`「日誌」小節）——會退回通用文案：「來自」顯示「（未知系統來源）」，「來源」顯示中性的「未知」 | 系統 |
 
 **指令 vs 對話靠 `message-handler.ts` 的 info 摘要 `Message classified` 判斷，`LOG_LEVEL=info` 下也準確。** 這行在訊息處理的所有分支之前記（包括 USERS 查詢失敗、管理員略過自動回覆這幾個提早 return 的分支），欄位是 `isCommand`，指令另外有 `commandType`。2026-10-04 之前的 log 另有 `parsed` 欄位，但它永遠是 `true`（`parseCommand()` 從來沒對 `@Dobby` 開頭的文字回過 `null`），已拿掉。依 [ADR 0005](adr/0005-purpose-context-layered-on-reqid.md)，這行不含訊息原文，也不含 userId。
 
@@ -116,6 +116,14 @@
 
 頁面右上角有「遮蔽 ID」按鈕，預設遮蔽（例如 `U1234●●●●●●abc`），點一下切換成顯示完整 userId；每個事件詳情裡使用者欄位旁邊的「顯示/遮蔽」連結是同一個開關。這是純前端顯示層級的遮蔽，並非資料保護機制——頁面本身仍然需要 `LOGS_ACCESS_TOKEN` 才能存取，遮蔽只是避免在螢幕分享/截圖時不小心露出真實 userId。顯示名稱（使用者的 `displayName`、對象的 `targetDisplayName`）不在遮蔽範圍內，一律明碼顯示，只有在對應的 log 有記錄到才會顯示（使用者名稱的來源規則見上方「每個事件卡片顯示什麼」）；沒有使用者的事件（例如排程、系統事件）整個「使用者」欄位/區塊會直接不顯示，不會看到一個空白的「（無 userId）」佔位，「對象」欄位同理。
 
+## 清除讀取快取按鈕
+
+「遮蔽 ID」右邊的「清除快取」按鈕會清空報名／請假進鎖前查詢用的讀取快取（USERS、人員清單姓名、季資料），並立刻重載 USERS 和人員清單。管理員剛在 Notion 手動改了季租名單、季預設場地數、`is_admin`、`Registered name`、People 姓名，不想等 TTL 或下一輪 15 分鐘重載時使用（[ADR 0020](adr/0020-pre-lock-read-cache.md)）。
+
+- **怎麼呼叫**：前端 `POST /logs/read-cache/clear`，跟頁面一樣要 `LOGS_ACCESS_TOKEN`。用 POST 是為了避免連結預覽之類的 GET 意外觸發。
+- **按完之後**：按鈕顯示重載後的筆數，例如「已清除並重載（33／41 筆）」。重載失敗時顯示「已清除，重載失敗」，這時快取是空的，查詢會直接打 Notion，結果仍然正確，只是比較慢。
+- **在 `/logs` 上**：每按一次會產生一張「排程」卡片，標題 `Read cache cleared from /logs`，「來自」顯示 `read-cache-clear`。它的重載也會記 `Read cache refresh complete`，但不會跟定時重載折疊在一起，也會讓「重新整理」按鈕亮「有新 log」。
+
 群組 ID（`groupId`）比照 userId 用同一套遮蔽規則、同一個全域開關——這是同一類 PII（見 `docs/adr/0005-purpose-context-layered-on-reqid.md`），只有 `LOG_LEVEL=debug` 時才會出現在事件詳情頁的「群組 ID」欄位（來源是 `Processing event detail` 的 `source.groupId`），`LOG_LEVEL=info` 時這個欄位不會出現，不是顯示空白。
 
 ## 訊息內容跟身分識別資訊只在 debug 層
@@ -144,26 +152,26 @@ Notion API 回應 429（rate limit）時程式會自動重試，同一次呼叫�
 
 ## reqId 分組／排程事件的 reqId
 
-事件分組底層是 `request-context.ts` 的 `runWithContext`：同一次事件處理過程中所有 log 都會自動帶上同一個 `reqId`（見 `docs/architecture.md` 的「Request Correlation ID」小節）。`weekly-push.ts`/`display-name-update.ts` 這兩個排程也各自用 `runWithContext` 包住整次執行，所以每次排程執行也會有自己專屬的 reqId、在 `/logs` 頁面上變成一個獨立的「排程」事件，不會跟其他次執行、或其他排程的 log 混在同一組。
+事件分組底層是 `request-context.ts` 的 `runWithContext`：同一次事件處理過程中所有 log 都會自動帶上同一個 `reqId`（見 `docs/architecture.md` 的「Request Correlation ID」小節）。`weekly-push.ts`/`display-name-update.ts`/`read-cache-refresh.ts` 這幾個排程也各自用 `runWithContext` 包住整次執行，所以每次排程執行也會有自己專屬的 reqId、在 `/logs` 頁面上變成一個獨立的「排程」事件，不會跟其他次執行、或其他排程的 log 混在同一組。
 
-R2 同步的 `uploadAllLogs()`（`src/utils/log-upload.ts`）也包在 `runWithContext` 裡，週期性同步跟 graceful shutdown 前多跑的那一次都一樣。只要那一輪有寫出 log——失敗時的 warn/error（例如 `Failed to upload log file to R2, skipping`、`R2 log sync failed: ...`），或 `LOG_LEVEL=debug` 下每輪都會記的 `R2 log sync complete`——就會變成一個「排程」事件：來源顯示「排程 · cron」，「來自」顯示 `log-upload`（`SCHEDULE_ORIGIN_MARKERS` 收錄了 `R2 log sync complete` 跟上面幾種失敗訊息；在 `runWithContext` 外面記的 `R2 log sync run failed`（`log-upload.ts` 的 `.catch`）跟 `R2 log sync on shutdown failed`（`graceful-shutdown.ts`）沒有 reqId，歸在「系統」）。成功的那幾輪在列表上會被折疊，見下方「連續 R2 同步折疊成一列」。切到 `LOG_LEVEL=info` 時，同步成功的那一輪不寫任何 log，不會出現卡片。
+R2 同步的 `uploadAllLogs()`（`src/utils/log-upload.ts`）也包在 `runWithContext` 裡，週期性同步跟 graceful shutdown 前多跑的那一次都一樣。只要那一輪有寫出 log——失敗時的 warn/error（例如 `Failed to upload log file to R2, skipping`、`R2 log sync failed: ...`），或 `LOG_LEVEL=debug` 下每輪都會記的 `R2 log sync complete`——就會變成一個「排程」事件：來源顯示「排程 · cron」，「來自」顯示 `log-upload`（`SCHEDULE_ORIGIN_MARKERS` 收錄了 `R2 log sync complete` 跟上面幾種失敗訊息；在 `runWithContext` 外面記的 `R2 log sync run failed`（`log-upload.ts` 的 `.catch`）跟 `R2 log sync on shutdown failed`（`graceful-shutdown.ts`）沒有 reqId，歸在「系統」）。成功的那幾輪在列表上會被折疊，見下方「連續 R2 同步、讀取快取重載折疊成一列」。切到 `LOG_LEVEL=info` 時，同步成功的那一輪不寫任何 log，不會出現卡片。
 
-完全沒有 reqId 的 log 分兩種處理：伺服器生命週期訊息（`Server started`/`Received shutdown signal, closing server`/`Server closed, exiting`/`Graceful shutdown timed out, forcing exit`/`Shutdown already in progress, ignoring signal`/`Weekly push scheduler started`/`Display name update scheduler started`）不會列成事件，其中重啟相關的會被拼成下面說的「服務重啟」分隔線；其餘的每一筆各自獨立變成一個「系統」事件，不會因為都沒有 reqId 就被合併成同一筆——有專屬文案的是 webhook 簽章驗證失敗、webhook 一次收到多筆事件、R2 未設定的啟動提示三種，其他（log-cleanup、錯誤處理的 `.catch` 等）退回通用文案，見上方分類表。
+完全沒有 reqId 的 log 分兩種處理：伺服器生命週期訊息（`Server started`/`Received shutdown signal, closing server`/`Server closed, exiting`/`Graceful shutdown timed out, forcing exit`/`Shutdown already in progress, ignoring signal`/`Weekly push scheduler started`/`Display name update scheduler started`/`Read cache refresh scheduler started`）不會列成事件，其中重啟相關的會被拼成下面說的「服務重啟」分隔線；其餘的每一筆各自獨立變成一個「系統」事件，不會因為都沒有 reqId 就被合併成同一筆——有專屬文案的是 webhook 簽章驗證失敗、webhook 一次收到多筆事件、R2 未設定的啟動提示三種，其他（log-cleanup、錯誤處理的 `.catch` 等）退回通用文案，見上方分類表。
 
-## 連續 R2 同步折疊成一列
+## 連續 R2 同步、讀取快取重載折疊成一列
 
-`LOG_LEVEL=debug` 下每一輪 R2 同步都是一張排程卡片，每 15 分鐘一張，一天將近 100 張，真正的指令卡片會被淹沒。列表上連續 2 張以上「成功的 R2 同步」會折疊成一列摘要（「R2 備份同步 × N」＋時間範圍＋「全部成功」），點一下就展開成原本的個別卡片（縮排顯示），每張一樣能點開看時間軸，再點摘要列會收合回去。
+`LOG_LEVEL=debug` 下每一輪 R2 同步都是一張排程卡片，每 15 分鐘一張，一天將近 100 張，真正的指令卡片會被淹沒。讀取快取重載（`docs/schedulers.md`「讀取快取重載」）也是每 15 分鐘一張，而且 info 層就有（每輪都有 Notion 呼叫）。列表上連續 2 張以上同一種的成功卡片會折疊成一列摘要（「R2 備份同步 × N」或「讀取快取重載 × N」＋時間範圍＋「全部成功」），點一下就展開成原本的個別卡片（縮排顯示），每張一樣能點開看時間軸，再點摘要列會收合回去。
 
-- **只是畫面上的折疊**：log 檔、`buildEvents()`、`?format=text` 匯出、分頁徽章數字都照舊逐筆計算。伺服器端只替可折疊的卡片加上 `data-merge="r2-sync"`（`eventMergeKey()`，種類跟顯示名稱對照在 `MERGE_LABELS`），真正把卡片包成一串的是前端的 `regroupMerges()`。
-- **哪些會被收進去**：只有「來自」是 `log-upload`、而且狀態是「完成」的排程事件。某個檔案上傳失敗的那一輪是「警告」，不會被收進去，而且會打斷一串、照常單獨顯示。`weekly-push`/`display-name-update` 一天或一週才跑一次，不折疊。
+- **只是畫面上的折疊**：log 檔、`buildEvents()`、`?format=text` 匯出、分頁徽章數字都照舊逐筆計算。伺服器端只替可折疊的卡片加上 `data-merge="r2-sync"`／`data-merge="read-cache-refresh"`（`eventMergeKey()`，「來自」跟折疊種類的對照在 `MERGEABLE_ORIGINS`，種類跟顯示名稱對照在 `MERGE_LABELS`），真正把卡片包成一串的是前端的 `regroupMerges()`。
+- **哪些會被收進去**：只有「來自」是 `log-upload` 或 `read-cache-refresh`、而且狀態是「完成」的排程事件；兩種各自成串，不會混在一起。某個檔案上傳失敗、或某張表重載失敗的那一輪是「警告」，不會被收進去，而且會打斷一串、照常單獨顯示。`weekly-push`/`display-name-update` 一天或一週才跑一次，不折疊。
 - **每次篩選都重新計算**：切分頁或搜尋之後，會用「目前看得到的卡片」重新分串。被篩選藏起來的卡片不會打斷一串，所以在「排程」分頁裡，原本被指令隔開的好幾串會接成一串。搜尋到只剩一張時就不折疊。服務重啟分隔線會打斷一串，不會跨過重啟合併。
 - **展開狀態記在成員卡片上**：重新分串後，只要新的一串裡有任何一張之前展開過，就維持展開。切分頁或搜尋後，如果目前選中的卡片被收進某一串，那一串會自動展開；自己按「收合」則照樣收起來。
 - **時間範圍**：摘要列顯示最舊到最新一張的時間。同一天內只顯示 `HH:MM–HH:MM`；跨日（例如 7 天範圍的「排程」分頁）會帶上日期 `MM-DD HH:MM–MM-DD HH:MM`，避免誤讀成只過了幾分鐘。
-- **「有新 log」輪詢**：如果清單前 50 行全是成功的 R2 同步，找不到可比對的行，這一輪就跳過、不亮提示（見上方「有新 log 時的提示」）。
+- **「有新 log」輪詢**：成功的 R2 同步、讀取快取重載都不算新 log（`POLL_IGNORED_LINE_SUFFIXES`）。如果清單前 50 行全是這兩種，找不到可比對的行，這一輪就跳過、不亮提示（見上方「有新 log 時的提示」）。
 
 ## 服務重啟分隔線
 
-事件列表裡偶爾會插入一條「⏻ 服務重新啟動」的分隔線，不是可以點開的事件——它是從 `Server started` 往回找最近一次的 `Received shutdown signal, closing server` 拼出來的（例如「SIGTERM · port 3000」），找不到對應的關閉訊號就只顯示 port。其他生命週期訊息（`Server closed, exiting`、`Graceful shutdown timed out, forcing exit`、兩個排程啟動時的 `... scheduler started`）不參與分隔線的拼湊，也不會打斷關閉訊號跟 `Server started` 的配對，只是單純不列成事件；原始 log 檔裡照樣保留。分隔線依時間插在正確位置，讓你一眼看出「這批事件是在服務重啟前還是重啟後發生的」，尤其是重啟前後的行為對不上時（例如重啟後某個環境變數沒設好）特別有用。
+事件列表裡偶爾會插入一條「⏻ 服務重新啟動」的分隔線，不是可以點開的事件——它是從 `Server started` 往回找最近一次的 `Received shutdown signal, closing server` 拼出來的（例如「SIGTERM · port 3000」），找不到對應的關閉訊號就只顯示 port。其他生命週期訊息（`Server closed, exiting`、`Graceful shutdown timed out, forcing exit`、排程啟動時的 `... scheduler started`）不參與分隔線的拼湊，也不會打斷關閉訊號跟 `Server started` 的配對，只是單純不列成事件；原始 log 檔裡照樣保留。分隔線依時間插在正確位置，讓你一眼看出「這批事件是在服務重啟前還是重啟後發生的」，尤其是重啟前後的行為對不上時（例如重啟後某個環境變數沒設好）特別有用。
 
 ## 看原始 log／複製 JSON
 

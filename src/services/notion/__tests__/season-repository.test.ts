@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { notionPost, notionGetAllResults } from '../notion-fetch.js';
-import { findByName } from '../season-repository.js';
+import { findByName, findByNameCached, SEASON_CACHE_MAX_AGE_MS } from '../season-repository.js';
 
 vi.mock('../notion-fetch.js');
 
@@ -117,6 +117,46 @@ describe('season-repository', () => {
       expect(season?.actualFeePerPerson).toBe(2340);
       expect(season?.refundPerPerson).toBe(140);
       expect(season?.balance).toBeNull();
+    });
+  });
+
+  // ADR 0020：只有報名／請假用的季資料快取
+  describe('findByNameCached', () => {
+    const page = () => ({ results: [makePage(baseProps({ 報名人: membersRelation('prop-members', 3) }))] });
+
+    it('serves repeats within the TTL from the cache, and reloads after it', async () => {
+      vi.useFakeTimers();
+      try {
+        notionPostMock.mockResolvedValue(page());
+
+        await findByNameCached('2025-Q1');
+        await findByNameCached('2025-Q1');
+        expect(notionPostMock).toHaveBeenCalledTimes(1);
+
+        vi.advanceTimersByTime(SEASON_CACHE_MAX_AGE_MS + 1);
+        await findByNameCached('2025-Q1');
+        expect(notionPostMock).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('shares one query between simultaneous registrations', async () => {
+      notionPostMock.mockResolvedValue(page());
+
+      const results = await Promise.all([findByNameCached('2025-Q1'), findByNameCached('2025-Q1'), findByNameCached('2025-Q1')]);
+
+      expect(notionPostMock).toHaveBeenCalledTimes(1);
+      expect(results.every((s) => s?.members.length === 3)).toBe(true);
+    });
+
+    it('does not make findByName cached: other commands still see an admin edit right away', async () => {
+      notionPostMock.mockResolvedValue(page());
+
+      await findByNameCached('2025-Q1');
+      await findByName('2025-Q1');
+
+      expect(notionPostMock).toHaveBeenCalledTimes(2);
     });
   });
 });

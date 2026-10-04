@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { notionGet, notionPost, notionPatch } from '../notion-fetch.js';
-import { findByUserId, findByPageId, findAll, create, update, incrementMessageCount } from '../users-repository.js';
+import { findByUserId, findByPageId, findAll, create, update, incrementMessageCount, refreshCache } from '../users-repository.js';
 import { getPurpose } from '../../../utils/request-context.js';
 
 vi.mock('../notion-fetch.js');
@@ -238,6 +238,130 @@ describe('users-repository', () => {
       expect(notionPatchMock).toHaveBeenCalledWith('/pages/user-page-1', {
         properties: { message_counts: { number: 5 } },
       });
+    });
+  });
+
+  // ADR 0020：報名／請假進鎖前查詢的讀取快取
+  describe('read cache', () => {
+    const userPage = (userId: string, customName: string, id = 'user-page-1') =>
+      makePage(
+        {
+          user_id: { type: 'title', title: [{ plain_text: userId }] },
+          'Custom Name': { type: 'rich_text', rich_text: [{ plain_text: customName }] },
+        },
+        id,
+      );
+
+    it('serves repeated actor and mention-target lookups from the cache', async () => {
+      notionPostMock.mockResolvedValue({ results: [userPage('user-alice', 'Alice')] });
+
+      await findByUserId('user-alice');
+      const again = await findByUserId('user-alice', 'mention-target');
+
+      expect(notionPostMock).toHaveBeenCalledTimes(1);
+      expect(again?.customName).toBe('Alice');
+    });
+
+    it("always queries Notion for 'track-user' (trackUser computes writes from it, ADR 0017)", async () => {
+      notionPostMock.mockResolvedValue({ results: [userPage('user-alice', 'Alice')] });
+
+      await findByUserId('user-alice');
+      await findByUserId('user-alice', 'track-user');
+
+      expect(notionPostMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not cache "not found": the USERS page trackUser creates next is found', async () => {
+      notionPostMock
+        .mockResolvedValueOnce({ results: [] })
+        .mockResolvedValueOnce({ results: [userPage('user-new', 'New')] });
+
+      expect(await findByUserId('user-new')).toBeNull();
+      expect(await findByUserId('user-new')).not.toBeNull();
+    });
+
+    it('drops the cached record on update, so the weekly customName change is seen right away', async () => {
+      notionPostMock
+        .mockResolvedValueOnce({ results: [userPage('user-alice', 'Old')] })
+        .mockResolvedValueOnce({ results: [userPage('user-alice', 'New')] });
+      notionPatchMock.mockResolvedValue({});
+
+      await findByUserId('user-alice');
+      await update('user-page-1', { customName: 'New' });
+
+      expect((await findByUserId('user-alice'))?.customName).toBe('New');
+    });
+
+    it('stores the page returned by the PATCH, without relying on a query right after the write', async () => {
+      notionPostMock.mockResolvedValue({ results: [userPage('user-alice', 'Old')] });
+      notionPatchMock.mockResolvedValue(userPage('user-alice', 'New'));
+
+      await findByUserId('user-alice');
+      await update('user-page-1', { customName: 'New' });
+      const after = await findByUserId('user-alice');
+
+      // A query right after the PATCH could still return the old name; the cache must not depend on it.
+      expect(after?.customName).toBe('New');
+      expect(notionPostMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('still drops the cached record when the PATCH fails (it may have landed anyway)', async () => {
+      notionPostMock
+        .mockResolvedValueOnce({ results: [userPage('user-alice', 'Old')] })
+        .mockResolvedValueOnce({ results: [userPage('user-alice', 'New')] });
+      notionPatchMock.mockRejectedValue(new Error('Notion 502'));
+
+      await findByUserId('user-alice');
+      await expect(update('user-page-1', { customName: 'New' })).rejects.toThrow();
+
+      expect((await findByUserId('user-alice'))?.customName).toBe('New');
+    });
+
+    it('replaces the cached record of the same userId on create (e.g. the old USERS page was deleted by hand)', async () => {
+      notionPostMock
+        .mockResolvedValueOnce({ results: [userPage('user-alice', 'Alice', 'old-page')] })
+        .mockResolvedValueOnce(userPage('user-alice', 'Alice', 'new-page'));
+
+      await findByUserId('user-alice');
+      await create('user-alice', 'Alice', 1);
+
+      expect((await findByUserId('user-alice'))?.pageId).toBe('new-page');
+      expect(notionPostMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps the cached record on incrementMessageCount (called for every group message)', async () => {
+      notionPostMock.mockResolvedValue({ results: [userPage('user-alice', 'Alice')] });
+      notionPatchMock.mockResolvedValue({});
+
+      await findByUserId('user-alice');
+      await incrementMessageCount('user-page-1', 3);
+      await findByUserId('user-alice');
+
+      expect(notionPostMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('refreshCache loads the whole table so a first lookup is already a hit, skipping pages without user_id', async () => {
+      notionPostMock.mockResolvedValueOnce({
+        results: [userPage('user-alice', 'Alice', 'p-a'), userPage('user-bob', 'Bob', 'p-b'), makePage({}, 'p-empty')],
+        has_more: false,
+        next_cursor: null,
+      });
+
+      const count = await refreshCache();
+      const bob = await findByUserId('user-bob');
+
+      expect(count).toBe(2);
+      expect(bob?.pageId).toBe('p-b');
+      expect(notionPostMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('refreshCache labels its Notion call with its own purpose', async () => {
+      notionPostMock.mockImplementation(async () => {
+        expect(getPurpose()).toBe('重載 bot 使用者帳號快取');
+        return { results: [], has_more: false, next_cursor: null };
+      });
+
+      await refreshCache();
     });
   });
 });

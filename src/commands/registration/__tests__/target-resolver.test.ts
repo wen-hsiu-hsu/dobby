@@ -25,7 +25,7 @@ function makeUser(overrides: Partial<NotionUser> = {}): NotionUser {
 
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.mocked(peopleRepo.findByPageIds).mockResolvedValue([{ pageId: 'person-1', name: 'Alice', hasPaid: true }]);
+  vi.mocked(peopleRepo.findNameByPageId).mockResolvedValue({ pageId: 'person-1', name: 'Alice' });
 });
 
 describe('resolveTarget (self)', () => {
@@ -57,7 +57,7 @@ describe('resolveTarget (self)', () => {
   it('falls back to the LINE custom name when the user has no People page', async () => {
     const result = await resolveTarget(selfTarget, 'user-alice', makeUser({ registeredPersonPageId: '' }));
 
-    expect(peopleRepo.findByPageIds).not.toHaveBeenCalled();
+    expect(peopleRepo.findNameByPageId).not.toHaveBeenCalled();
     expect(result).toEqual({ personPageId: '', displayName: 'alice-line', resolvedVia: 'self' });
   });
 });

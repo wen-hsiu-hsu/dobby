@@ -161,7 +161,7 @@ src/services/mutex.ts
 
 ### 進鎖順序（號碼牌閘門）
 
-mutex 的 FIFO 排的是「呼叫 `withMutex` 的先後」，但進鎖前要查 USERS、對象、季資料，每則 0.8～2.2 秒不等，單靠 mutex 會變成「誰先查完誰先進鎖」。為了做到先送先報，`+N`／`-N`／`假`／`銷假` 在 `message-handler.ts` 查 USERS 之前，就依收到的順序拿號碼（`src/services/entry-gate.ts`，key 同樣是活動日期，四種指令共用一條序列）。查詢照常並行，`withFreshCalendarEvent` 要呼叫 `withMutex` 時才等前面的號碼都進鎖或提早結束。前一號卡住時，從拿號碼起最多等 5 秒，超過就不照順序進鎖，記 warn `Entry gate wait capped; entering out of order`。正常進鎖記 info `Entry gate passed`（key 不是純日期時降為 debug 且不記 key，同 mutex 摘要的規則），欄位：
+mutex 的 FIFO 排的是「呼叫 `withMutex` 的先後」，但進鎖前要查 USERS、對象、季資料，沒命中讀取快取時每則 0.8～2.2 秒不等，單靠 mutex 會變成「誰先查完誰先進鎖」。為了做到先送先報，`+N`／`-N`／`假`／`銷假` 在 `message-handler.ts` 查 USERS 之前，就依收到的順序拿號碼（`src/services/entry-gate.ts`，key 同樣是活動日期，四種指令共用一條序列）。查詢照常並行，`withFreshCalendarEvent` 要呼叫 `withMutex` 時才等前面的號碼都進鎖或提早結束。前一號卡住時，從拿號碼起最多等 5 秒，超過就不照順序進鎖，記 warn `Entry gate wait capped; entering out of order`。正常進鎖記 info `Entry gate passed`（key 不是純日期時降為 debug 且不記 key，同 mutex 摘要的規則），欄位：
 
 | 欄位 | 意思 |
 |------|------|
@@ -171,6 +171,19 @@ mutex 的 FIFO 排的是「呼叫 `withMutex` 的先後」，但進鎖前要查 
 | `lineTimestamp` | LINE 收到訊息的時間（`event.timestamp`）。同一個 key 的 `Entry gate passed` 依出現先後排，`lineTimestamp` 沒有跟著遞增，表示進鎖順序和 LINE 的順序對調了 |
 
 設計理由、不能改成的寫法見 [ADR 0018](adr/0018-entry-gate-orders-lock-entry.md)。
+
+### 進鎖前的讀取快取
+
+進鎖前的三個查詢都先讀 in-memory 快取，命中時這段只要幾毫秒：
+- 發話者的 USERS（`usersRepo.findByUserId`）
+- 對象的 People 姓名（`peopleRepo.findNameByPageId`）
+- 季資料（`seasonRepo.findByNameCached`）
+
+USERS 和 People 每 15 分鐘整表重載一次（`src/schedulers/read-cache-refresh.ts`），bot 自己寫入 USERS 時會用寫入 API 的回傳值立刻更新快取。季資料 TTL 60 秒，只有報名／請假使用，其他指令照樣即時查。
+
+直接在 Notion 手動改的資料會延遲生效：季租名單、季預設場地數最多 60 秒；`is_admin`、`Registered name`、People 姓名最多約 15 分鐘。這段時間內名額或報名名稱可能用舊值計算。要立刻生效的話，按 `/logs` 頁首的「清除快取」（`docs/logging.md`「清除讀取快取按鈕」）。
+
+快取不能取代閘門，也不會提高鎖內的吞吐量。做法、失效規則和不能改成的寫法見 [ADR 0020](adr/0020-pre-lock-read-cache.md)。
 
 ## Target Resolver（誰在報名）
 
@@ -254,7 +267,7 @@ outcome 行不是「每個事件恰好一行」，例外有這些：
 - **mutex 逾時**：當下沒有 outcome，wrapper 已有 warn。（2026-10-04 短暫開過取消，那段期間排隊中逾時被取消的任務，warn 是 `… timed out while queued; cancelled, nothing written`，永遠不會有 outcome。）任務不管逾時當下開始了沒，背景的讀寫跑完後，它自己的 outcome 仍會用同一個 reqId 寫出，時間軸上排在 `Event processed` 之後。例外：背景 refetch 才發現沒有活動時，`EventNotFoundError` 會被 mutex 吞掉，不會有 `event-not-found` 行（很少見）。
 - **鎖內非預期錯誤**：wrapper 的 `… error` 那行就是結果。
 - **鎖外組狀態卡失敗**：outcome 照常寫出（判斷和寫入都在鎖內完成了），另外有一行 warn `… status card failed; replied with the headline only`，使用者收到的是 headline 純文字。這只在 `buildEventStatusReply` 查請假人姓名丟錯時發生：0 人不查；1 人是直接 GET，失敗就丟錯；2 人以上時反向查詢失敗會先退回逐筆 GET（見 [notion/databases.md](notion/databases.md)），GET 也失敗才會丟錯。這時 `/logs` 會照規則 1 把事件判成「失敗」、標「Notion API 失敗」（見 [logging.md](logging.md)），但寫入其實已經成功，使用者也收到了 headline，要看同一 reqId 的 outcome 和 PATCH 判斷結果。
-- **取鎖前的查詢 throw**（`resolveTarget`／`seasonRepo.findByName`）：沒有 outcome，也不經過 wrapper；handler 自己記一行跟 wrapper 同名的 `… error`（`Registration handler error`／`Leave handler error`），並回「系統錯誤，請稍後再試」。對象查無但 Season 查詢 throw 時，也是回「系統錯誤」，不是「找不到您的帳號」「找不到您的資料」這類查無對象的回覆，因為兩個查詢並行，`Promise.all` 整個 reject。
+- **取鎖前的查詢 throw**（`resolveTarget`／`seasonRepo.findByNameCached`）：沒有 outcome，也不經過 wrapper；handler 自己記一行跟 wrapper 同名的 `… error`（`Registration handler error`／`Leave handler error`），並回「系統錯誤，請稍後再試」。對象查無但 Season 查詢 throw 時，也是回「系統錯誤」，不是「找不到您的帳號」「找不到您的資料」這類查無對象的回覆，因為兩個查詢並行，`Promise.all` 整個 reject。
 
 報名被拒的四種（`paused`／`full`／`no-registration`／`zero-delta`）是 handler 依 `delta` 和 `isPaused` 推出來的（`registration-handler.ts` 的 `rejectionOutcome()`），因為 `CapacityResult` 只有給使用者看的錯誤文字。**`capacity-calculator.ts` 如果新增拒絕路徑，`rejectionOutcome()` 要一起改**，不然會被歸成 `full` 或 `no-registration`。
 

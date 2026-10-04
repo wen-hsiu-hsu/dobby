@@ -40,7 +40,7 @@ function makeEvent(userId: string) {
   };
 }
 
-function baseSeason(overrides: Partial<Awaited<ReturnType<typeof seasonRepo.findByName>>> = {}) {
+function baseSeason(overrides: Partial<Awaited<ReturnType<typeof seasonRepo.findByNameCached>>> = {}) {
   return {
     pageId: 'season-1',
     name: getCurrentSeasonName(),
@@ -62,7 +62,7 @@ function baseSeason(overrides: Partial<Awaited<ReturnType<typeof seasonRepo.find
 /**
  * Flushes a fixed, generous number of microtask ticks. Everything standing between
  * calling handleRegistration and it reaching `withMutex` (resolveTarget,
- * seasonRepo.findByName) is a mocked, already-resolved promise — a fixed small
+ * seasonRepo.findByNameCached) is a mocked, already-resolved promise — a fixed small
  * number of hops determined by the current code path, not by real time — so this is
  * deterministic across runs, unlike a real `setTimeout`-based wait.
  */
@@ -79,7 +79,7 @@ beforeEach(() => {
       ? { personPageId: 'person-1', displayName: 'Alice', resolvedVia: 'self' as const }
       : { personPageId: 'person-2', displayName: 'Bob', resolvedVia: 'self' as const },
   );
-  vi.mocked(seasonRepo.findByName).mockResolvedValue(baseSeason());
+  vi.mocked(seasonRepo.findByNameCached).mockResolvedValue(baseSeason());
 });
 
 describe('registration concurrency (real withMutex)', () => {
@@ -126,7 +126,7 @@ describe('registration concurrency (real withMutex)', () => {
 
     const callB = handleRegistration(makeEvent('user-bob'), 1, false);
 
-    // Give B's own chain (resolveTarget -> seasonRepo.findByName -> withMutex(date))
+    // Give B's own chain (resolveTarget -> seasonRepo.findByNameCached -> withMutex(date))
     // plenty of microtask ticks to run and reach withMutex.
     await flushMicrotasks();
 

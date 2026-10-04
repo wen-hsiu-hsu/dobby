@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import request from 'supertest';
 import express from 'express';
+import vm from 'node:vm';
 
 const { getR2SyncStatusMock } = vi.hoisted(() => ({
   getR2SyncStatusMock: vi.fn().mockReturnValue({ enabled: false }),
@@ -8,6 +9,10 @@ const { getR2SyncStatusMock } = vi.hoisted(() => ({
 
 vi.mock('../../utils/log-upload.js', () => ({
   getR2SyncStatus: getR2SyncStatusMock,
+}));
+
+vi.mock('../../schedulers/read-cache-refresh.js', () => ({
+  clearAndReloadReadCaches: vi.fn().mockResolvedValue({ users: 33, people: 41 }),
 }));
 
 vi.mock('../../utils/log-reader.js', () => ({
@@ -87,6 +92,7 @@ vi.mock('../../utils/log-reader.js', () => ({
 }));
 
 import { readRecentLogs } from '../../utils/log-reader.js';
+import { clearAndReloadReadCaches } from '../../schedulers/read-cache-refresh.js';
 import { createLogsRouter } from '../logs.js';
 
 async function getLogsHtml(): Promise<string> {
@@ -1388,6 +1394,47 @@ describe('createLogsRouter', () => {
       expect(detail).toContain('<span class="detail-field-value">log-upload</span>');
     });
 
+    it('marks a successful read cache refresh as mergeable, but not a partially failed one', async () => {
+      // 真實的重載卡片前面有 Notion 呼叫的 log；標題要取排程自己的摘要行，「有新 log」輪詢的後綴比對才對得上。
+      const refresh = (reqId: string, minute: number) => [
+        { level: 30, time: Date.UTC(2024, 0, 1, 0, minute, 0), msg: 'Notion API request', method: 'POST', path: '/databases/test-db-users/query', callId: `${reqId}-1`, reqId },
+        { level: 30, time: Date.UTC(2024, 0, 1, 0, minute, 1), msg: 'Notion API response', method: 'POST', path: '/databases/test-db-users/query', callId: `${reqId}-1`, durationMs: 400, reqId },
+        { level: 30, time: Date.UTC(2024, 0, 1, 0, minute, 2), msg: 'Read cache refresh complete', entries: { users: 40, people: 60 }, reqId },
+      ];
+      vi.mocked(readRecentLogs).mockResolvedValueOnce([
+        ...refresh('cache-ok', 0),
+        { level: 40, time: Date.UTC(2024, 0, 1, 0, 15, 0), msg: 'Read cache refresh failed: people', reqId: 'cache-bad' },
+      ]);
+
+      const html = await getLogsHtml();
+      expect(html).toMatch(/data-key="cache-ok"[^>]*data-merge="read-cache-refresh"/);
+      expect(html).toContain('data-key="cache-bad"');
+      expect(html).not.toMatch(/data-key="cache-bad"[^>]*data-merge=/);
+
+      vi.mocked(readRecentLogs).mockResolvedValueOnce(refresh('cache-ok', 0));
+      const { text } = await getLogsText();
+      expect(text.trim().split('\n')[0]!.endsWith('\t[排程/完成]\tRead cache refresh complete')).toBe(true);
+    });
+
+    it('keeps a manual cache clear visible on its own, even though its reload logs the same completion line', async () => {
+      vi.mocked(readRecentLogs)
+        .mockResolvedValueOnce([
+          { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), msg: 'Read cache cleared from /logs', reqId: 'cache-clear' },
+          { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 2), msg: 'Read cache refresh complete', entries: { users: 40, people: 60 }, reqId: 'cache-clear' },
+        ])
+        .mockResolvedValueOnce([
+          { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 0), msg: 'Read cache cleared from /logs', reqId: 'cache-clear' },
+          { level: 30, time: Date.UTC(2024, 0, 1, 0, 0, 2), msg: 'Read cache refresh complete', entries: { users: 40, people: 60 }, reqId: 'cache-clear' },
+        ]);
+
+      const html = await getLogsHtml();
+      expect(html).toContain('data-key="cache-clear"');
+      expect(html).not.toMatch(/data-key="cache-clear"[^>]*data-merge=/);
+
+      const detail = await getEventDetailHtml('cache-clear');
+      expect(detail).toContain('<span class="detail-field-value">read-cache-clear</span>');
+    });
+
     it('does not mark an R2 sync with a failed upload as mergeable (it must stay visible on its own)', async () => {
       vi.mocked(readRecentLogs).mockResolvedValueOnce([
         { level: 40, time: Date.UTC(2024, 0, 1, 0, 0, 0), msg: 'Failed to upload log file to R2, skipping', file: 'app.log', reqId: 'r2-bad' },
@@ -1445,7 +1492,8 @@ describe('createLogsRouter', () => {
       expect(lines[1]!.endsWith(suffix)).toBe(false);
 
       const html = await getLogsHtml();
-      expect(html).toContain(`const POLL_IGNORED_LINE_SUFFIX = ${JSON.stringify(suffix)};`);
+      const cacheSuffix = '\t[排程/完成]\tRead cache refresh complete';
+      expect(html).toContain(`const POLL_IGNORED_LINE_SUFFIXES = [${JSON.stringify(suffix)}, ${JSON.stringify(cacheSuffix)}];`);
     });
   });
 
@@ -1612,6 +1660,47 @@ describe('createLogsRouter', () => {
         '終點 LINE 回覆已送出',
         'Mutex task finished',
       ]);
+    });
+  });
+
+  // 頁首「清除快取」按鈕（ADR 0020）
+  describe('POST /read-cache/clear', () => {
+    const app = () => {
+      const a = express();
+      a.use('/logs', createLogsRouter('/unused/because/reader/is/mocked'));
+      return a;
+    };
+
+    it('rejects a request without the logs token and does not clear anything', async () => {
+      vi.mocked(clearAndReloadReadCaches).mockClear();
+
+      const res = await request(app()).post('/logs/read-cache/clear');
+
+      expect(res.status).toBe(401);
+      expect(clearAndReloadReadCaches).not.toHaveBeenCalled();
+    });
+
+    it('clears and reloads the caches, returning the reloaded counts', async () => {
+      const res = await request(app()).post('/logs/read-cache/clear').query({ token: process.env['LOGS_ACCESS_TOKEN'] });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ users: 33, people: 41 });
+    });
+
+    // 前端 JS 寫在 TS template literal 裡，跳脫寫錯（例如 regex 的 `\/` 被吃成 `/`）整頁的 script 都會
+    // 語法錯誤，字串比對測不出來，所以實際解析一次。
+    it('renders page scripts that parse', async () => {
+      const html = await getLogsHtml();
+      const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!);
+
+      expect(scripts.length).toBeGreaterThan(0);
+      for (const script of scripts) expect(() => new vm.Script(script)).not.toThrow();
+    });
+
+    it('puts the button right after #mask-btn', async () => {
+      const html = await getLogsHtml();
+
+      expect(html).toMatch(/<button id="mask-btn"[^\n]*\n\s*<button id="cache-btn" onclick="clearReadCache\(\)"/);
     });
   });
 });

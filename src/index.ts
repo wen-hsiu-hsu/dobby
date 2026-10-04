@@ -83,8 +83,10 @@ if (env.NODE_ENV !== 'test') {
 
     const { startWeeklyPush } = await import('./schedulers/weekly-push.js');
     const { startDisplayNameUpdate } = await import('./schedulers/display-name-update.js');
+    const { startReadCacheRefresh } = await import('./schedulers/read-cache-refresh.js');
     startWeeklyPush();
     startDisplayNameUpdate();
+    startReadCacheRefresh();
   })().catch((err: unknown) => {
     // 啟動做到一半失敗（例如某個動態 import 丟例外），服務可能只起了一部分
     // （排程沒啟動、或還沒 listen），不要帶著半套狀態繼續跑。

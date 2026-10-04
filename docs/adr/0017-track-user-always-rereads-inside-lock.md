@@ -1,5 +1,7 @@
 # `trackUser` 在鎖內一律重讀 USERS，不沿用呼叫端的快照
 
+> 後續變更：見 [ADR 0020](0020-pre-lock-read-cache.md)（`findByUserId` 預設的 `'actor'` 會走讀取快取，鎖內重讀必須傳 `'track-user'` 才會直接查 Notion）
+
 `message-handler.ts` 開頭為了判斷管理員身分，已經 `findByUserId` 查過發訊者一次，並把結果（`knownUser`）傳給 `trackUser`。`trackUser` 在 `user-track-${userId}` 鎖內**一律重讀**，不直接拿這份快照算更新（`src/services/user-management.ts` 的 `_trackUserAsync`）：
 
 - 快照不是 `null`：用快照的 pageId 讀頁面本身（`usersRepo.findByPageId`，`GET /pages/{id}`）。頁面已封存或在垃圾桶時回 `null`，改用 `findByUserId` 查。

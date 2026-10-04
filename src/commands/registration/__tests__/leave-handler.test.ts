@@ -48,7 +48,7 @@ const baseSeason = {
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(resolveTarget).mockResolvedValue({ personPageId: 'person-1', displayName: 'Alice', resolvedVia: 'self' });
-  vi.mocked(seasonRepo.findByName).mockResolvedValue(baseSeason);
+  vi.mocked(seasonRepo.findByNameCached).mockResolvedValue(baseSeason);
   vi.mocked(calendarRepo.findByDate).mockResolvedValue({
     pageId: 'evt-1',
     date: '2026-05-09',
@@ -94,7 +94,7 @@ describe('handleLeave', () => {
   it("looks up the event date's season by name, not just the first season record", async () => {
     await handleLeave(event, false, false);
 
-    expect(seasonRepo.findByName).toHaveBeenCalledWith(getSeasonNameForDate(formatDate(getNextSaturday())));
+    expect(seasonRepo.findByNameCached).toHaveBeenCalledWith(getSeasonNameForDate(formatDate(getNextSaturday())));
   });
 
   describe('in the last days of a quarter, when next Saturday is already in the next season', () => {
@@ -111,14 +111,14 @@ describe('handleLeave', () => {
     it("looks up the event date's season (Q4), not today's (Q3)", async () => {
       await handleLeave(event, false, false);
 
-      expect(seasonRepo.findByName).toHaveBeenCalledWith('2026-Q4');
-      expect(seasonRepo.findByName).not.toHaveBeenCalledWith('2026-Q3');
+      expect(seasonRepo.findByNameCached).toHaveBeenCalledWith('2026-Q4');
+      expect(seasonRepo.findByNameCached).not.toHaveBeenCalledWith('2026-Q3');
       expect(calendarRepo.findByDate).toHaveBeenCalledWith('2026-10-03');
     });
 
     it("rejects leave from a last-season member who isn't in the event season", async () => {
       // person-1 was a Q3 member but is not in Q4's members
-      vi.mocked(seasonRepo.findByName).mockImplementation(async (name: string) =>
+      vi.mocked(seasonRepo.findByNameCached).mockImplementation(async (name: string) =>
         name === '2026-Q4' ? { ...baseSeason, name, members: ['person-9'] } : { ...baseSeason, name, members: ['person-1'] },
       );
 
@@ -129,7 +129,7 @@ describe('handleLeave', () => {
     });
 
     it('replies with the event season name (not "僅限季租成員") when that season has not been created yet', async () => {
-      vi.mocked(seasonRepo.findByName).mockResolvedValue(null);
+      vi.mocked(seasonRepo.findByNameCached).mockResolvedValue(null);
 
       await handleLeave(event, false, false);
 
@@ -148,7 +148,7 @@ describe('handleLeave', () => {
 
   it('still replies "not found" (not the season error) when both lookups come back empty', async () => {
     vi.mocked(resolveTarget).mockResolvedValue(null);
-    vi.mocked(seasonRepo.findByName).mockResolvedValue(null);
+    vi.mocked(seasonRepo.findByNameCached).mockResolvedValue(null);
 
     await handleLeave(event, false, false);
 
@@ -163,7 +163,7 @@ describe('handleLeave', () => {
     const handling = handleLeave(event, false, false, actorUser);
     await Promise.resolve();
     expect(resolveTarget).toHaveBeenCalledWith(expect.objectContaining({ isSelf: true }), 'user-alice', actorUser);
-    expect(seasonRepo.findByName).toHaveBeenCalled();
+    expect(seasonRepo.findByNameCached).toHaveBeenCalled();
 
     finishResolve({ personPageId: 'person-1', displayName: 'Alice', resolvedVia: 'self' });
     await handling;
@@ -173,12 +173,12 @@ describe('handleLeave', () => {
   // 取鎖前的查詢 throw 時 withFreshCalendarEvent 還沒接手，handler 要自己回覆，否則例外一路丟到 event-router 只記 log。
   it.each([
     ['the target lookup', () => vi.mocked(resolveTarget).mockRejectedValue(new Error('Notion 502'))],
-    ['the season lookup', () => vi.mocked(seasonRepo.findByName).mockRejectedValue(new Error('Notion 502'))],
+    ['the season lookup', () => vi.mocked(seasonRepo.findByNameCached).mockRejectedValue(new Error('Notion 502'))],
     [
       'the season lookup (with the target not found)',
       () => {
         vi.mocked(resolveTarget).mockResolvedValue(null);
-        vi.mocked(seasonRepo.findByName).mockRejectedValue(new Error('Notion 502'));
+        vi.mocked(seasonRepo.findByNameCached).mockRejectedValue(new Error('Notion 502'));
       },
     ],
   ])('replies "系統錯誤" without taking the lock when %s throws', async (_label, arrange) => {
@@ -337,7 +337,7 @@ describe('handleLeave', () => {
     const text = replyText();
     expect(text).toBe('指令格式錯誤：指定對象需使用 @Name');
     expect(reply().type).toBe('text');
-    expect(seasonRepo.findByName).not.toHaveBeenCalled();
+    expect(seasonRepo.findByNameCached).not.toHaveBeenCalled();
     expect(calendarRepo.updateAbsentees).not.toHaveBeenCalled();
   });
 
@@ -357,7 +357,7 @@ describe('handleLeave', () => {
 
     const text = replyText();
     expect(text).toBe('你不是管理員');
-    expect(seasonRepo.findByName).not.toHaveBeenCalled();
+    expect(seasonRepo.findByNameCached).not.toHaveBeenCalled();
     expect(calendarRepo.updateAbsentees).not.toHaveBeenCalled();
   });
 
@@ -449,7 +449,7 @@ describe('handleLeave', () => {
     });
 
     it('logs "season-not-found" and "target-not-found"', async () => {
-      vi.mocked(seasonRepo.findByName).mockResolvedValue(null);
+      vi.mocked(seasonRepo.findByNameCached).mockResolvedValue(null);
       await handleLeave(event, false, false);
       expect(outcomeSummary()).toMatchObject({ outcome: 'season-not-found', resolvedVia: 'self' });
 

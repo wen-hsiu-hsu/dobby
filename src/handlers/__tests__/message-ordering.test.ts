@@ -49,7 +49,7 @@ beforeEach(() => {
       ? { personPageId: 'person-1', displayName: 'Alice', resolvedVia: 'self' as const }
       : { personPageId: 'person-2', displayName: 'Bob', resolvedVia: 'self' as const },
   );
-  vi.mocked(seasonRepo.findByName).mockResolvedValue({
+  vi.mocked(seasonRepo.findByNameCached).mockResolvedValue({
     pageId: 'season-1',
     name: getCurrentSeasonName(),
     members: ['person-1', 'person-2'],

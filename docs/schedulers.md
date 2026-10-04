@@ -1,6 +1,6 @@
 # 排程任務
 
-系統有兩個定時排程任務，在 `src/index.ts` 啟動時初始化。
+系統有三個定時排程任務，在 `src/index.ts` 啟動時初始化。
 
 ## 每週打球資訊推播
 
@@ -84,3 +84,17 @@
 - 使用者必須在 `groups` 欄位裡至少有一個目前仍有效（bot 還在其中）的群組 ID 才查得到；若曾經在的所有群組都已離開，API 全部回 404，該使用者會被跳過且不影響其他人
 - 查詢 USERS 資料庫時會用 cursor 分頁抓完所有使用者（不受單次查詢 100 筆上限影響）；單一使用者更新失敗只會被個別 try/catch 隔離、記 log 後跳過，不會中斷整批
 - `getGroupMemberProfile()` 呼叫的 `profile-service.ts`/`getProfile()` 有摘要 log，跑這支批次作業時 `/logs` 會出現對應數量的 `'LINE get profile'` log 行（每個使用者一行）——這是預期行為，不是 bug，見 `docs/logging.md`。
+
+## 讀取快取重載
+
+**觸發時間：** 服務啟動時跑一次，之後每 15 分鐘一次（`setInterval`）
+
+**實作：** `src/schedulers/read-cache-refresh.ts`
+
+用整張 USERS 表和 People 表換掉報名／請假進鎖前查詢的讀取快取（`usersRepo.refreshCache`、`peopleRepo.refreshCache`）。為什麼要整表預載、快取怎麼失效，見 [ADR 0020](adr/0020-pre-lock-read-cache.md)。
+
+- 每輪包在 `runWithContext` 裡，`/logs` 上是一張「排程」卡片，「來自」顯示 `read-cache-refresh`。成功的連續幾張會折疊成一列（`docs/logging.md`「連續 R2 同步、讀取快取重載折疊成一列」）。
+- 兩張表各自 try/catch：一邊失敗記 warn `Read cache refresh failed: users`／`Read cache refresh failed: people`，另一邊照樣更新；失敗的那邊沿用舊快取，項目滿 30 分鐘就過期，改回直接查 Notion。
+- 兩邊都成功才記 info `Read cache refresh complete`，筆數放在 `entries: { users, people }` 物件裡。不放成頂層數字欄位，是因為 `/logs` 會把兩個以上的頂層數字畫成批次比例條，「users 對 people」的比例沒有意義。
+- 上一輪還沒跑完時，這一輪直接跳過，不會疊兩輪。
+- `/logs` 的「清除快取」按鈕（`clearAndReloadReadCaches`）會清空快取後立刻跑一輪。如果剛好有一輪正在跑，會先等它結束：那一輪是清除前開始的，結果會被丟掉，所以要再自己重跑一輪。

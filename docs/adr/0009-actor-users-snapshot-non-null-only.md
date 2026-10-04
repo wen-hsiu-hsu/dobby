@@ -1,5 +1,7 @@
 # 報名／請假沿用 message-handler 的 USERS 快照：只信非 null，不做請求範圍快取
 
+> 後續變更：見 [ADR 0020](0020-pre-lock-read-cache.md)（USERS 改在 repository 層做讀取快取，快照可能來自快取；`null` 仍不存、`track-user` 仍繞過）
+
 `message-handler.ts` 開頭為了判斷管理員身分，已經 `findByUserId` 查過發訊者一次。報名、請假自己操作（`target.isSelf`）時，這份快照經 `routeCommand` → `handleRegistration`／`handleLeave` → `resolveTarget`（`src/commands/registration/target-resolver.ts`）用 `actorUser?` 參數往下傳，省掉一次重複的 USERS 查詢（約 0.45 秒）。**只有快照不是 `null` 時才採用，`null` 或沒傳一律重查。** 替別人報名（@mention、名字指定）查的是別人，不用這份快照。
 
 **為什麼非 null 可以信**：`resolveTarget` 只用到 `registeredPersonPageId` 和 `customName`。既有使用者的 `trackUser` 只會改 groups／multiChats／message_counts（`src/services/user-management.ts` 的 existing 分支），不會改 `registeredPersonPageId`。快照也可能是剛建好、還沒連到 People 的頁面（`trackUser` 建頁後約 1 秒才寫入連結），這時結果跟重查一樣：自動建立的 People 頁名稱就是 `customName`，也不在任何季租名單上。

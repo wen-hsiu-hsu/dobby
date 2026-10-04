@@ -4,6 +4,7 @@ import { readRecentLogs, MAX_WINDOW_DAYS, type LogEntry } from '../utils/log-rea
 import { getLogLevel } from '../utils/logger.js';
 import { getR2SyncStatus, type R2SyncStatus } from '../utils/log-upload.js';
 import { logsAuthMiddleware } from '../middleware/logs-auth.js';
+import { clearAndReloadReadCaches } from '../schedulers/read-cache-refresh.js';
 import {
   groupPairedEntries,
   buildFlowGroups,
@@ -95,7 +96,7 @@ const DEGRADATION_EXPLANATIONS: Record<string, string> = {
  * 伺服器生命週期訊息——沒有 reqId，且不代表任何一次事件處理，不會被當成
  * 獨立事件列出。其中只有 `Server started` 跟 `Received shutdown signal,
  * closing server` 會被 `buildBoundaryMarkers` 拿來拼服務重啟的分隔線，其
- * 餘的（包括兩個排程啟動時各記一次的 `... scheduler started`）在
+ * 餘的（包括各排程啟動時記一次的 `... scheduler started`）在
  * `buildBoundaryMarkers` 裡不會命中任何分支，等於靜默忽略：不產生分隔線，
  * 也不會重設「最近一次關閉訊號」的配對狀態。
  *
@@ -111,6 +112,7 @@ const LIFECYCLE_MESSAGES = new Set([
   'Shutdown already in progress, ignoring signal',
   'Weekly push scheduler started',
   'Display name update scheduler started',
+  'Read cache refresh scheduler started',
 ]);
 
 function escapeHtml(str: string): string {
@@ -590,6 +592,7 @@ function groupGroupId(group: FlowGroup): string {
 // 跟 `utils/log-upload.ts` 的 log 訊息字面量一致——不從那邊 import，測試會
 // 整個 mock 掉 log-upload.js，常數會變成 undefined。
 const R2_SYNC_COMPLETE_MSG = 'R2 log sync complete';
+const READ_CACHE_REFRESH_COMPLETE_MSG = 'Read cache refresh complete';
 
 const SCHEDULE_ORIGIN_MARKERS: Array<[string, string]> = [
   ['Starting display name batch update', 'display-name-update'],
@@ -602,6 +605,11 @@ const SCHEDULE_ORIGIN_MARKERS: Array<[string, string]> = [
   ['Failed to upload log file to R2, skipping', 'log-upload'],
   ['R2 log sync failed: could not read log directory', 'log-upload'],
   ['R2 log sync failed: could not initialize S3 client', 'log-upload'],
+  // 手動清除要排在 refresh 前面：清除後的那輪重載也會記 `Read cache refresh complete`，
+  // 先比對到它的話會被當成定時重載、折疊進去藏起來。
+  ['Read cache cleared from /logs', 'read-cache-clear'],
+  [READ_CACHE_REFRESH_COMPLETE_MSG, 'read-cache-refresh'],
+  ['Read cache refresh failed', 'read-cache-refresh'],
 ];
 
 /**
@@ -614,16 +622,20 @@ function matchesScheduleMarker(msg: string, marker: string): boolean {
 
 /**
  * 列表上可以「連續幾筆折疊成一列」的事件種類——只有純雜訊、又高頻的才收
- * （目前只有 R2 同步：`LOG_LEVEL=debug` 下每 15 分鐘一輪、每輪都記一行
- * `R2 log sync complete`，一天近百張卡片會把真正的指令淹掉）。折疊只發生在
+ * （R2 同步：`LOG_LEVEL=debug` 下每 15 分鐘一輪、每輪都記一行
+ * `R2 log sync complete`；讀取快取重載：每 15 分鐘一輪，info 層就有 Notion
+ * 呼叫。一天近百張卡片會把真正的指令淹掉）。折疊只發生在
  * 前端畫面（`regroupMerges()`），log 檔本身、`buildEvents()`、`?format=text`
  * 匯出、分頁徽章數字都照舊逐筆計算。狀態不是「完成」的那一輪（例如某個
  * 檔案上傳失敗）不收進來，會打斷連續的一串、照常單獨顯示，異常不會被藏起來。
  */
-const MERGE_LABELS: Record<string, string> = { 'r2-sync': 'R2 備份同步' };
+const MERGE_LABELS: Record<string, string> = { 'r2-sync': 'R2 備份同步', 'read-cache-refresh': '讀取快取重載' };
+
+/** 排程來源（SCHEDULE_ORIGIN_MARKERS 的 slug）→ 折疊用的 key。 */
+const MERGEABLE_ORIGINS: Record<string, string> = { 'log-upload': 'r2-sync', 'read-cache-refresh': 'read-cache-refresh' };
 
 function eventMergeKey(kind: EventKind, origin: string, status: EventStatus): string | null {
-  return kind === 'schedule' && origin === 'log-upload' && status === 'ok' ? 'r2-sync' : null;
+  return kind === 'schedule' && status === 'ok' ? (MERGEABLE_ORIGINS[origin] ?? null) : null;
 }
 
 /** 「來自」欄位——訊息事件是指令類型，排程事件是排程檔案名稱，其餘退回一個通用標籤。 */
@@ -1606,6 +1618,8 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
     #search:focus { border-color: #7c72c4; }
     button { cursor: pointer; font-family: inherit; }
     #mask-btn { font-size: 12px; font-weight: 500; border-radius: 8px; padding: 7px 12px; color: #d2cefd; border: 1px solid #5d5294; background: #201c33; }
+    #cache-btn { font-size: 12px; color: #8b8fa3; background: transparent; border: 1px solid #262835; border-radius: 8px; padding: 7px 12px; }
+    #cache-btn:disabled { cursor: default; opacity: 0.6; }
     #refresh-btn { font-size: 12px; color: #8b8fa3; background: transparent; border: 1px solid #262835; border-radius: 8px; padding: 7px 12px; }
     #refresh-btn.has-new { color: #d2cefd; border-color: #5d5294; background: #201c33; font-weight: 500; }
     .level-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 500; font-family: ui-monospace, monospace; border-radius: 4px; padding: 5px 9px; flex: none; }
@@ -1776,6 +1790,7 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
       <h1>🐶 Dobby Logs</h1>
       <input type="text" id="search" placeholder="搜尋指令、回覆、reqId、使用者…" oninput="applyFilters()">
       <button id="mask-btn" onclick="toggleMask()"><span class="id-masked">遮蔽 ID ●</span><span class="id-plain">顯示 ID ○</span></button>
+      <button id="cache-btn" onclick="clearReadCache()" title="清空快取並立刻從 Notion 重載">清除快取</button>
       <button id="refresh-btn" onclick="document.location.reload()">↻ 重新整理</button>
     </header>
 
@@ -1958,6 +1973,35 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
       document.body.classList.toggle('masked');
     }
 
+    // 頁面網址可能是 /logs 或 /logs/，相對路徑會解析錯，所以從 pathname 組。不用 regex 去尾端斜線：
+    // 這段 JS 在 TS template literal 裡，regex 的跳脫斜線會被吃掉、變成 // 註解，整個 script 語法錯誤。
+    function clearReadCache() {
+      const btn = document.getElementById('cache-btn');
+      btn.disabled = true;
+      btn.textContent = '清除中…';
+      const base = location.pathname.endsWith('/') ? location.pathname.slice(0, -1) : location.pathname;
+      const url = base + '/read-cache/clear?token=' + encodeURIComponent(LOGS_TOKEN);
+      fetch(url, { method: 'POST' })
+        .then((r) => {
+          if (!r.ok) throw new Error('clear failed: ' + r.status);
+          return r.json();
+        })
+        .then((result) => {
+          btn.textContent = result.users !== null && result.people !== null
+            ? '已清除並重載（' + result.users + '／' + result.people + ' 筆）'
+            : '已清除，重載失敗（改直接查 Notion）';
+        })
+        .catch(() => {
+          btn.textContent = '清除失敗';
+        })
+        .finally(() => {
+          setTimeout(() => {
+            btn.textContent = '清除快取';
+            btn.disabled = false;
+          }, 4000);
+        });
+    }
+
     const NEW_LOG_CHECK_INTERVAL_MS = 20000;
     let latestSeenFingerprint = null;
 
@@ -1966,12 +2010,14 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
     // API。拿第一行（最新一筆事件）當 fingerprint，跟頁面載入當下的第一次
     // 輪詢結果比對；有落差就把按鈕標成「有新 log」，但不自動重新整理——
     // 使用者要看新內容還是得自己按按鈕，只是現在按之前就知道按了有沒有用。
-    // 成功的 R2 同步（列表上會被折疊的那種）不算「新 log」：它每 15 分鐘
-    // 就來一筆，算進去的話按鈕幾乎永遠亮著，提示就失去意義——所以
-    // fingerprint 取的是第一個「不是成功 R2 同步」的事件行。後綴字串要跟
-    // renderEventListText() 的行格式對得上。「…還有 N 筆」那行也跳過，
-    // 它的數字會隨同步筆數浮動。
-    const POLL_IGNORED_LINE_SUFFIX = ${jsStringLiteral(`\t[${KIND_META.schedule.label}/${STATUS_LABELS.ok}]\t${R2_SYNC_COMPLETE_MSG}`)};
+    // 成功的 R2 同步、讀取快取重載（列表上會被折疊的那種）不算「新 log」：
+    // 它們每 15 分鐘就來一筆，算進去的話按鈕幾乎永遠亮著，提示就失去意義——
+    // 所以 fingerprint 取的是第一個「不是這兩種成功背景作業」的事件行。後綴
+    // 字串要跟 renderEventListText() 的行格式對得上。「…還有 N 筆」那行也
+    // 跳過，它的數字會隨同步筆數浮動。
+    const POLL_IGNORED_LINE_SUFFIXES = [${[R2_SYNC_COMPLETE_MSG, READ_CACHE_REFRESH_COMPLETE_MSG]
+      .map((msg) => jsStringLiteral(`\t[${KIND_META.schedule.label}/${STATUS_LABELS.ok}]\t${msg}`))
+      .join(', ')}];
     function checkForNewLogs() {
       if (document.hidden) return;
       const url = '?format=text&days=' + LOGS_DAYS + '&token=' + encodeURIComponent(LOGS_TOKEN);
@@ -1982,12 +2028,12 @@ function renderHtml(entries: LogEntry[], days: number, token: string): string {
         })
         .then((text) => {
           const firstLine =
-            text.split('\\n').find((l) => l && !l.startsWith('…') && !l.endsWith(POLL_IGNORED_LINE_SUFFIX)) || '';
+            text.split('\\n').find((l) => l && !l.startsWith('…') && !POLL_IGNORED_LINE_SUFFIXES.some((suffix) => l.endsWith(suffix))) || '';
           if (latestSeenFingerprint === null) {
             latestSeenFingerprint = firstLine;
             return;
           }
-          // 找不到任何非 R2 行，不代表有新東西：清單只列前
+          // 找不到任何非背景作業行，不代表有新東西：清單只列前
           // ${TEXT_EXPORT_LIST_LIMIT} 筆，fingerprint 那筆可能被後來的同步擠出
           // 清單，或滑出 days 範圍。真的有新事件時它一定排在最前面、找得到。
           if (firstLine === '') return;
@@ -2169,6 +2215,11 @@ export function createLogsRouter(logDir: string): Router {
     const tokenParam = req.query['token'];
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(renderHtml(entries, days, typeof tokenParam === 'string' ? tokenParam : ''));
+  });
+
+  // 頁首「清除快取」按鈕（ADR 0020）。用 POST，避免連結預覽、爬蟲之類的 GET 意外觸發。
+  router.post('/read-cache/clear', logsAuthMiddleware, async (_req: Request, res: Response) => {
+    res.json(await clearAndReloadReadCaches());
   });
 
   return router;

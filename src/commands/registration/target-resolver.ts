@@ -24,6 +24,11 @@ export interface ResolvedTarget {
  * links it ~1s after creating it); that's harmless too, since the auto-created People
  * page is named after customName and isn't in any season, so the result is the same.
  * See docs/adr/0009-actor-users-snapshot-non-null-only.md.
+ *
+ * USERS and People lookups here go through the read cache (ADR 0020). trackUser's link
+ * write goes through usersRepo.update, which replaces the cached record with the page the
+ * PATCH returned, so a just-linked user isn't stuck with the unlinked snapshot until the
+ * next refresh.
  */
 export async function resolveTarget(
   target: RegistrationTarget,
@@ -35,7 +40,7 @@ export async function resolveTarget(
     const user = actorUser ?? await usersRepo.findByUserId(actorUserId);
     if (!user) return null;
     const person = user.registeredPersonPageId
-      ? (await peopleRepo.findByPageIds([user.registeredPersonPageId]))[0] ?? null
+      ? await peopleRepo.findNameByPageId(user.registeredPersonPageId)
       : null;
     return { personPageId: person?.pageId ?? '', displayName: person?.name ?? user.customName, resolvedVia: 'self' };
   }
@@ -44,7 +49,7 @@ export async function resolveTarget(
     const user = await usersRepo.findByUserId(target.targetUserId, 'mention-target');
     if (user) {
       const person = user.registeredPersonPageId
-        ? (await peopleRepo.findByPageIds([user.registeredPersonPageId]))[0] ?? null
+        ? await peopleRepo.findNameByPageId(user.registeredPersonPageId)
         : null;
       return { personPageId: person?.pageId ?? '', displayName: person?.name ?? user.customName, resolvedVia: 'mention' };
     }

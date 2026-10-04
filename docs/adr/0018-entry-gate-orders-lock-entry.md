@@ -1,5 +1,7 @@
 # 報名／請假用號碼牌閘門，照收到訊息的順序進鎖
 
+> 後續變更：見 [ADR 0020](0020-pre-lock-read-cache.md)（進鎖前的查詢多半命中讀取快取，閘門很少需要真的等前一號；閘門仍保留）
+
 社團要求報名「先送先報」：名額只剩幾個時，先送出的人要先拿到。`withMutex`（`src/services/mutex.ts`）是 FIFO，但排的是「呼叫 `withMutex` 的先後」。進鎖前還有一段 Notion 查詢：`message-handler.ts` 查 USERS，handler 再並行查對象（`resolveTarget`）和季資料。全新使用者還要等 `trackUser` 建頁。這段每則要 0.8～2.2 秒，所以實際上是誰先查完誰先進鎖。2026-10-04 測試環境實測過同一人的 `-1` 和 `假` 順序對調（見 `docs/performance-observations.md` 的 43 秒寫入那條）。
 
 `src/services/entry-gate.ts` 在 mutex 前面加了一道閘門：

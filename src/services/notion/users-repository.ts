@@ -9,6 +9,7 @@ import {
   getMultiSelect,
 } from './property-helpers.js';
 import { withPurpose } from '../../utils/request-context.js';
+import { ReadCache } from './read-cache.js';
 import type { NotionUser } from '../../types/notion-models.js';
 import type { PageObjectResponse } from '@notionhq/client/build/src/api-endpoints.js';
 
@@ -40,7 +41,23 @@ const USER_LOOKUP_PURPOSES: Record<UserLookupReason, string> = {
   'track-user': '追蹤使用者時重查 bot 使用者帳號（發話者或新加入的成員）',
 };
 
+/** 定時整表重載的間隔是 15 分鐘（schedulers/read-cache-refresh.ts），容許一次重載失敗。 */
+export const USERS_CACHE_MAX_AGE_MS = 30 * 60 * 1000;
+
+// key 是 userId；寫入以 pageId 進行，所以失效用 pageId 比對。
+const cache = new ReadCache<NotionUser>('users', USERS_CACHE_MAX_AGE_MS, (u) => u.pageId);
+
+/**
+ * 'actor'／'mention-target' 走快取（ADR 0020）：快取記錄的 `messageCount`／`groups`／`multiChats`
+ * 可能是舊的，不能拿來算任何寫入。'track-user' 是 trackUser 鎖內的重讀（ADR 0017），
+ * 會用讀到的值算出新值寫回，所以一律直接查 Notion。
+ */
 export async function findByUserId(userId: string, reason: UserLookupReason = 'actor'): Promise<NotionUser | null> {
+  if (reason === 'track-user') return queryByUserId(userId, reason);
+  return cache.getOrLoad(userId, () => queryByUserId(userId, reason));
+}
+
+async function queryByUserId(userId: string, reason: UserLookupReason): Promise<NotionUser | null> {
   return withPurpose(USER_LOOKUP_PURPOSES[reason], async () => {
     const response = await notionPost(`/databases/${env.NOTION_DB_USERS}/query`, {
       filter: { property: 'user_id', title: { equals: userId } },
@@ -48,6 +65,15 @@ export async function findByUserId(userId: string, reason: UserLookupReason = 'a
     if (response.results.length === 0) return null;
     return pageToUser(response.results[0] as PageObjectResponse);
   });
+}
+
+/** 定時排程用整張 USERS 表換掉快取，回傳快取筆數。 */
+export async function refreshCache(): Promise<number> {
+  return withPurpose('重載 bot 使用者帳號快取', () =>
+    cache.replaceAll(async () =>
+      (await queryAll()).filter((u) => u.userId).map((u): [string, NotionUser] => [u.userId, u]),
+    ),
+  );
 }
 
 /**
@@ -66,22 +92,24 @@ export async function findByPageId(pageId: string): Promise<NotionUser | null> {
 }
 
 export async function findAll(): Promise<NotionUser[]> {
-  return withPurpose('查詢全部 bot 使用者帳號', async () => {
-    const users: NotionUser[] = [];
-    let cursor: string | undefined;
-    let first = true;
-    do {
-      if (!first) await new Promise((r) => setTimeout(r, 400)); // Notion rate limit
-      first = false;
-      const response = await notionPost(`/databases/${env.NOTION_DB_USERS}/query`, {
-        page_size: 100,
-        ...(cursor ? { start_cursor: cursor } : {}),
-      }) as { results: PageObjectResponse[]; has_more: boolean; next_cursor: string | null };
-      users.push(...response.results.map(pageToUser));
-      cursor = response.has_more ? (response.next_cursor ?? undefined) : undefined;
-    } while (cursor);
-    return users;
-  });
+  return withPurpose('查詢全部 bot 使用者帳號', queryAll);
+}
+
+async function queryAll(): Promise<NotionUser[]> {
+  const users: NotionUser[] = [];
+  let cursor: string | undefined;
+  let first = true;
+  do {
+    if (!first) await new Promise((r) => setTimeout(r, 400)); // Notion rate limit
+    first = false;
+    const response = await notionPost(`/databases/${env.NOTION_DB_USERS}/query`, {
+      page_size: 100,
+      ...(cursor ? { start_cursor: cursor } : {}),
+    }) as { results: PageObjectResponse[]; has_more: boolean; next_cursor: string | null };
+    users.push(...response.results.map(pageToUser));
+    cursor = response.has_more ? (response.next_cursor ?? undefined) : undefined;
+  } while (cursor);
+  return users;
 }
 
 export async function findAdmin(): Promise<NotionUser | null> {
@@ -114,6 +142,8 @@ export async function create(userId: string, customName: string, messageCount: n
         message_counts: { number: messageCount },
       },
     });
+    // 同一個 userId 的舊記錄（例如管理員手動刪掉舊頁）會被新頁取代，不會留到下次重載。
+    cacheWrittenPage(page);
     return pageToUser(page as PageObjectResponse);
   });
 }
@@ -132,10 +162,30 @@ export async function update(
       properties['multi-chat'] = { multi_select: updates.multiChats.map(name => ({ name })) };
     if (updates.registeredPersonPageId !== undefined)
       properties['Registered name'] = { relation: [{ id: updates.registeredPersonPageId }] };
-    await notionPatch(`/pages/${pageId}`, { properties });
+    // 寫入前後都失效，成功後用 PATCH 回傳的頁面存回快取，見 read-cache.ts。
+    // display-name-update 改 customName、trackUser 寫 Registered name 都走這裡，不用另外清快取。
+    cache.invalidate(pageId);
+    let page: unknown;
+    try {
+      page = await notionPatch(`/pages/${pageId}`, { properties });
+    } finally {
+      cache.invalidate(pageId);
+    }
+    cacheWrittenPage(page);
   });
 }
 
+/** 寫入 API 回傳的是整個頁面；格式不對（例如測試 mock 回 `{}`）就不存，下次查詢再補。 */
+function cacheWrittenPage(page: unknown): void {
+  if (!page || typeof page !== 'object' || !('properties' in page)) return;
+  const user = pageToUser(page as PageObjectResponse);
+  if (user.userId) cache.put(user.userId, user);
+}
+
+/**
+ * 不讓快取失效：每則群組訊息都會呼叫，失效的話快取幾乎不會命中。快取裡的 `messageCount`
+ * 本來就不可信，trackUser 一律在鎖內重讀（ADR 0017）。
+ */
 export async function incrementMessageCount(pageId: string, currentCount: number): Promise<void> {
   return withPurpose('累加使用者發言次數', async () => {
     await notionPatch(`/pages/${pageId}`, {

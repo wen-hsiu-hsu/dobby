@@ -76,7 +76,11 @@ await bot.run('@Dobby +1', {
 `routePost`／`routeGet`（`create-test-bot.ts`）只依 DB ID 路由到對應 fixture（`GET /pages/<id>` 例外：先在 users、再在 people fixture 裡找同 id 的頁面，`trackUser` 重讀發話者 USERS 頁就是走這條），**不解析 Notion query 的 filter body**——所以像「`seasonRepo.findByName(name)` vs `seasonRepo.findAll()[0]`」這種差異，在 `createTestBot` 底下永遠回傳一樣的結果，測不出行為差異。分頁版的 `notionGetAllResults` 只接 `/blocks/<pageId>/children`（也走 `routeGet`，只回傳 fixture 的 `results`，不會跟著 `has_more` 抓下一頁，所以分頁行為同樣測不出來）；其他路徑（例如 relation 剛好 25 筆時 `getFullRelation` 打的 `/pages/<id>/properties/<propId>`）會直接丟錯，要測就手動 mock。
 
 遇到這種要斷言「呼叫了哪個 repository 函式／帶什麼參數」的情境，改用手動 `vi.mock()` 直接 mock 該 repository 模組，斷言呼叫參數即可（見
-`src/commands/registration/__tests__/leave-handler.test.ts`）。這不是隨意繞過慣例——只有在 `createTestBot` 的 fixture routing 結構性測不出來時才這樣做；其他情境仍優先用 `createTestBot`。
+`src/commands/registration/__tests__/leave-handler.test.ts`）。這不是隨意繞過慣例——只有在 `createTestBot` 的 fixture routing 結構性測不出來時才這樣做；其他情境仍優先用 `createTestBot`。手動 mock 報名／請假 handler 時要 mock 的是 `seasonRepo.findByNameCached`、`peopleRepo.findNameByPageId`，不是 `findByName`／`findByPageIds`（ADR 0020）。
+
+### 讀取快取
+
+USERS、People 姓名、季資料的讀取快取（`src/services/notion/read-cache.ts`）是模組層級的狀態。`setup.ts` 在每個測試前呼叫 `clearAllReadCaches()` 清空，不用自己清。同一個測試裡連續 `run()` 兩次，第二次會命中第一次存下的 USERS／季資料，不會再打 Notion。要斷言 Notion 呼叫次數時，記得把這點算進去。
 
 ---
 

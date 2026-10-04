@@ -4,6 +4,7 @@ import { getTitle, getRelation, getNumber, getRichText, getFormulaNumber } from 
 import { getFullRelation } from './paginated-relation.js';
 import { logger } from '../../utils/logger.js';
 import { withPurpose } from '../../utils/request-context.js';
+import { ReadCache } from './read-cache.js';
 import type { SeasonRecord } from '../../types/notion-models.js';
 import type { PageObjectResponse } from '@notionhq/client/build/src/api-endpoints.js';
 
@@ -51,4 +52,23 @@ export async function findByName(name: string): Promise<SeasonRecord | null> {
     if (response.results.length === 0) return null;
     return await pageToRecord(response.results[0] as PageObjectResponse);
   });
+}
+
+/**
+ * 季資料 TTL 是 60 秒，比 USERS／People 短很多，因為它直接決定名額：鎖內的 getEventOccupancy
+ * 用 handler 傳進來的這份季資料算 `calculateTotalSlots`，不會重讀（event-occupancy.ts）。
+ * 管理員改了季租名單或季預設場地數後，60 秒內的報名可能用舊值算名額。每週的場地數覆寫在
+ * 行事曆的 `場地數`，鎖內本來就會重讀，不受影響。為什麼不改成鎖內重讀，見 ADR 0020。
+ */
+export const SEASON_CACHE_MAX_AGE_MS = 60 * 1000;
+
+// bot 不會寫入季資料，versionKey 用不到失效，給季名就好。
+const cache = new ReadCache<SeasonRecord>('season', SEASON_CACHE_MAX_AGE_MS, (s) => s.name);
+
+/**
+ * 只給報名／請假進鎖前用（ADR 0020）。其他指令（season 公告、付款、名單）照樣呼叫
+ * findByName：管理員改完費用馬上查，要看到新值。
+ */
+export async function findByNameCached(name: string): Promise<SeasonRecord | null> {
+  return cache.getOrLoad(name, () => findByName(name));
 }

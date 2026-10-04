@@ -31,7 +31,7 @@ function makeEvent(text: string, mentionees: any[] = []) {
   };
 }
 
-function baseSeason(overrides: Partial<Awaited<ReturnType<typeof seasonRepo.findByName>>> = {}) {
+function baseSeason(overrides: Partial<Awaited<ReturnType<typeof seasonRepo.findByNameCached>>> = {}) {
   return {
     pageId: 'season-1',
     name: getCurrentSeasonName(),
@@ -81,7 +81,7 @@ function cardSummary() {
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(resolveTarget).mockResolvedValue({ personPageId: 'person-1', displayName: 'Alice', resolvedVia: 'self' });
-  vi.mocked(seasonRepo.findByName).mockResolvedValue(baseSeason());
+  vi.mocked(seasonRepo.findByNameCached).mockResolvedValue(baseSeason());
   vi.mocked(calendarRepo.findByDate).mockResolvedValue(baseCalendarEvent());
   vi.mocked(peopleRepo.findByPageIds).mockImplementation(async (ids: string[]) =>
     ids.map((id) => ({
@@ -112,7 +112,7 @@ describe('handleRegistration', () => {
 
   it('registers a guest for a non-season-member (零打) self sign-up without the 的朋友 suffix', async () => {
     vi.mocked(resolveTarget).mockResolvedValue({ personPageId: 'person-2', displayName: 'Bob', resolvedVia: 'mention' });
-    vi.mocked(seasonRepo.findByName).mockResolvedValue(baseSeason({ members: ['person-1'] }));
+    vi.mocked(seasonRepo.findByNameCached).mockResolvedValue(baseSeason({ members: ['person-1'] }));
     const event = makeEvent('@Dobby +1');
 
     await handleRegistration(event, 1, false);
@@ -131,7 +131,7 @@ describe('handleRegistration', () => {
   it('caps a non-admin request that exceeds remaining capacity and reports cappedAt in the headline', async () => {
     // courts(1) * 7 - members(1) + absentees(0) = 6 available slots
     vi.mocked(resolveTarget).mockResolvedValue({ personPageId: 'person-2', displayName: 'Bob', resolvedVia: 'mention' });
-    vi.mocked(seasonRepo.findByName).mockResolvedValue(baseSeason({ members: ['person-1'], courts: 1 }));
+    vi.mocked(seasonRepo.findByNameCached).mockResolvedValue(baseSeason({ members: ['person-1'], courts: 1 }));
     const event = makeEvent('@Dobby +10');
 
     await handleRegistration(event, 10, false);
@@ -154,7 +154,7 @@ describe('handleRegistration', () => {
     // calendar courts(1) * 7 - members(1) + absentees(0) = 6 slots;
     // the season default (2 courts) would have allowed 13 — must not be used for the gate
     vi.mocked(resolveTarget).mockResolvedValue({ personPageId: 'person-2', displayName: 'Bob', resolvedVia: 'mention' });
-    vi.mocked(seasonRepo.findByName).mockResolvedValue(baseSeason({ members: ['person-1'], courts: 2 }));
+    vi.mocked(seasonRepo.findByNameCached).mockResolvedValue(baseSeason({ members: ['person-1'], courts: 2 }));
     vi.mocked(calendarRepo.findByDate).mockResolvedValue(baseCalendarEvent({ courts: 1 }));
     const event = makeEvent('@Dobby +10');
 
@@ -202,7 +202,7 @@ describe('handleRegistration', () => {
 
     expect(replyText()).toBe('你不是管理員');
     expect(reply().type).toBe('text');
-    expect(seasonRepo.findByName).not.toHaveBeenCalled();
+    expect(seasonRepo.findByNameCached).not.toHaveBeenCalled();
     expect(calendarRepo.updateGuests).not.toHaveBeenCalled();
   });
 
@@ -213,7 +213,7 @@ describe('handleRegistration', () => {
 
     expect(replyText()).toBe('指令格式錯誤：指定對象需使用 @Name');
     expect(reply().type).toBe('text');
-    expect(seasonRepo.findByName).not.toHaveBeenCalled();
+    expect(seasonRepo.findByNameCached).not.toHaveBeenCalled();
     expect(calendarRepo.updateGuests).not.toHaveBeenCalled();
   });
 
@@ -226,7 +226,7 @@ describe('handleRegistration', () => {
     await handleRegistration(event, 1, false);
 
     expect(replyText()).toBe('指令格式錯誤：指定對象需使用 @Name');
-    expect(seasonRepo.findByName).not.toHaveBeenCalled();
+    expect(seasonRepo.findByNameCached).not.toHaveBeenCalled();
     expect(calendarRepo.updateGuests).not.toHaveBeenCalled();
   });
 
@@ -252,7 +252,7 @@ describe('handleRegistration', () => {
 
   it('still replies "account not found" (not the season error) when both lookups come back empty', async () => {
     vi.mocked(resolveTarget).mockResolvedValue(null);
-    vi.mocked(seasonRepo.findByName).mockResolvedValue(null);
+    vi.mocked(seasonRepo.findByNameCached).mockResolvedValue(null);
 
     await handleRegistration(makeEvent('@Dobby +1'), 1, false);
 
@@ -267,7 +267,7 @@ describe('handleRegistration', () => {
     const handling = handleRegistration(makeEvent('@Dobby +1'), 1, false, actorUser);
     await Promise.resolve();
     expect(resolveTarget).toHaveBeenCalledWith(expect.objectContaining({ isSelf: true }), 'user-alice', actorUser);
-    expect(seasonRepo.findByName).toHaveBeenCalled();
+    expect(seasonRepo.findByNameCached).toHaveBeenCalled();
 
     finishResolve({ personPageId: 'person-1', displayName: 'Alice', resolvedVia: 'self' });
     await handling;
@@ -277,12 +277,12 @@ describe('handleRegistration', () => {
   // 取鎖前的查詢 throw 時 withFreshCalendarEvent 還沒接手，handler 要自己回覆，否則例外一路丟到 event-router 只記 log。
   it.each([
     ['the target lookup', () => vi.mocked(resolveTarget).mockRejectedValue(new Error('Notion 502'))],
-    ['the season lookup', () => vi.mocked(seasonRepo.findByName).mockRejectedValue(new Error('Notion 502'))],
+    ['the season lookup', () => vi.mocked(seasonRepo.findByNameCached).mockRejectedValue(new Error('Notion 502'))],
     [
       'the season lookup (with the target not found)',
       () => {
         vi.mocked(resolveTarget).mockResolvedValue(null);
-        vi.mocked(seasonRepo.findByName).mockRejectedValue(new Error('Notion 502'));
+        vi.mocked(seasonRepo.findByNameCached).mockRejectedValue(new Error('Notion 502'));
       },
     ],
   ])('replies "系統錯誤" without taking the lock when %s throws', async (_label, arrange) => {
@@ -311,7 +311,7 @@ describe('handleRegistration', () => {
   });
 
   it('replies when the event season cannot be found, without touching the calendar', async () => {
-    vi.mocked(seasonRepo.findByName).mockResolvedValue(null);
+    vi.mocked(seasonRepo.findByNameCached).mockResolvedValue(null);
     const event = makeEvent('@Dobby +1');
 
     await handleRegistration(event, 1, false);
@@ -334,14 +334,14 @@ describe('handleRegistration', () => {
     it("looks up the event date's season (Q4), not today's (Q3)", async () => {
       await handleRegistration(makeEvent('@Dobby +1'), 1, false);
 
-      expect(seasonRepo.findByName).toHaveBeenCalledWith('2026-Q4');
-      expect(seasonRepo.findByName).not.toHaveBeenCalledWith('2026-Q3');
+      expect(seasonRepo.findByNameCached).toHaveBeenCalledWith('2026-Q4');
+      expect(seasonRepo.findByNameCached).not.toHaveBeenCalledWith('2026-Q3');
       expect(calendarRepo.findByDate).toHaveBeenCalledWith('2026-10-03');
     });
 
     it("registers a last-season member who isn't in the event season as 零打 themself, without 的朋友", async () => {
       // 官穗妙 case: person-1 was a Q3 member but is not in Q4's members
-      vi.mocked(seasonRepo.findByName).mockImplementation(async (name: string) =>
+      vi.mocked(seasonRepo.findByNameCached).mockImplementation(async (name: string) =>
         name === '2026-Q4' ? baseSeason({ name, members: ['person-9'] }) : baseSeason({ name, members: ['person-1'] }),
       );
 
@@ -351,7 +351,7 @@ describe('handleRegistration', () => {
     });
 
     it('replies with the event season name when that season has not been created yet', async () => {
-      vi.mocked(seasonRepo.findByName).mockResolvedValue(null);
+      vi.mocked(seasonRepo.findByNameCached).mockResolvedValue(null);
 
       await handleRegistration(makeEvent('@Dobby +1'), 1, false);
 
@@ -536,7 +536,7 @@ describe('handleRegistration', () => {
     });
 
     it('logs "season-not-found" with the season it looked for', async () => {
-      vi.mocked(seasonRepo.findByName).mockResolvedValue(null);
+      vi.mocked(seasonRepo.findByNameCached).mockResolvedValue(null);
 
       await handleRegistration(makeEvent('@Dobby +1'), 1, false);
 
