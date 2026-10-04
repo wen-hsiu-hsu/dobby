@@ -34,27 +34,30 @@ description: 功能或修正完成後，檢查並同步 dobby 的文件（docs/ 
 從 diff 取出被改名、刪除或改語意的識別字：函式名、log 訊息字串、Notion 欄位名、指令文字、回覆文案。
 
 ```bash
-grep -rn "舊名稱\|舊字串" docs src TODO.md CLAUDE.md --include='*.md' --include='*.ts' --include='*.json'
+grep -rn "舊名稱\|舊字串" docs src TODO.md CLAUDE.md --include='*.md' --include='*.ts' --include='*.json' --exclude-dir=archive
 ```
 
-排除歷史快照，這些不用改：`docs/code-review-*.md`、`docs/_analysis-report.html`。
+`docs/archive/` 是歷史快照，不用改。
+
+命中的地方如果只是重述主文件已經寫的行為（例如 `logging.md`、`architecture.md` 又描述一次鎖內／鎖外流程），改成一句話加連結指到主文件，不要逐處同步改寫。主文件就是第 2 步對照表裡的那份。
 
 ## 4. TODO 與待辦文件
 
 - 這次做完的條目：從 `TODO.md` 直接刪除，不打勾。
 - 其他條目引用的檔案:行號，如果被這次改動位移了要校正。用改動的檔名 grep `TODO.md`、`docs/performance-observations.md`，打開檔案實際確認行號。
 - 刪掉條目後，其他條目如果用「第 N 項」「下方某項」指到它，要改掉。
-- 新發現、這次不處理的問題：照 `CLAUDE.md`「新增問題／技術債觀察類 TODO」的規則寫。效能類放 `docs/performance-observations.md`；評估後否決的方案放 `docs/rejected-proposals.md`（附重新評估的條件）。
-- 「手動測試追蹤」：需要真機或真實 LINE 驗證的改動，要補測試項。
+- 新發現、這次不處理的問題：照 `CLAUDE.md`「新增問題／技術債觀察類 TODO」的規則寫，先判斷是一行短條目還是完整格式。效能類放 `docs/performance-observations.md`；評估後否決的方案放 `docs/rejected-proposals.md`（附重新評估的條件）。
+- 「手動測試追蹤」：需要真機或真實 LINE 驗證的改動，要補測試項。Flex 卡只列這張卡特有的檢查，共通檢查已寫在該區塊開頭。
+- 手動測試做完：通過就直接刪掉該項，結論寫進 commit message，有值得留的觀察再在對應 ADR 加一兩句；不要把整段實測紀錄貼進 `TODO.md`。
 
 ## 5. ADR
 
 - 這次有沒有非顯而易見的決策，也就是之後很容易被「簡化」回錯誤寫法、或來自真實事故的決策？有的話新增 `docs/adr/00NN-*.md`（編號接 `ls docs/adr` 的最後一號），格式照既有 ADR：是什麼、為什麼、不這樣做會怎樣。並在相關的 `docs/*.md` 加一句指向它。
-- 既有 ADR 的描述如果被這次改動推翻或補充，要更新那份 ADR。
+- ADR 是當時決策的快照，本文不跟著後續改動改寫。既有 ADR 被這次改動推翻或補充時，只在它標題下加一行 `> 後續變更：見 [ADR 00NN](00NN-*.md)（一句話說改了什麼）`；現在的行為寫在主文件。例外：檔案路徑、連結失效可以直接修。
 
 ## 6. 索引與記憶
 
-- `docs/README.md` 目錄表：有新增文件就加一列；既有文件涵蓋範圍變了，就更新「說明」「什麼情境該讀」欄。
+- `docs/README.md` 目錄表：有新增文件就加一列；既有文件涵蓋範圍變了，就更新「說明」「什麼情境該讀」欄。說明欄寫涵蓋範圍，不列具體待辦或條目名稱，避免每次增刪條目都要改。
 - `~/.claude/projects/-Users-shiu-Documents-repos-dobby/memory/` 裡跟這個功能相關的 project 記憶如果過時了（例如寫著「尚未實作」「等部署後刪」），要更新或刪除，`MEMORY.md` 的索引行也一起改。
 
 ## 7. 回報

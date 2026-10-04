@@ -77,7 +77,7 @@
 4. 每個處理過的使用者之間 delay 400ms（避免觸發 Notion rate limit）——這個 delay 寫在迴圈本體最底部、try/catch 之後，只要這次迴圈沒有提早 `continue`（例如 `groups` 為空、查不到 profile），就會執行，不論這次有沒有真的呼叫 Notion 更新、或是進了 catch 記錄失敗
 5. 跑完記一行 `Display name update complete`，每個使用者剛好落在一個計數裡：`updated`（改名並寫回）、`unchanged`（名稱沒變）、`skipped`（`groups` 為空或全部群組都查不到 profile）、`failed`（例外）、`noUserId`（USERS 記錄沒有 userId），加起來等於 `total`。`/logs` 的批次結果圖靠這些計數畫比例，漏算的人會讓比例失真（見 `docs/logging.md`「排程事件的批次結果圖」）
 
-**⚠️ 這裡一定要帶 `groupId` 查詢**：LINE 的 profile API 不帶 `groupId` 查的是「一對一好友」資料，社團成員多半只在群組互動、沒加 bot 為個人好友，不帶 `groupId` 幾乎必定回 404。2026-09-17 曾經因為漏帶這個參數，讓這支排程實質上永遠不會成功更新任何人，詳見 `docs/code-review-2026-09-17.md` 第 5.1 節。
+**⚠️ 這裡一定要帶 `groupId` 查詢**：LINE 的 profile API 不帶 `groupId` 查的是「一對一好友」資料，社團成員多半只在群組互動、沒加 bot 為個人好友，不帶 `groupId` 幾乎必定回 404。2026-09-17 曾經因為漏帶這個參數，讓這支排程實質上永遠不會成功更新任何人，詳見 `docs/archive/code-review-2026-09-17.md` 第 5.1 節。
 
 ### 注意事項
 
