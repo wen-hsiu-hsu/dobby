@@ -268,6 +268,90 @@ describe('mutex', () => {
     expect(order).toEqual(['a-start', 'a-end', 'b-start', 'b-end', 'c-start', 'c-end']);
   });
 
+  describe('cancelIfNotStarted', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('never runs a task whose caller timed out while it was still queued, and reports it as not started', async () => {
+      const order: string[] = [];
+      let resolveStuck!: () => void;
+      const stuck = withMutex('cancel1', () => {
+        order.push('stuck-start');
+        return new Promise<void>((r) => { resolveStuck = r; });
+      });
+      const stuckAssertion = expect(stuck).rejects.toMatchObject({ started: true });
+
+      await vi.advanceTimersByTimeAsync(100);
+      const queued = withMutex('cancel1', async () => { order.push('queued-start'); }, { cancelIfNotStarted: true });
+      const queuedAssertion = expect(queued).rejects.toMatchObject({ name: 'MutexTimeoutError', started: false, cancelled: true });
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      await stuckAssertion;
+      await queuedAssertion;
+
+      // A call after the cancellation still waits for the stuck task, not for the skipped one.
+      const later = withMutex('cancel1', async () => { order.push('later-start'); return 'later'; });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(order).toEqual(['stuck-start']);
+
+      resolveStuck();
+      await expect(later).resolves.toBe('later');
+      expect(order).toEqual(['stuck-start', 'later-start']);
+    });
+
+    it('runs a queued task normally when its turn comes before the timeout', async () => {
+      let resolveFirst!: () => void;
+      const first = withMutex('cancel4', () => new Promise<void>((r) => { resolveFirst = r; }));
+      const queued = withMutex('cancel4', async () => 'queued', { cancelIfNotStarted: true });
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      resolveFirst();
+      await first;
+      await expect(queued).resolves.toBe('queued');
+    });
+
+    it('lets a task that already started keep running after its caller times out, reporting it as started', async () => {
+      let resolveStuck!: (v: string) => void;
+      let finished = false;
+      const p = withMutex(
+        'cancel2',
+        () => new Promise<string>((r) => { resolveStuck = r; }).then((v) => { finished = true; return v; }),
+        { cancelIfNotStarted: true }
+      );
+      const assertion = expect(p).rejects.toMatchObject({ started: true, cancelled: false });
+      await vi.advanceTimersByTimeAsync(10_000);
+      await assertion;
+
+      resolveStuck('done');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(finished).toBe(true);
+    });
+
+    it('without the option, still runs a queued task late after its caller timed out', async () => {
+      const order: string[] = [];
+      let resolveStuck!: () => void;
+      const stuck = withMutex('cancel3', () => new Promise<void>((r) => { resolveStuck = r; }));
+      const stuckAssertion = expect(stuck).rejects.toBeInstanceOf(MutexTimeoutError);
+      await vi.advanceTimersByTimeAsync(100);
+      const queued = withMutex('cancel3', async () => { order.push('queued-start'); });
+      // Not cancelled: without the option the caller must not claim nothing was done.
+      const queuedAssertion = expect(queued).rejects.toMatchObject({ started: false, cancelled: false });
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      await stuckAssertion;
+      await queuedAssertion;
+
+      resolveStuck();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(order).toEqual(['queued-start']);
+    });
+  });
+
   describe('task summary log', () => {
     const SUMMARY = 'Mutex task finished';
 
@@ -293,7 +377,7 @@ describe('mutex', () => {
       await expect(p).resolves.toBe('ok');
 
       expect(summaryCalls('info')).toEqual([
-        { key: '2026-10-03', queuedAhead: 0, waitMs: 0, heldMs: 300, callerTimedOut: false, fnFailed: false },
+        { key: '2026-10-03', queuedAhead: 0, waitMs: 0, heldMs: 300, callerTimedOut: false, fnFailed: false, cancelled: false },
       ]);
       expect(summaryCalls('debug')).toEqual([]);
     });
@@ -308,9 +392,9 @@ describe('mutex', () => {
       await second;
 
       expect(summaryCalls('info')).toEqual([
-        { key: '2026-10-04', queuedAhead: 0, waitMs: 0, heldMs: 500, callerTimedOut: false, fnFailed: false },
+        { key: '2026-10-04', queuedAhead: 0, waitMs: 0, heldMs: 500, callerTimedOut: false, fnFailed: false, cancelled: false },
         // Arrived at t=100, started when the first finished at t=500.
-        { key: '2026-10-04', queuedAhead: 1, waitMs: 400, heldMs: 200, callerTimedOut: false, fnFailed: false },
+        { key: '2026-10-04', queuedAhead: 1, waitMs: 400, heldMs: 200, callerTimedOut: false, fnFailed: false, cancelled: false },
       ]);
     });
 
@@ -331,7 +415,7 @@ describe('mutex', () => {
       await vi.advanceTimersByTimeAsync(10_000);
       await aAssertion;
       expect(logger.warn).toHaveBeenCalledWith(
-        { key: '2026-10-06', queuedAhead: 0 },
+        { key: '2026-10-06', queuedAhead: 0, started: true },
         expect.stringContaining('timed out')
       );
       // The caller has gone, but fn() is still running: no summary yet.
@@ -342,7 +426,7 @@ describe('mutex', () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(summaryCalls('info')).toEqual([
-        { key: '2026-10-06', queuedAhead: 0, waitMs: 0, heldMs: 15_000, callerTimedOut: true, fnFailed: false },
+        { key: '2026-10-06', queuedAhead: 0, waitMs: 0, heldMs: 15_000, callerTimedOut: true, fnFailed: false, cancelled: false },
       ]);
     });
 
@@ -361,6 +445,30 @@ describe('mutex', () => {
       ]);
     });
 
+    it('logs a cancelled task with cancelled: true, no hold time, and not as a failure', async () => {
+      let resolveStuck!: () => void;
+      const stuck = withMutex('2026-10-12', () => new Promise<void>((r) => { resolveStuck = r; }));
+      const stuckAssertion = expect(stuck).rejects.toBeInstanceOf(MutexTimeoutError);
+      await vi.advanceTimersByTimeAsync(100);
+      const queued = withMutex('2026-10-12', async () => undefined, { cancelIfNotStarted: true });
+      const queuedAssertion = expect(queued).rejects.toBeInstanceOf(MutexTimeoutError);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await stuckAssertion;
+      await queuedAssertion;
+      // Not logged at the timeout: like any task, the summary waits until its turn comes.
+      expect(summaryCalls('info')).toEqual([]);
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      resolveStuck();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(summaryCalls('info')).toEqual([
+        expect.objectContaining({ key: '2026-10-12', queuedAhead: 0, cancelled: false }),
+        // Arrived at t=100, its turn came when the stuck task finished at t=12100.
+        { key: '2026-10-12', queuedAhead: 1, waitMs: 12_000, heldMs: 0, callerTimedOut: true, fnFailed: false, cancelled: true },
+      ]);
+    });
+
     it('counts a timed-out task that is still running in queuedAhead', async () => {
       let resolveStuck!: () => void;
       const a = withMutex('2026-10-08', () => new Promise<void>((r) => { resolveStuck = r; }));
@@ -376,7 +484,7 @@ describe('mutex', () => {
       // a's caller gave up, but the new call still sees the background task ahead of it.
       const [, cSummary] = summaryCalls('info');
       expect(cSummary).toEqual({
-        key: '2026-10-08', queuedAhead: 1, waitMs: 1_000, heldMs: 0, callerTimedOut: false, fnFailed: false,
+        key: '2026-10-08', queuedAhead: 1, waitMs: 1_000, heldMs: 0, callerTimedOut: false, fnFailed: false, cancelled: false,
       });
     });
 
@@ -393,7 +501,7 @@ describe('mutex', () => {
       await bAssertion;
 
       expect(logger.warn).toHaveBeenLastCalledWith(
-        { key: '2026-10-09', queuedAhead: 1 },
+        { key: '2026-10-09', queuedAhead: 1, started: false },
         expect.stringContaining('timed out')
       );
 

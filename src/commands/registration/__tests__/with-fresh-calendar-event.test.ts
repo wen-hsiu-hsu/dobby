@@ -60,14 +60,14 @@ describe('withFreshCalendarEvent', () => {
     expect(logger.warn).not.toHaveBeenCalled();
   });
 
-  it('locks by date and runs mutation with the refetched value', async () => {
+  it('locks by date, cancelling the task if it times out while queued, and runs mutation with the refetched value', async () => {
     const fresh = { ...calEvent, guests: ['Alice'] };
     const mutation = vi.fn().mockResolvedValue(status);
     vi.mocked(buildEventStatusReply).mockResolvedValue(card);
 
     await withFreshCalendarEvent('token', '2026-05-09', 'ctx', () => Promise.resolve(fresh), mutation);
 
-    expect(mutex.withMutex).toHaveBeenCalledWith('2026-05-09', expect.any(Function));
+    expect(mutex.withMutex).toHaveBeenCalledWith('2026-05-09', expect.any(Function), { cancelIfNotStarted: true });
     expect(mutation).toHaveBeenCalledWith(fresh);
   });
 
@@ -111,8 +111,8 @@ describe('withFreshCalendarEvent', () => {
     expect(logger.error).not.toHaveBeenCalled();
   });
 
-  it('tells the user the result is unknown and not to retry when the mutex times out', async () => {
-    vi.mocked(mutex.withMutex).mockRejectedValue(new mutex.MutexTimeoutError('2026-05-09'));
+  it('tells the user the result is unknown and not to retry when the mutex times out after the task started', async () => {
+    vi.mocked(mutex.withMutex).mockRejectedValue(new mutex.MutexTimeoutError('2026-05-09', true, false));
 
     await withFreshCalendarEvent('token', '2026-05-09', 'ctx', () => Promise.resolve(calEvent), vi.fn());
 
@@ -129,6 +129,23 @@ describe('withFreshCalendarEvent', () => {
     expect(buildEventStatusReply).not.toHaveBeenCalled();
     // The warn already says what happened; the background task logs its own outcome later.
     expect(logger.info).not.toHaveBeenCalledWith(expect.anything(), 'ctx outcome');
+  });
+
+  it('tells the user nothing was done and to resend later when the mutex times out while the task is still queued', async () => {
+    vi.mocked(mutex.withMutex).mockRejectedValue(new mutex.MutexTimeoutError('2026-05-09', false, true));
+
+    await withFreshCalendarEvent('token', '2026-05-09', 'ctx', () => Promise.resolve(calEvent), vi.fn());
+
+    expect(replyMessage).toHaveBeenCalledTimes(1);
+    expect(replyMessage).toHaveBeenCalledWith('token', [
+      { type: 'text', text: '目前處理較慢，這次操作沒有執行，請稍後再送一次。' },
+    ]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(mutex.MutexTimeoutError) }),
+      'ctx timed out while queued; cancelled, nothing written',
+    );
+    expect(logger.error).not.toHaveBeenCalled();
+    expect(buildEventStatusReply).not.toHaveBeenCalled();
   });
 
   it('replies with a generic error and logs when mutation throws', async () => {

@@ -106,7 +106,7 @@ describe('handleRegistration', () => {
 
     await handleRegistration(event, 1, false);
 
-    expect(mutex.withMutex).toHaveBeenCalledWith(expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), expect.any(Function));
+    expect(mutex.withMutex).toHaveBeenCalledWith(expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), expect.any(Function), { cancelIfNotStarted: true });
     expect(calendarRepo.updateGuests).toHaveBeenCalledWith('evt-1', ['Alice的朋友']);
   });
 

@@ -24,7 +24,8 @@ Registration Parser
     ▼
 獲取 Mutex 鎖（key = 下一個週六的日期字串，同 key FIFO 排隊，見下方「Mutex 保護」）
     │
-    ├── 排隊＋執行超過 10 秒 → 回「這次操作可能已經完成，請勿重複操作」，讀寫仍在背景完成
+    ├── 排隊超過 10 秒、還沒輪到 → 取消不執行，回「這次操作沒有執行，請稍後再送一次」
+    ├── 已開始、排隊＋執行超過 10 秒 → 回「這次操作可能已經完成，請勿重複操作」，讀寫仍在背景完成
     │
     ├── 鎖內查詢最新 Calendar 事件（避免 race condition；查無此活動 → 回「找不到活動」，不視為系統錯誤）
     │
@@ -119,9 +120,12 @@ mutation 回傳狀態卡要用的資料（鎖內算出的快照：新名單、�
 
 Mutex 以活動日期字串為 key（不是 calendar 頁面 ID，這樣不用多一次查詢才能知道要鎖哪個 key），同一個活動一次只允許一個報名操作在執行。
 
-同一個 key 的請求會排成 FIFO 佇列，後到的等前一個做完才執行，**不會直接拒絕**、不需要使用者重試。每次呼叫有 10 秒逾時保護，從呼叫 `withMutex` 起算，**包含排隊時間**，所以尖峰時排在後面的人可能在自己的讀寫還沒開始前就逾時。逾時只影響「這次呼叫端等多久」——背後真正的讀寫仍會在背景跑到完成，後面排隊的請求會等它真正完成才開始，不會因為前一個逾時就提早用舊資料搶跑。
+同一個 key 的請求會排成 FIFO 佇列，後到的等前一個做完才執行，**不會直接拒絕**、不需要使用者重試。每次呼叫有 10 秒逾時保護，從呼叫 `withMutex` 起算，**包含排隊時間**，所以尖峰時排在後面的人可能在自己的讀寫還沒開始前就逾時。逾時分兩種：
 
-逾時時使用者會收到「處理時間較長，這次操作可能已經完成，請勿重複操作。如需確認，請洽管理員。」，而不是「系統錯誤」。因為背景的讀寫之後仍可能成功，而 `+N`／`-N` 不是冪等的，重試會重複報名或多取消一筆。訊息不引導使用者用 `next` 自己確認，因為 `next` 限管理員使用。細節與這個設計取捨的原因見 `docs/adr/0002-mutex-timeout-does-not-cancel-task.md`。
+- **還在排隊、讀寫還沒開始**：`withFreshCalendarEvent` 傳了 `cancelIfNotStarted`，這個任務會被跳過、永遠不執行，使用者收到「目前處理較慢，這次操作沒有執行，請稍後再送一次。」。這時什麼都沒寫，重送是安全的。說「稍後」是因為卡住佇列的那個任務可能還沒結束，馬上重送只會再排到它後面。
+- **已經開始**：只影響「這次呼叫端等多久」——背後真正的讀寫仍會在背景跑到完成，後面排隊的請求會等它真正完成才開始，不會因為前一個逾時就提早用舊資料搶跑。
+
+已開始的逾時，使用者會收到「處理時間較長，這次操作可能已經完成，請勿重複操作。如需確認，請洽管理員。」，而不是「系統錯誤」。因為背景的讀寫之後仍可能成功，而 `+N`／`-N` 不是冪等的，重試會重複報名或多取消一筆。訊息不引導使用者用 `next` 自己確認，因為 `next` 限管理員使用。細節與這個設計取捨的原因見 `docs/adr/0002-mutex-timeout-does-not-cancel-task.md`。
 
 ### 從 log 看鎖競爭
 
@@ -134,9 +138,10 @@ Mutex 以活動日期字串為 key（不是 calendar 頁面 ID，這樣不用多
 | `waitMs` | 從呼叫 `withMutex` 到 `fn()` 開始，也就是排隊等前面任務的時間 |
 | `heldMs` | `fn()` 從開始到真正結束的時間，就是實際持有鎖的時間；呼叫端逾時後仍會量到背景跑完為止 |
 | `callerTimedOut` | 呼叫端是否已經因 10 秒逾時放棄等待 |
+| `cancelled` | 呼叫端在 `fn()` 開始前就逾時，而且有傳 `cancelIfNotStarted`，所以 `fn()` 完全沒執行。這時 `heldMs` 是 0、`fnFailed` 是 `false`，摘要在輪到它的時候才寫出 |
 | `fnFailed` | `fn()` 是否丟出錯誤。呼叫端逾時後，背景任務失敗只有這個欄位看得到，錯誤本身不會再被任何人記下。注意報名／請假「找不到活動」也會是 `true`：`withFreshCalendarEvent` 是在鎖內丟 `EventNotFoundError` 再由 wrapper 接住，這是正常流程，不是失敗（看同一 reqId 的 `… outcome` 是不是 `event-not-found`） |
 
-看法：`queuedAhead > 0` 表示有人同時操作同一場活動；`waitMs` 大而 `heldMs` 正常是被前面的人拖住，`heldMs` 本身就大則是鎖內的 Notion 呼叫慢（2026-10-04 起請假人姓名查詢和 LINE 回覆都移到鎖外，不算在 `heldMs` 裡）（對照同一 reqId 時間軸上的各步 `durationMs`）。逾時時，呼叫端那一行 warn 也帶 `queuedAhead`，摘要則要等背景任務跑完才寫出，會排在該事件 `Event processed` 之後。
+看法：`queuedAhead > 0` 表示有人同時操作同一場活動；`waitMs` 大而 `heldMs` 正常是被前面的人拖住，`heldMs` 本身就大則是鎖內的 Notion 呼叫慢（2026-10-04 起請假人姓名查詢和 LINE 回覆都移到鎖外，不算在 `heldMs` 裡）（對照同一 reqId 時間軸上的各步 `durationMs`）。逾時時，呼叫端那一行 warn 也帶 `queuedAhead` 和 `started`（逾時當下 `fn()` 開始了沒），摘要則要等背景任務跑完才寫出，會排在該事件 `Event processed` 之後。
 
 等級依 key 格式決定：key 是純日期（`YYYY-MM-DD`）才記 info，其他 key 一律 debug。`user-track-${userId}` 這種含 userId 的 key 因此不會把 userId 寫進 info 層（ADR 0005）；之後新增的 key 格式預設也走 debug，要放 info 得先確認 key 不含身分資訊，再改 `mutex.ts` 的 `INFO_SUMMARY_KEY`。
 
@@ -196,7 +201,7 @@ LINE 電腦版和手機版的 `mentionees` 行為不一致：
 - 報名：`Registration handler outcome`
 - 請假：`Leave handler outcome`
 
-跟 `withFreshCalendarEvent` 逾時／錯誤時的 `Registration handler timed out; …`／`Registration handler error` 同一個前綴（handler 傳給 wrapper 的 `context`）。取鎖前的查詢 throw 時，handler 自己也會記同名的 `… error`，見下方「outcome 行不是每個事件恰好一行」的例外清單。有 debug 明細的分支，另外記一行 `… outcome detail`（debug）。helper 在 `src/commands/registration/outcome-log.ts`。
+跟 `withFreshCalendarEvent` 逾時／錯誤時的 `Registration handler timed out…`／`Registration handler error` 同一個前綴（handler 傳給 wrapper 的 `context`）。取鎖前的查詢 throw 時，handler 自己也會記同名的 `… error`，見下方「outcome 行不是每個事件恰好一行」的例外清單。有 debug 明細的分支，另外記一行 `… outcome detail`（debug）。helper 在 `src/commands/registration/outcome-log.ts`。
 
 **等級一律 info，不能用 warn**：`/logs` 的事件狀態會掃所有行的等級（`src/routes/logs.ts` 的 `groupStatus`），用 warn 會讓「名額不足」「已請假」這類正常的拒絕被標成「警告」。
 
@@ -223,7 +228,7 @@ LINE 電腦版和手機版的 `mentionees` 行為不一致：
 
 outcome 行不是「每個事件恰好一行」，例外有這些：
 
-- **mutex 逾時**：當下沒有 outcome，wrapper 已有 warn。背景的讀寫跑完後，它自己的 outcome 仍會用同一個 reqId 寫出，時間軸上排在 `Event processed` 之後。例外：背景 refetch 才發現沒有活動時，`EventNotFoundError` 會被 mutex 吞掉，不會有 `event-not-found` 行（很少見）。
+- **mutex 逾時**：當下沒有 outcome，wrapper 已有 warn。排隊中逾時被取消的任務（warn 是 `… timed out while queued; cancelled, nothing written`）永遠不會有 outcome，只有輪到它時那行 `cancelled: true` 的 `Mutex task finished`。已開始的任務，背景的讀寫跑完後，它自己的 outcome 仍會用同一個 reqId 寫出，時間軸上排在 `Event processed` 之後。例外：背景 refetch 才發現沒有活動時，`EventNotFoundError` 會被 mutex 吞掉，不會有 `event-not-found` 行（很少見）。
 - **鎖內非預期錯誤**：wrapper 的 `… error` 那行就是結果。
 - **鎖外組狀態卡失敗**：outcome 照常寫出（判斷和寫入都在鎖內完成了），另外有一行 warn `… status card failed; replied with the headline only`，使用者收到的是 headline 純文字。這只在 `buildEventStatusReply` 查請假人姓名丟錯時發生：0 人不查；1 人是直接 GET，失敗就丟錯；2 人以上時反向查詢失敗會先退回逐筆 GET（見 [notion/databases.md](notion/databases.md)），GET 也失敗才會丟錯。這時 `/logs` 會照規則 1 把事件判成「失敗」、標「Notion API 失敗」（見 [logging.md](logging.md)），但寫入其實已經成功，使用者也收到了 headline，要看同一 reqId 的 outcome 和 PATCH 判斷結果。
 - **取鎖前的查詢 throw**（`resolveTarget`／`seasonRepo.findByName`）：沒有 outcome，也不經過 wrapper；handler 自己記一行跟 wrapper 同名的 `… error`（`Registration handler error`／`Leave handler error`），並回「系統錯誤，請稍後再試」。對象查無但 Season 查詢 throw 時，也是回「系統錯誤」，不是「找不到您的帳號」「找不到您的資料」這類查無對象的回覆，因為兩個查詢並行，`Promise.all` 整個 reject。

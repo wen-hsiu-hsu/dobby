@@ -49,7 +49,7 @@ export async function handleLeave(
   // Independent lookups, run in parallel; the "not found" reply still takes precedence.
   // withFreshCalendarEvent only catches errors once it takes over, so a failure here must be
   // replied to here. Nothing is written yet, so "retry later" is safe. Keep withFreshCalendarEvent
-  // out of this try: a timeout there may still write, and must never be answered with "retry".
+  // out of this try: a timeout after the mutation started may still write, and must never be answered with "retry".
   let resolved, activeSeason;
   try {
     [resolved, activeSeason] = await Promise.all([
