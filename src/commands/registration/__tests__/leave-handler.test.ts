@@ -163,6 +163,29 @@ describe('handleLeave', () => {
     expect(calendarRepo.updateAbsentees).toHaveBeenCalled();
   });
 
+  // 取鎖前的查詢 throw 時 withFreshCalendarEvent 還沒接手，handler 要自己回覆，否則例外一路丟到 event-router 只記 log。
+  it.each([
+    ['the target lookup', () => vi.mocked(resolveTarget).mockRejectedValue(new Error('Notion 502'))],
+    ['the season lookup', () => vi.mocked(seasonRepo.findByName).mockRejectedValue(new Error('Notion 502'))],
+    [
+      'the season lookup (with the target not found)',
+      () => {
+        vi.mocked(resolveTarget).mockResolvedValue(null);
+        vi.mocked(seasonRepo.findByName).mockRejectedValue(new Error('Notion 502'));
+      },
+    ],
+  ])('replies "系統錯誤" without taking the lock when %s throws', async (_label, arrange) => {
+    arrange();
+
+    await handleLeave(event, false, false);
+
+    expect(replyMessage).toHaveBeenCalledTimes(1);
+    expect(replyText()).toBe('系統錯誤，請稍後再試');
+    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ err: expect.any(Error) }), 'Leave handler error');
+    expect(logger.info).not.toHaveBeenCalledWith(expect.anything(), 'Leave handler outcome');
+    expect(mutex.withMutex).not.toHaveBeenCalled();
+  });
+
   it('wraps the read-modify-write in withMutex using the event date as key', async () => {
     await handleLeave(event, false, false);
 

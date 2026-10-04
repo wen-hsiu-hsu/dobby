@@ -18,6 +18,8 @@ Registration Parser
   兩者都查無時，以找不到對象優先：報名回「找不到您的帳號，請先向管理員登記」、
   請假回「找不到您的資料」（管理員代報 @Name 時，兩者都改回「找不到「Name」的資料，請確認名稱與人員清單一致」）；
   對象有找到但 Season 查無，才回「找不到 YYYY-QN 季租資料」
+  任一查詢 throw（Notion 5xx、網路錯誤、429 重試用完）→ handler 自己 catch，回「系統錯誤，請稍後再試」
+  （還沒寫入任何東西，引導重試是安全的；這個 try 刻意不包 withFreshCalendarEvent，理由見 ADR 0002）
     │
     ▼
 獲取 Mutex 鎖（key = 下一個週六的日期字串，同 key FIFO 排隊，見下方「Mutex 保護」）
@@ -40,7 +42,7 @@ Capacity Calculator
 釋放 Mutex
 ```
 
-失敗或邊界情況（名額不足、重複請假、未請假卻銷假等）也會回覆同一種「完整名額狀態」卡片，只是徽章顏色／圖示、標題、副標題換成對應的說明，而不是只回一句話。從取鎖開始的流程中，只有 `withFreshCalendarEvent` 統一處理的三種情況維持純文字：找不到活動、mutex 逾時（見下方「Mutex 保護」）、其他非預期錯誤（「系統錯誤，請稍後再試」）。取鎖前的檢查（指定對象語法錯誤、非管理員代操、查無對象、查無季資料、對象不是季租成員）也都是純文字，因為這些情況還沒有活動資料可以組卡片。例外情況見下方「請假邏輯」一節。
+失敗或邊界情況（名額不足、重複請假、未請假卻銷假等）也會回覆同一種「完整名額狀態」卡片，只是徽章顏色／圖示、標題、副標題換成對應的說明，而不是只回一句話。從取鎖開始的流程中，只有 `withFreshCalendarEvent` 統一處理的三種情況維持純文字：找不到活動、mutex 逾時（見下方「Mutex 保護」）、其他非預期錯誤（「系統錯誤，請稍後再試」）。取鎖前的檢查（指定對象語法錯誤、非管理員代操、查無對象、查無季資料、對象不是季租成員、查詢 throw 時的「系統錯誤」）也都是純文字，因為這些情況還沒有活動資料可以組卡片。例外情況見下方「請假邏輯」一節。
 
 ### 狀態卡（Flex）
 
@@ -190,7 +192,7 @@ LINE 電腦版和手機版的 `mentionees` 行為不一致：
 - 報名：`Registration handler outcome`
 - 請假：`Leave handler outcome`
 
-跟 `withFreshCalendarEvent` 逾時／錯誤時的 `Registration handler timed out; …`／`Registration handler error` 同一個前綴（handler 傳給 wrapper 的 `context`）。有 debug 明細的分支，另外記一行 `… outcome detail`（debug）。helper 在 `src/commands/registration/outcome-log.ts`。
+跟 `withFreshCalendarEvent` 逾時／錯誤時的 `Registration handler timed out; …`／`Registration handler error` 同一個前綴（handler 傳給 wrapper 的 `context`）。取鎖前的查詢 throw 時，handler 自己也會記同名的 `… error`，見下方「outcome 行不是每個事件恰好一行」的例外清單。有 debug 明細的分支，另外記一行 `… outcome detail`（debug）。helper 在 `src/commands/registration/outcome-log.ts`。
 
 **等級一律 info，不能用 warn**：`/logs` 的事件狀態會掃所有行的等級（`src/routes/logs.ts` 的 `groupStatus`），用 warn 會讓「名額不足」「已請假」這類正常的拒絕被標成「警告」。
 
@@ -219,7 +221,7 @@ outcome 行不是「每個事件恰好一行」，例外有這些：
 
 - **mutex 逾時**：當下沒有 outcome，wrapper 已有 warn。背景的讀寫跑完後，它自己的 outcome 仍會用同一個 reqId 寫出，時間軸上排在 `Event processed` 之後。例外：背景 refetch 才發現沒有活動時，`EventNotFoundError` 會被 mutex 吞掉，不會有 `event-not-found` 行（很少見）。
 - **鎖內非預期錯誤**：wrapper 的 `… error` 那行就是結果。outcome 是在判斷完、組回覆訊息之前記的，所以如果是組訊息時（`buildEventStatusReply` 查請假人姓名）才 throw，會同時有 outcome 行和 error 行——outcome 代表判斷結果（寫入成功的分支代表已經寫入），error 代表回覆沒送出。
-- **取鎖前的查詢 throw**（`resolveTarget`／`seasonRepo.findByName`）：沒有 outcome，也不經過 wrapper，只有 event-router 的 error（使用者也收不到回覆，見 `TODO.md`「已知問題」）。
+- **取鎖前的查詢 throw**（`resolveTarget`／`seasonRepo.findByName`）：沒有 outcome，也不經過 wrapper；handler 自己記一行跟 wrapper 同名的 `… error`（`Registration handler error`／`Leave handler error`），並回「系統錯誤，請稍後再試」。對象查無但 Season 查詢 throw 時，也是回「系統錯誤」，不是「找不到您的帳號」「找不到您的資料」這類查無對象的回覆，因為兩個查詢並行，`Promise.all` 整個 reject。
 
 報名被拒的四種（`paused`／`full`／`no-registration`／`zero-delta`）是 handler 依 `delta` 和 `isPaused` 推出來的（`registration-handler.ts` 的 `rejectionOutcome()`），因為 `CapacityResult` 只有給使用者看的錯誤文字。**`capacity-calculator.ts` 如果新增拒絕路徑，`rejectionOutcome()` 要一起改**，不然會被歸成 `full` 或 `no-registration`。
 

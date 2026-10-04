@@ -8,6 +8,7 @@ import { calculateAddCapacity, calculateRemoveCapacity } from './capacity-calcul
 import { parseRegistrationTarget } from './registration-parser.js';
 import { buildEventStatusReply } from './event-status-message.js';
 import { FLEX_ICONS } from '../../config/flex-assets.js';
+import { logger } from '../../utils/logger.js';
 import { logOutcome, describeTargetRequest, type RegistrationOutcome } from './outcome-log.js';
 import { formatDate, getNextSaturday, getSeasonNameForDate } from '../../utils/date-utils.js';
 import type { NotionUser } from '../../types/notion-models.js';
@@ -47,10 +48,20 @@ export async function handleRegistration(
   // Season of the event date (e.g. "2026-Q4"), not today's — see getSeasonNameForDate
   const seasonName = getSeasonNameForDate(nextSaturday);
   // Independent lookups, run in parallel; the "account not found" reply still takes precedence.
-  const [resolved, activeSeason] = await Promise.all([
-    resolveTarget(target, event.source.userId, actorUser),
-    seasonRepo.findByName(seasonName),
-  ]);
+  // withFreshCalendarEvent only catches errors once it takes over, so a failure here must be
+  // replied to here. Nothing is written yet, so "retry later" is safe. Keep withFreshCalendarEvent
+  // out of this try: a timeout there may still write, and must never be answered with "retry".
+  let resolved, activeSeason;
+  try {
+    [resolved, activeSeason] = await Promise.all([
+      resolveTarget(target, event.source.userId, actorUser),
+      seasonRepo.findByName(seasonName),
+    ]);
+  } catch (err) {
+    logger.error({ err }, `${LOG_CONTEXT} error`);
+    await replyMessage(event.replyToken, [{ type: 'text', text: '系統錯誤，請稍後再試' }]);
+    return;
+  }
   const requestSummary = { date: nextSaturday, seasonName, requestedDelta: delta, isAdmin };
   if (!resolved) {
     logOutcome(

@@ -56,21 +56,6 @@
 
 ## 已知問題（尚未處理）
 
-- [ ] **報名／請假在取鎖前的 Notion 例外不會回覆使用者。** `handleRegistration`／`handleLeave` 呼叫 `withFreshCalendarEvent` 之前，會先用 `Promise.all` 並行查 `resolveTarget` 和 `seasonRepo.findByName`（`src/commands/registration/registration-handler.ts:49-52`、`leave-handler.ts:49-52`）。這段沒有 try/catch；`with-fresh-calendar-event.ts:21-45` 的 try 只包住取鎖之後。任一查詢 throw，例外會經 `command-router.ts`、`message-handler.ts:71` 一路丟到 `src/handlers/event-router.ts:50-52`，那裡只 `logger.error`（`/logs` 會顯示為失敗），使用者收不到任何回覆。
-
-  這是 bug，但目前還沒觀察到：
-  - `notion-fetch.ts` 只對 429 重試（最多 3 次，第 74、121 行）；5xx、網路錯誤、429 重試用完都會直接 throw（`assertOk`，第 45-72 行）。本機 `logs/`（2026-09-21～27）沒有任何 `Error handling event` 或 `Notion API error`。
-  - 從 n8n 遷移的第一版（commit `23c32a1`）就是這樣，當時的 try 也只包鎖內。
-  - 其他指令都自己 try/catch 並回「系統錯誤，請稍後再試」：`owe.ts:9-42`、`news.ts:163-207`、`participants.ts:11-42`、`payment.ts:10-36`、`next-event.ts:13-27`、`season-announcement.ts:209-361`、`introduce.ts:12-42`。`message-handler.ts:48-54` 的 `findByUserId` 也在 commit `5ef200d` 補過同一種缺口。只有報名／請假漏掉。
-  - 2026-09-28 把兩個查詢改成並行後，多了一種觸發情況：對象查無（`resolved` 為 null）而 Season 查詢 throw。舊版依序執行，會先回「找不到您的帳號」；現在 `Promise.all` 整個 reject，不回覆。其他組合的行為跟舊版相同。
-  - 影響：使用者以為 bot 沒收到，通常會再打一次。這段在任何寫入之前，所以重打不會重複報名，只是體驗差。
-
-  如果要處理：
-  - 可以把取鎖前的查詢（`Promise.all` 那段）包進 try/catch，catch 時記 `logger.error`、回「系統錯誤，請稍後再試」。取鎖前還沒寫入任何東西，回「系統錯誤」、讓使用者重試是安全的。
-  - **try 範圍不要包住 `withFreshCalendarEvent`。** 它自己會處理例外並回覆。外層再 catch 回「系統錯誤」的話，萬一日後它把 `MutexTimeoutError` 往外丟，就會違反 [ADR 0002](docs/adr/0002-mutex-timeout-does-not-cancel-task.md)：逾時時背景寫入可能仍會成功，`+N`／`-N` 不是冪等的，不能回「系統錯誤」引導重試。
-  - 另一種做法是在 `message-handler.ts:71` 對 `routeCommand` 統一 catch，以後新增的指令也不會漏。但同樣不能讓 `MutexTimeoutError` 落到這裡被回成「系統錯誤」；已經回覆過的 handler 若之後才 throw，再回一次會因 replyToken 已用過而被 LINE 拒絕（無害，但 `/logs` 會多一筆 `Reply failed`）。
-  - 測試不能用 `createTestBot`（fixture 不會 throw），要手動 mock repository 讓它 reject，寫法參考 `src/commands/registration/__tests__/registration-handler.test.ts` 開頭。
-
 - [ ] **`trackUser` 可能用過時的 USERS 快照寫回，少算一次發言數，少數情況會弄丟一個群組 ID。**（2026-09-28 code review 發現，是既有問題，不是當天 log 改動造成的）
 
   **嚴重度：低優先、不是急件。** 這是 bug，但沒有觀察到實際發生（見下方「有沒有發生過」）。`message_counts` 目前沒有任何程式讀取，成就規則也不用它；groups 只有暱稱排程在讀，而且弄丟群組需要很少見的時序。
