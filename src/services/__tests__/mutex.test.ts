@@ -222,6 +222,52 @@ describe('mutex', () => {
     vi.useRealTimers();
   });
 
+  it('does not let a call arriving after an earlier task finished skip the task still running behind it', async () => {
+    const order: string[] = [];
+    let releaseA!: () => void;
+    let releaseB!: () => void;
+    let releaseC!: () => void;
+    const gateA = new Promise<void>((r) => { releaseA = r; });
+    const gateB = new Promise<void>((r) => { releaseB = r; });
+    const gateC = new Promise<void>((r) => { releaseC = r; });
+
+    const a = withMutex('key9', async () => {
+      order.push('a-start');
+      await gateA;
+      order.push('a-end');
+    });
+    const b = withMutex('key9', async () => {
+      order.push('b-start');
+      await gateB;
+      order.push('b-end');
+    });
+
+    // Finish a and let its cleanup run, so b is now the only task holding the key.
+    releaseA();
+    await a;
+    await new Promise((r) => setImmediate(r));
+    expect(order).toEqual(['a-start', 'a-end', 'b-start']);
+
+    // a's cleanup must only drop the queue entry if it is still a's own; deleting b's
+    // entry would let c find no queue and run alongside b.
+    const c = withMutex('key9', async () => {
+      order.push('c-start');
+      await gateC;
+      order.push('c-end');
+    });
+
+    // Without this wait a wrongly unqueued c would not have run yet either, so the
+    // assertion below would pass even when the cleanup is broken.
+    await new Promise((r) => setImmediate(r));
+    expect(order).toEqual(['a-start', 'a-end', 'b-start']);
+
+    releaseB();
+    await b;
+    releaseC();
+    await c;
+    expect(order).toEqual(['a-start', 'a-end', 'b-start', 'b-end', 'c-start', 'c-end']);
+  });
+
   describe('task summary log', () => {
     const SUMMARY = 'Mutex task finished';
 
@@ -353,6 +399,18 @@ describe('mutex', () => {
 
       resolveStuck();
       await vi.advanceTimersByTimeAsync(0);
+    });
+
+    it('stops counting a finished task in queuedAhead for later calls on the same key', async () => {
+      await withMutex('2026-10-11', async () => 'first');
+      await vi.advanceTimersByTimeAsync(0);
+      await withMutex('2026-10-11', async () => 'second');
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(summaryCalls('info')).toEqual([
+        expect.objectContaining({ key: '2026-10-11', queuedAhead: 0 }),
+        expect.objectContaining({ key: '2026-10-11', queuedAhead: 0 }),
+      ]);
     });
 
     it('keeps keys that are not a bare date (e.g. user-track-<userId>) out of info', async () => {

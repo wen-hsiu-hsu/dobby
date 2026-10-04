@@ -6,7 +6,7 @@
 
 **為什麼不改成從拿到鎖才開始計時**：`notion-fetch.ts` 的 `fetch` 沒有請求逾時。若計時只從拿到鎖開始，前一個任務卡住時，排隊的人永遠拿不到鎖、永遠收不到回覆，等於拿掉現有唯一的安全網。要改的話，得先補上 fetch 逾時或總等待上限。
 
-實作上把兩件事拆開：`settle`（真正執行 `fn()` 的 promise，只依賴「上一個 `settle` 真的完成」，永遠不被逾時打斷，佇列鏈永遠掛在它上面）跟呼叫端拿到的 promise（`Promise.race([settle, timeout])` 的結果）。**`queues` 這個 Map 的清理邏輯必須綁在 `settle` 真正完成上，不能綁在「還有幾個呼叫者在等」的計數上**——後者會因為呼叫者逾時而提前歸零，若這時把 `queues` 的 entry 清掉，下一個全新呼叫會讀到「沒有人在排隊」，跳過還在背景跑的舊任務直接搶跑，重新引入本來要防的 race，只是延後觸發、更難重現。
+實作上把兩件事拆開：`settle`（真正執行 `fn()` 的 promise，只依賴「上一個 `settle` 真的完成」，永遠不被逾時打斷，佇列鏈永遠掛在它上面）跟呼叫端拿到的 promise（`Promise.race([settle, timeout])` 的結果）。**`queues` 這個 Map 的清理邏輯必須綁在 `settle` 真正完成上，不能綁在「還有幾個呼叫者在等」的計數上**——後者會因為呼叫者逾時而提前歸零，若這時把 `queues` 的 entry 清掉，下一個全新呼叫會讀到「沒有人在排隊」，跳過還在背景跑的舊任務直接搶跑，重新引入本來要防的 race，只是延後觸發、更難重現。清理時還要先確認 `queues.get(key) === tail` 才刪：A 結束時，entry 可能已經換成排在後面、還在跑的 B，無條件刪除會讓 B 執行期間進來的新呼叫不等 B 就開跑（`mutex.test.ts` 有測這個時序）。
 
 **`Mutex task finished` 摘要 log 掛在 `tail` 完成處，不掛在呼叫端的 `finally`**：理由跟 `queues` 清理一樣。逾時後呼叫端的 `finally` 早就跑完，但 `fn()` 還在背景持有鎖，在 `finally` 記會把 `heldMs` 量短、`callerTimedOut` 的案例正好是最需要準確數字的時候。同理，`queuedAhead` 用的計數（`inFlight`）只在 `tail` 完成時才減一，不在呼叫端的 `finally`，否則會漏算呼叫端已逾時、但還在背景跑的任務。摘要在 `void tail.then(...)` 裡寫出時，AsyncLocalStorage 保留的是**註冊 `.then` 時**（也就是呼叫 `withMutex` 的那個請求）的 context，所以 reqId 仍是原本事件的，即使 `fn()` 是被別的請求的程式碼觸發完成（`mutex.test.ts` 有測）。
 
