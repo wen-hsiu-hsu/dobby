@@ -57,7 +57,12 @@
 
 ## 已知問題（尚未處理）
 
-目前沒有。
+- [ ] **`src/routes/__tests__/logs.test.ts` 跑整套測試時偶發逾時，一次掛 2～12 個。**（2026-10-04 發現，還沒分析）
+  - 現象：`npx vitest run --dir src` 跑約 15 次，有 3 次這支檔案的測試超過 vitest 預設的 5 秒逾時（`Error: Test timed out in 5000ms`），每次掛的測試不一樣，例如第 1123 行的 `shows a short request-body summary…`、第 1020 行的 `shows lagMs in the 起點 step note…`、第 1037 行的 `renders a service-restart boundary marker…`。其他次都是全過。單獨跑這支檔案（83 個測試）只要約 0.34 秒，從沒失敗過。
+  - 不是產品 bug，`/logs` 頁面本身沒問題，只影響測試結果的可信度。發現當時的改動（反向 relation 查詢）沒碰 `src/routes`；這支檔案最近一次改動是 commit `f75a27d`（起點摘要顯示 lagMs）。所以應該是原本就有的問題，不是那次造成的，但沒有在更早的 commit 上重現確認。
+  - 推測一（沒驗證）：整套測試平行跑時機器負載高，每個測試都用 supertest 起一個新的 express app（第 92-124 行的 `getLogsHtml`／`getEventDetailHtml`／`getLogsText`），偶爾超過 5 秒。
+  - 推測二（沒驗證）：一次掛好幾個，可能是連鎖失敗。這支檔案沒有 `beforeEach`／`afterEach` 重設 mock，很多測試用 `vi.mocked(readRecentLogs).mockResolvedValueOnce(...)` 疊加假資料（第 100-107 行的註解有說明疊加規則）。如果一個測試逾時，它還沒被消耗掉的 `mockResolvedValueOnce` 會留給後面的測試，後面的測試就拿到錯的資料而失敗。
+  - 如果要處理：先在更早的 commit 上跑整套測試確認是不是原本就有；再看失敗的測試是「逾時」還是「斷言失敗」，以分辨上面兩個推測。陷阱：不要只把 `testTimeout` 調大了事，如果推測二成立，殘留的 Once mock 還是會在其他情況造成連鎖失敗。加 `beforeEach` 重設 mock 前要注意，檔案開頭的 `vi.mock('../../utils/log-reader.js', ...)` 有一組預設假資料（第 13-87 行），很多測試依賴它，`vi.resetAllMocks()` 會把它清掉，要改用只清 Once 佇列的做法，或在 `beforeEach` 重新設定預設值。
 
 ---
 
