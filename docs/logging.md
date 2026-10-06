@@ -186,13 +186,14 @@ R2 同步的 `uploadAllLogs()`（`src/utils/log-upload.ts`）也包在 `runWithC
 1. **不帶 `reqId`**：回傳最近（最多 50 筆，由新到舊）事件的索引，一行一筆：`reqId␉時間␉[種類/狀態]␉標題`。先看這份索引找出要查的 reqId。
 2. **帶 `?reqId=xxx`**：回傳那一筆事件的精簡詳情——標題、時間、耗時、狀態、使用者、對象、時間軸每一步的 `title`/`path`/`duration`/`note`/回覆內容（`body`）。Notion 呼叫步驟的 `note` 含截斷過的請求內容摘要（見上方「處理過程時間軸」的「請求內容」說明），所以看得出這一步實際寫了/查了什麼，但**刻意不含**每個步驟展開後的完整 request/response JSON（也就是「看這筆的原始 log」那份內容，尤其是回應——通常整個頁面物件連同無關的 rollup/relation 都會回顯一次）——那正是讓一次除錯動輒貼出幾百行 JSON 的來源。找不到這個 reqId（可能已超過保留期、伺服器重啟過，或不在目前查詢的 `?days=` 範圍內，預設只有 24 小時）回 404，純文字說明原因。
 
-範例：
+平常用 `npm run trace`（`scripts/trace.sh`，Claude Code 有對應的 `/trace` skill）。token 從 `.env` 讀，用 `Authorization: Bearer` header 送，不會出現在網址或對話裡：
 ```
-curl -s "https://<domain>/logs?format=text&token=$LOGS_ACCESS_TOKEN"
-curl -s "https://<domain>/logs?format=text&reqId=6c27ed&token=$LOGS_ACCESS_TOKEN"
-# 要查的 reqId 超過 24 小時、預設範圍找不到時，加 &days= 擴大範圍（最大 7）：
-curl -s "https://<domain>/logs?format=text&reqId=6c27ed&days=7&token=$LOGS_ACCESS_TOKEN"
+npm run trace -- --list [days]          # 1. 索引
+npm run trace -- 6c27ed [days]          # 2. 單筆詳情；超過 24 小時找不到時 days 給 7（上限）
+npm run trace -- --after 6c27ed [N]     # 這筆之後的 N 筆，依時間先後（從索引裡切出來）
+LOGS_URL=https://<domain> npm run trace -- 6c27ed   # 查別台，預設 http://localhost:3000
 ```
+直接用 curl 的話也用 header 帶 token：`curl -s -H "Authorization: Bearer $LOGS_ACCESS_TOKEN" "https://<domain>/logs?format=text&reqId=6c27ed&days=7"`。
 
 這個端點跟 HTML 版共用同一套分組邏輯（`buildEvents()`，`src/routes/logs.ts`），不是另外維護一套「哪些訊息該合併」的規則，只是省略了完整 payload 那一層。要看某一步的完整 Notion payload，還是得開瀏覽器用 HTML 版展開對應的時間軸步驟。
 

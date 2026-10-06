@@ -11,6 +11,7 @@
     "test": "vitest",
     "test:brief": "bash scripts/test-brief.sh",
     "test:coverage": "vitest run --coverage",
+    "trace": "bash scripts/trace.sh",
     "record-fixtures": "tsx scripts/record-fixtures.ts"
   },
   "keywords": [],
