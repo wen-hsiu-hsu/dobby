@@ -52,6 +52,7 @@ const cache = new ReadCache<NotionUser>('users', USERS_CACHE_MAX_AGE_MS, (u) => 
  * 可能是舊的，不能拿來算任何寫入。'track-user' 是 trackUser 鎖內的重讀（ADR 0017），
  * 會用讀到的值算出新值寫回，所以一律直接查 Notion。
  */
+// purpose-exempt: 只負責選快取或直查，實際的 Notion 呼叫在 queryByUserId 標註
 export async function findByUserId(userId: string, reason: UserLookupReason = 'actor'): Promise<NotionUser | null> {
   if (reason === 'track-user') return queryByUserId(userId, reason);
   return cache.getOrLoad(userId, () => queryByUserId(userId, reason));

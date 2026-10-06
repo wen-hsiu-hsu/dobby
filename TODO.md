@@ -60,7 +60,7 @@
 
 ## 已知問題（尚未處理）
 
-- [ ] **`src/routes/__tests__/logs.test.ts` 跑整套測試時偶發逾時，一次掛 2～12 個。**（2026-10-04 發現，還沒分析）
+- [ ] **`src/routes/__tests__/logs.test.ts` 跑整套測試時偶發逾時，一次掛 2～12 個。**（2026-10-04 發現，還沒分析；commit 前 hook `.claude/hooks/pre-commit-check.sh` 先用「失敗重跑一次」吸收，修好後拿掉）
     - 現象：`npx vitest run --dir src` 跑約 15 次，有 3 次這支檔案的測試超過 vitest 預設 5 秒逾時（`Error: Test timed out in 5000ms`），每次掛的不一樣，例如第 1123 行 `shows a short request-body summary…`、第 1020 行 `shows lagMs in the 起點 step note…`、第 1037 行 `renders a service-restart boundary marker…`。單獨跑這支（83 個測試）約 0.34 秒，從沒失敗。同一天另有一次 `src/__tests__/logs-auth.test.ts` 的 `GET /logs > accepts requests with the correct Bearer token` 失敗（也打 `/logs`，失敗訊息沒保留），可能是同一問題。
     - 不是產品 bug，`/logs` 頁面本身沒問題，只影響測試結果可信度。發現當時的改動（反向 relation 查詢）沒碰 `src/routes`；這支檔案最近一次改動是 commit `f75a27d`。應該是原本就有的問題，但沒在更早的 commit 上重現確認。
     - 推測一（沒驗證）：整套平行跑時負載高，每個測試都用 supertest 起新的 express app（第 92-124 行 `getLogsHtml`／`getEventDetailHtml`／`getLogsText`），偶爾超過 5 秒。

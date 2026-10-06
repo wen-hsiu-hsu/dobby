@@ -69,6 +69,7 @@ const cache = new ReadCache<SeasonRecord>('season', SEASON_CACHE_MAX_AGE_MS, (s)
  * 只給報名／請假進鎖前用（ADR 0020）。其他指令（season 公告、付款、名單）照樣呼叫
  * findByName：管理員改完費用馬上查，要看到新值。
  */
+// purpose-exempt: 快取未命中時呼叫 findByName，目的在那裡標註
 export async function findByNameCached(name: string): Promise<SeasonRecord | null> {
   return cache.getOrLoad(name, () => findByName(name));
 }

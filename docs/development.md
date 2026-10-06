@@ -112,6 +112,8 @@ npm test -- --watch
 npm run test:brief
 ```
 
+Claude Code 的專案 hook（`.claude/settings.json`）：編輯 `.ts` 後跑 `scripts/check-conventions.sh`（CLAUDE.md「專案慣例」裡能用 grep 判斷的幾條）；`git commit` 前依序跑慣例檢查、`tsc --noEmit`、`test:brief`，任一失敗就擋下。只改文件的 commit 不跑。
+
 測試框架：Vitest + supertest
 
 ### 測試結構
