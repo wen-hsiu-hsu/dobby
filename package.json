@@ -9,6 +9,7 @@
     "dev": "tsx watch src/index.ts",
     "dev:docker": "docker compose -f docker-compose.dev.yml --env-file .env.ngrok up --build",
     "test": "vitest",
+    "test:brief": "bash scripts/test-brief.sh",
     "test:coverage": "vitest run --coverage",
     "record-fixtures": "tsx scripts/record-fixtures.ts"
   },

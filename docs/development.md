@@ -107,6 +107,9 @@ npm run test:coverage
 
 # 監看模式（開發時使用）
 npm test -- --watch
+
+# 精簡輸出（給 AI agent 用：固定 --dir src，通過只印摘要，失敗只印失敗報告）
+npm run test:brief
 ```
 
 測試框架：Vitest + supertest

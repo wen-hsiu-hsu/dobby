@@ -32,4 +32,6 @@
 
 用 `createTestBot`（`src/test-utils/`）一行驅動 bot 並斷言 LINE 回覆內容 + Notion 呼叫。測試檔開頭需 mock `notion-fetch.js`、`config/line.js`、`services/mutex.js`（見 `src/test-utils/README.md`）。不要用 `npm run record-fixtures` 覆蓋 `src/test-utils/fixtures/` 下手寫的合成 fixture。
 
+跑測試一律用 `npm run test:brief`（可接 `-- <檔案>` 或 `-- -t "名稱"`）：固定 `--dir src`、通過只印摘要、失敗只印失敗報告，不要自己組 `npx vitest ... | grep` 管線；派 subagent 時 prompt 也寫這個指令。`git commit` 前有 hook（`.claude/hooks/pre-commit-check.sh`）自動跑 tsc＋測試，失敗會擋下。
+
 ## 永遠用繁體中文回應
