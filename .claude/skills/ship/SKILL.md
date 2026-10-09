@@ -17,12 +17,12 @@ description: dobby 改動完成後的收尾流程：判斷要不要 review → �
 | 改動 | 處理 |
 |---|---|
 | 純文件、typo、只補測試、開發工具（scripts／.claude） | 不派 review，跳到第 4 步，自己跑 `/doc-sync` 清單 |
-| 碰到 `src/services/mutex.ts`、`entry-gate`、`src/commands/registration/**`、`with-fresh-calendar-event`、容量／名額計算 | 派 review，**預設模型** |
-| 其他功能等級改動（新指令、repository 方法、Flex 卡等） | 派 review，`model: "sonnet"` |
+| 碰到 `src/services/mutex.ts`、`entry-gate`、`src/commands/registration/**`、`with-fresh-calendar-event`、容量／名額計算 | 派 `reviewer`，`model: "opus"`（競態與名額算錯的代價高） |
+| 其他功能等級改動（新指令、repository 方法、Flex 卡等） | 派 `reviewer`（Sonnet，不用傳 model） |
 
 ## 3. 派一個 review agent（程式審查＋文件同步合併）
 
-先在主 session 做 doc-sync 第 3 步的 grep（被改名、刪除、改語意的識別字），把命中的 `檔案:行號` 收好。然後派**一個**背景 agent，prompt 至少包含：
+先在主 session 做 doc-sync 第 3 步的 grep（被改名、刪除、改語意的識別字），把命中的 `檔案:行號` 收好。然後用 `subagent_type: "reviewer"` 派**一個**背景 agent，prompt 至少包含：
 
 - 範圍：commit 範圍或 `git diff` 的檔案清單，以及第 1 步那句行為摘要。
 - 相關 `TODO.md` 條目原文（註明不用整份讀 `TODO.md`）、已排除的方案與原因。
